@@ -20,12 +20,16 @@
         .modal-animate { animation: modalIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes modalIn { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
         
-        /* 타임테이블 물리적 높이 보정 (가독성 확보) */
+        /* 타임테이블 물리적 높이 보정 */
         .time-slot { height: 100px; border-bottom: 1px solid #f1f5f9; }
         
-        /* 캔버스 출력용 고정 비율 및 해상도 최적화 */
-        .export-area { width: 1700px !important; min-width: 1700px !important; }
-        .schedule-block { word-break: break-all; line-height: 1.4; }
+        /* 캔버스 출력용 고정 비율 및 해상도 최적화 (가로폭 확장) */
+        .export-area { 
+            width: 1700px !important; 
+            min-width: 1700px !important; 
+            background: white !important;
+        }
+        .schedule-block { word-break: break-all; line-height: 1.4; overflow: hidden; }
     </style>
 </head>
 <body class="overflow-hidden text-slate-900 font-medium">
@@ -79,7 +83,6 @@
             const [customColors, setCustomColors] = useState([]);
             const [tempColor, setTempColor] = useState('#3b82f6');
 
-            // sForm 초기 상태 변경 (tag -> tags[])
             const [sForm, setSForm] = useState({ title: '', days: [], startH: '09', startM: '00', endH: '10', endM: '00', tags: ['자습'], memo: '', color: DEFAULT_COLORS[0] });
 
             useEffect(() => {
@@ -103,19 +106,29 @@
                 return { total, avg: Math.round(total / 7) };
             }, [filteredSchedules]);
 
+            // --- 이미지 출력 엔진 최적화 (Resolution & Padding Fix) ---
             const handleExport = () => {
                 if (!captureAreaRef.current || !current) return;
+                
                 html2canvas(captureAreaRef.current, {
                     backgroundColor: "#ffffff",
                     scale: 3, 
                     useCORS: true,
+                    allowTaint: true,
                     scrollX: 0,
-                    scrollY: -window.scrollY,
-                    windowWidth: 1800
+                    scrollY: 0,
+                    onclone: (clonedDoc) => {
+                        const area = clonedDoc.querySelector('.export-area');
+                        if (area) {
+                            area.style.transform = 'none';
+                            area.style.margin = '0';
+                            area.style.padding = '48px'; // 명시적 여백 고정
+                        }
+                    }
                 }).then(canvas => {
                     const link = document.createElement('a');
                     link.download = `${current.name}_주간계획표_스터디큐브.png`;
-                    link.href = canvas.toDataURL('image/png');
+                    link.href = canvas.toDataURL('image/png', 1.0);
                     link.click();
                 });
             };
@@ -155,7 +168,6 @@
                 setScheduleModal({ open: false, editId: null });
             };
 
-            // 태그 중복 선택 및 해제 로직
             const toggleTag = (t) => {
                 const currentTags = sForm.tags || [];
                 if (currentTags.includes(t)) {
@@ -168,7 +180,7 @@
             const formatTime = (h, m) => `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 
             return (
-                <div className="flex h-screen w-full bg-slate-50 overflow-hidden" onClick={() => setActiveMenuId(null)}>
+                <div className="flex h-screen w-full bg-slate-50 overflow-hidden font-sans" onClick={() => setActiveMenuId(null)}>
                     {/* 사이드바 */}
                     <aside className="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-30 shadow-md">
                         <div className="p-6 border-b border-slate-100 bg-slate-50/50">
@@ -197,25 +209,24 @@
                             ))}
                         </div>
 
-                        {/* 일정 목록 섹션 */}
                         {selectedId && current && (
-                            <div className="h-[45%] border-t border-slate-200 flex flex-col bg-white overflow-hidden shadow-inner">
+                            <div className="h-[45%] border-t border-slate-200 flex flex-col bg-white overflow-hidden shadow-inner font-sans">
                                 <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-                                    <h3 className="text-sm font-black text-slate-500 uppercase tracking-widest">실시간 일정 목록</h3>
+                                    <h3 className="text-sm font-black text-slate-500 uppercase tracking-widest">일정 목록</h3>
                                     <span className="text-xs font-black text-blue-600 bg-blue-100 px-3 py-1 rounded-full">{filteredSchedules.length} UNITS</span>
                                 </div>
-                                <div className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar">
+                                <div className="flex-1 overflow-y-auto p-4 space-y-2.5 custom-scrollbar font-sans">
                                     {filteredSchedules.map(sched => (
                                         <div key={sched.id} onClick={() => setDetailModal({ open: true, item: sched })} className="p-4 rounded-2xl border border-slate-100 hover:border-blue-200 cursor-pointer group bg-slate-50/30 transition-all shadow-sm">
-                                            <div className="flex items-center gap-3 mb-2">
+                                            <div className="flex items-center gap-3 mb-2 font-sans">
                                                 <div className="w-3 h-3 rounded-full shadow-sm" style={{ backgroundColor: sched.color }}></div>
-                                                <div className="font-black text-base text-slate-800 truncate">{sched.title}</div>
+                                                <div className="font-black text-base text-slate-800 truncate font-sans">{sched.title}</div>
                                             </div>
-                                            <div className="flex flex-wrap gap-1 pl-6">
+                                            <div className="flex flex-wrap gap-1 pl-6 font-sans">
                                                 {(sched.tags || []).map(tag => (
-                                                    <span key={tag} className="text-[10px] font-black text-blue-500 bg-blue-50 px-2 py-0.5 rounded-md">{tag}</span>
+                                                    <span key={tag} className="text-[11px] font-black text-blue-500 bg-blue-50 px-2 py-0.5 rounded-md font-sans">{tag}</span>
                                                 ))}
-                                                <span className="bg-slate-100 px-2 py-0.5 rounded text-[10px] font-black text-slate-500 ml-auto">{sched.startH}:{sched.startM}</span>
+                                                <span className="bg-slate-100 px-2 py-0.5 rounded text-[11px] font-black text-slate-500 ml-auto font-sans">{sched.startH}:{sched.startM}</span>
                                             </div>
                                         </div>
                                     ))}
@@ -228,7 +239,7 @@
                     <main className="flex-1 flex flex-col relative bg-white overflow-hidden">
                         {current ? (
                             <>
-                                <header className="h-24 border-b border-slate-100 flex items-center justify-between px-10 shrink-0 bg-white z-10 shadow-sm">
+                                <header className="h-24 border-b border-slate-100 flex items-center justify-between px-10 shrink-0 bg-white z-10 shadow-sm font-sans">
                                     <div className="flex items-center gap-6">
                                         <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-2xl border border-slate-100 shadow-inner">
                                             <input type="text" placeholder="제목 필터" value={filterTitle} onChange={e => setFilterTitle(e.target.value)} className="bg-transparent px-4 py-2 text-sm font-black outline-none border-r border-slate-200 w-44 font-sans" />
@@ -241,7 +252,7 @@
                                             <Icon name="download" size={20} /> 이미지 저장
                                         </button>
                                         <button onClick={() => setIsEditMode(!isEditMode)} className={`flex items-center gap-3 px-8 py-4 rounded-2xl font-black text-base transition-all shadow-xl ${isEditMode ? 'bg-slate-900 text-white shadow-slate-300' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-                                            <Icon name={isEditMode ? "check" : "edit-3"} size={20} /> {isEditMode ? '저장 종료' : '일정 편집 시작'}
+                                            <Icon name={isEditMode ? "check" : "edit-3"} size={20} /> {isEditMode ? '저장 종료' : '편집 시작'}
                                         </button>
                                     </div>
                                 </header>
@@ -249,7 +260,7 @@
                                 <div className="flex-1 overflow-auto bg-slate-50/50 p-12 custom-scrollbar">
                                     <div ref={captureAreaRef} className="export-area bg-white p-16 rounded-[4rem] shadow-[0_40px_100px_-20px_rgba(0,0,0,0.1)] border border-slate-100 mx-auto">
                                         
-                                        <div className="mb-12 border-b-4 border-slate-900 pb-10 flex justify-between items-end">
+                                        <div className="mb-12 border-b-4 border-slate-900 pb-10 flex justify-between items-end font-sans">
                                             <div>
                                                 <h1 className="text-4xl font-black text-slate-900 tracking-tight uppercase italic">{current.name} 주간 계획표</h1>
                                             </div>
@@ -259,26 +270,26 @@
                                         </div>
 
                                         <div className="flex gap-12">
-                                            {/* 리포트 패널 */}
+                                            {/* 리포트 패널 - 단위 여백 보정 */}
                                             <div className="w-72 shrink-0 space-y-10">
                                                 <div className="bg-slate-900 text-white p-10 rounded-[3rem] shadow-2xl relative overflow-hidden">
-                                                    <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full -mr-16 -mt-16 blur-2xl"></div>
-                                                    <h3 className="text-[12px] font-black uppercase tracking-[0.3em] opacity-30 mb-10">CORE REPORT</h3>
+                                                    <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full -mr-16 -mt-16 blur-2xl font-sans"></div>
+                                                    <h3 className="text-[12px] font-black uppercase tracking-[0.3em] opacity-30 mb-10 font-sans">CORE REPORT</h3>
                                                     <div className="space-y-12 font-sans">
-                                                        <div className="flex flex-col">
+                                                        <div className="flex flex-col font-sans">
                                                             <p className="text-[11px] font-black opacity-40 uppercase mb-3 font-sans">Weekly Focus</p>
-                                                            <div className="flex items-baseline justify-between w-full">
+                                                            <div className="flex items-baseline w-full font-sans">
                                                                 <span className="text-5xl font-black tracking-tighter">{Math.floor(statistics.total/60)}</span>
-                                                                <span className="text-xl font-black opacity-30 italic ml-4">H</span>
+                                                                <span className="text-xl font-black opacity-30 italic ml-4 mr-6">H</span>
                                                                 <span className="text-5xl font-black tracking-tighter ml-auto">{statistics.total%60}</span>
                                                                 <span className="text-xl font-black opacity-30 italic ml-4">M</span>
                                                             </div>
                                                         </div>
-                                                        <div className="flex flex-col">
+                                                        <div className="flex flex-col font-sans">
                                                             <p className="text-[11px] font-black opacity-40 uppercase mb-3 font-sans">Daily Avg</p>
-                                                            <div className="flex items-baseline justify-between w-full text-blue-400">
+                                                            <div className="flex items-baseline w-full text-blue-400 font-sans">
                                                                 <span className="text-5xl font-black tracking-tighter">{Math.floor(statistics.avg/60)}</span>
-                                                                <span className="text-xl font-black opacity-30 italic ml-4">H</span>
+                                                                <span className="text-xl font-black opacity-30 italic ml-4 mr-6">H</span>
                                                                 <span className="text-5xl font-black tracking-tighter ml-auto">{statistics.avg%60}</span>
                                                                 <span className="text-xl font-black opacity-30 italic ml-4">M</span>
                                                             </div>
@@ -291,12 +302,12 @@
                                                         <div key={sched.id} className="p-6 rounded-[2rem] border-2 border-slate-50 flex items-start gap-5 bg-white shadow-sm transition-transform hover:translate-x-1">
                                                             <div className="w-2.5 h-16 rounded-full shrink-0" style={{ backgroundColor: sched.color }}></div>
                                                             <div className="overflow-hidden flex-1 pt-1 font-sans">
-                                                                <p className="font-black text-lg text-slate-800 truncate mb-1.5">{sched.title}</p>
-                                                                <div className="flex flex-wrap gap-1">
+                                                                <p className="font-black text-lg text-slate-800 truncate mb-1.5 font-sans">{sched.title}</p>
+                                                                <div className="flex flex-wrap gap-1 font-sans">
                                                                     {(sched.tags || []).map(tag => (
-                                                                        <span key={tag} className="text-[9px] font-black text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded">{tag}</span>
+                                                                        <span key={tag} className="text-[10px] font-black text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded font-sans">{tag}</span>
                                                                     ))}
-                                                                    <span className="text-[9px] font-black text-slate-400 uppercase ml-auto">{sched.startH}:{sched.startM}</span>
+                                                                    <span className="text-[10px] font-black text-slate-400 uppercase ml-auto font-sans">{sched.startH}:{sched.startM}</span>
                                                                 </div>
                                                             </div>
                                                         </div>
@@ -306,8 +317,8 @@
 
                                             {/* 타임라인 */}
                                             <div className="flex-1 grid grid-cols-8 divide-x-2 divide-slate-100 border-2 border-slate-100 rounded-[3.5rem] overflow-hidden shadow-2xl bg-white">
-                                                <div className="bg-slate-50/50 flex flex-col text-center">
-                                                    <div className="h-20 border-b-4 border-slate-900 flex items-center justify-center text-[12px] font-black text-slate-900 uppercase bg-white italic tracking-tighter">TIME</div>
+                                                <div className="bg-slate-50/50 flex flex-col text-center font-sans">
+                                                    <div className="h-20 border-b-4 border-slate-900 flex items-center justify-center text-[12px] font-black text-slate-900 uppercase bg-white italic tracking-tighter font-sans">TIME</div>
                                                     {Array.from({ length: END_HOUR - START_HOUR + 1 }).map((_, i) => (
                                                         <div key={i} className="time-slot flex items-start justify-center pt-6 text-[14px] font-black text-slate-300 font-sans">
                                                             {START_HOUR + i < 24 ? START_HOUR + i : START_HOUR + i - 24}:00
@@ -315,11 +326,11 @@
                                                     ))}
                                                 </div>
                                                 {DAYS.map(day => (
-                                                    <div key={day} className="flex flex-col relative group min-w-[150px]">
-                                                        <div className="h-20 border-b-4 border-slate-900 flex items-center justify-center text-lg font-black text-slate-900 bg-white uppercase tracking-tighter">{day}요일</div>
-                                                        <div className="flex-1 relative bg-white/40">
+                                                    <div key={day} className="flex flex-col relative group min-w-[150px] font-sans">
+                                                        <div className="h-20 border-b-4 border-slate-900 flex items-center justify-center text-lg font-black text-slate-900 bg-white uppercase tracking-tighter font-sans">{day}요일</div>
+                                                        <div className="flex-1 relative bg-white/40 font-sans">
                                                             {Array.from({ length: END_HOUR - START_HOUR + 1 }).map((_, i) => (
-                                                                <div key={i} className="time-slot border-dotted border-b border-slate-100"></div>
+                                                                <div key={i} className="time-slot border-dotted border-b border-slate-100 font-sans"></div>
                                                             ))}
                                                             {filteredSchedules.filter(a => a.days.includes(day)).map(a => {
                                                                 const start = (parseInt(a.startH) * 60 + parseInt(a.startM)) - (START_HOUR * 60);
@@ -334,28 +345,28 @@
                                                                         style={{ top: `${topPos}px`, height: `${blockH}px`, backgroundColor: a.color }}>
                                                                         
                                                                         <div className="flex flex-col h-full pointer-events-none font-sans">
-                                                                            <div className="flex justify-between items-start mb-2">
-                                                                                <span className="truncate leading-tight font-black text-[15px] uppercase tracking-tighter">{a.title}</span>
+                                                                            <div className="flex justify-between items-start mb-2 font-sans">
+                                                                                <span className="truncate leading-tight font-black text-[15px] uppercase tracking-tighter font-sans">{a.title}</span>
                                                                             </div>
                                                                             
                                                                             {blockH > 60 && (
                                                                                 <div className="text-[12px] font-black opacity-80 tracking-tighter mb-2 flex items-center gap-1.5 font-sans">
-                                                                                    <Icon name="clock" size={12} className="opacity-40" />
+                                                                                    <Icon name="clock" size={12} className="opacity-40 font-sans" />
                                                                                     {formatTime(a.startH, a.startM)} → {formatTime(a.endH, a.endM)}
                                                                                 </div>
                                                                             )}
 
                                                                             {/* 태그 영역을 시간 하단으로 이동 */}
                                                                             {blockH > 85 && a.tags && a.tags.length > 0 && (
-                                                                                <div className="flex flex-wrap gap-1 mb-2">
+                                                                                <div className="flex flex-wrap gap-1 mb-2 font-sans">
                                                                                     {a.tags.map(tag => (
-                                                                                        <span key={tag} className="bg-white/70 px-2 py-0.5 rounded-lg text-[10px] font-black uppercase shrink-0 border border-black/5 shadow-sm text-slate-800">{tag}</span>
+                                                                                        <span key={tag} className="bg-white/70 px-2 py-0.5 rounded-lg text-[10px] font-black uppercase shrink-0 border border-black/5 shadow-sm text-slate-800 font-sans">{tag}</span>
                                                                                     ))}
                                                                                 </div>
                                                                             )}
                                                                             
                                                                             {blockH > 130 && a.memo && (
-                                                                                <div className="text-[12px] font-bold leading-relaxed opacity-60 border-t border-black/10 pt-3 truncate-5 schedule-block">
+                                                                                <div className="text-[12px] font-bold leading-relaxed opacity-60 border-t border-black/10 pt-3 truncate-5 schedule-block font-sans">
                                                                                     {a.memo}
                                                                                 </div>
                                                                             )}
@@ -372,14 +383,14 @@
                                 </div>
 
                                 {isEditMode && (
-                                    <button onClick={() => openScheduleModal()} className="absolute bottom-12 right-12 w-24 h-24 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-all z-20 hover:bg-blue-700 shadow-blue-500/40">
+                                    <button onClick={() => openScheduleModal()} className="absolute bottom-12 right-12 w-24 h-24 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-all z-20 hover:bg-blue-700 shadow-blue-500/40 font-sans">
                                         <Icon name="plus" size={48} />
                                     </button>
                                 )}
                             </>
                         ) : (
                             <div className="flex-1 flex flex-col items-center justify-center text-slate-300 bg-slate-50 font-sans">
-                                <div className="w-44 h-44 bg-white rounded-[4rem] flex items-center justify-center shadow-inner mb-10 border border-slate-100"><Icon name="users" size={80} className="opacity-20 text-slate-400" /></div>
+                                <div className="w-44 h-44 bg-white rounded-[4rem] flex items-center justify-center shadow-inner mb-10 border border-slate-100 font-sans"><Icon name="users" size={80} className="opacity-20 text-slate-400" /></div>
                                 <p className="font-black text-2xl text-slate-400 uppercase tracking-widest italic font-sans">학생 데이터를 먼저 선택해 주십시오</p>
                             </div>
                         )}
@@ -388,36 +399,36 @@
                     {/* 상세 활동 정보 모달 */}
                     {detailModal.open && detailModal.item && (
                         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xl flex items-center justify-center z-[150] p-10 font-sans">
-                            <div className="bg-white rounded-[4rem] w-full max-w-xl shadow-2xl overflow-hidden modal-animate border border-white/20 font-sans">
-                                <div className="h-52 relative" style={{ backgroundColor: detailModal.item.color }}>
-                                    <button onClick={() => setDetailModal({ open: false, item: null })} className="absolute top-10 right-10 p-4 bg-black/20 text-white rounded-full transition-all hover:bg-black/40"><Icon name="x" size={32} /></button>
-                                    <div className="absolute -bottom-10 left-16 bg-white p-7 rounded-[2.5rem] shadow-2xl border border-slate-50"><Icon name="bookmark" className="text-slate-800" size={44} /></div>
+                            <div className="bg-white rounded-[4rem] w-full max-w-lg shadow-2xl overflow-hidden modal-animate border border-white/20 font-sans font-sans">
+                                <div className="h-52 relative font-sans" style={{ backgroundColor: detailModal.item.color }}>
+                                    <button onClick={() => setDetailModal({ open: false, item: null })} className="absolute top-10 right-10 p-4 bg-black/20 text-white rounded-full transition-all hover:bg-black/40 font-sans"><Icon name="x" size={32} /></button>
+                                    <div className="absolute -bottom-10 left-16 bg-white p-7 rounded-[2.5rem] shadow-2xl border border-slate-50 font-sans"><Icon name="bookmark" className="text-slate-800 font-sans" size={44} /></div>
                                 </div>
                                 <div className="p-16 pt-20 space-y-12 text-slate-800 font-sans">
                                     <div>
-                                        <h3 className="text-5xl font-black mb-5 italic tracking-tighter text-slate-900">{detailModal.item.title}</h3>
-                                        <div className="flex flex-wrap gap-3 font-sans">
+                                        <h3 className="text-5xl font-black mb-5 italic tracking-tighter text-slate-900 font-sans font-sans">{detailModal.item.title}</h3>
+                                        <div className="flex flex-wrap gap-3 font-sans font-sans">
                                             {(detailModal.item.tags || []).map(tag => (
-                                                <span key={tag} className="px-5 py-2.5 bg-slate-900 text-white rounded-2xl text-[14px] font-black uppercase tracking-widest">{tag}</span>
+                                                <span key={tag} className="px-5 py-2.5 bg-slate-900 text-white rounded-2xl text-[14px] font-black uppercase tracking-widest font-sans font-sans">{tag}</span>
                                             ))}
-                                            {detailModal.item.days.map(d => <span key={d} className="px-5 py-2.5 bg-slate-100 rounded-2xl text-[14px] font-black text-slate-600">{d}요일</span>)}
+                                            {detailModal.item.days.map(d => <span key={d} className="px-5 py-2.5 bg-slate-100 rounded-2xl text-[14px] font-black text-slate-600 font-sans font-sans">{d}요일</span>)}
                                         </div>
                                     </div>
-                                    <div className="bg-slate-50 p-10 rounded-[3rem] border-2 border-slate-100 shadow-inner space-y-8 font-sans">
-                                        <div className="flex items-center gap-8 font-sans">
-                                            <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-md text-slate-400 border border-slate-100"><Icon name="clock" size={32} /></div>
-                                            <div className="text-4xl font-black italic tracking-tighter text-slate-800 font-sans">{formatTime(detailModal.item.startH, detailModal.item.startM)} → {formatTime(detailModal.item.endH, detailModal.item.endM)}</div>
+                                    <div className="bg-slate-50 p-10 rounded-[3rem] border-2 border-slate-100 shadow-inner space-y-8 font-sans font-sans">
+                                        <div className="flex items-center gap-8 font-sans font-sans font-sans">
+                                            <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-md text-slate-400 border border-slate-100 font-sans font-sans"><Icon name="clock" size={32} /></div>
+                                            <div className="text-4xl font-black italic tracking-tighter text-slate-800 font-sans font-sans font-sans">{formatTime(detailModal.item.startH, detailModal.item.startM)} → {formatTime(detailModal.item.endH, detailModal.item.endM)}</div>
                                         </div>
                                         {detailModal.item.memo && (
-                                            <div className="flex gap-8 pt-8 border-t-2 border-slate-200/50 font-sans">
-                                                <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-md text-slate-400 shrink-0 border border-slate-100"><Icon name="file-text" size={32} /></div>
-                                                <p className="text-xl font-bold text-slate-600 leading-relaxed pt-2">{detailModal.item.memo}</p>
+                                            <div className="flex gap-8 pt-8 border-t-2 border-slate-200/50 font-sans font-sans font-sans font-sans">
+                                                <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-md text-slate-400 shrink-0 border border-slate-100 font-sans font-sans font-sans font-sans"><Icon name="file-text" size={32} /></div>
+                                                <p className="text-xl font-bold text-slate-600 leading-relaxed pt-2 font-sans font-sans font-sans font-sans">{detailModal.item.memo}</p>
                                             </div>
                                         )}
                                     </div>
-                                    <div className="flex gap-6 font-sans">
-                                        <button onClick={() => { openScheduleModal(detailModal.item); setDetailModal({ open: false, item: null }); setIsEditMode(true); }} className="flex-1 py-7 bg-slate-900 text-white rounded-[2.5rem] font-black shadow-2xl active:scale-95 transition-all text-lg uppercase tracking-tight">상세 파라미터 수정</button>
-                                        <button onClick={() => { if(confirm("삭제하시겠습니까?")) { setStudents(prev => prev.map(s => s.id === selectedId ? {...s, schedules: s.schedules.filter(x => x.id !== detailModal.item.id)} : s)); setDetailModal({open: false, item: null}); } }} className="p-8 bg-red-50 text-red-500 rounded-[2.5rem] active:scale-95 transition-colors hover:bg-red-100 shadow-lg"><Icon name="trash-2" size={36} /></button>
+                                    <div className="flex gap-6 font-sans font-sans font-sans font-sans font-sans">
+                                        <button onClick={() => { openScheduleModal(detailModal.item); setDetailModal({ open: false, item: null }); setIsEditMode(true); }} className="flex-1 py-7 bg-slate-900 text-white rounded-[2.5rem] font-black shadow-2xl active:scale-95 transition-all text-lg uppercase tracking-tight font-sans font-sans font-sans font-sans font-sans">상세 파라미터 수정</button>
+                                        <button onClick={() => { if(confirm("삭제하시겠습니까?")) { setStudents(prev => prev.map(s => s.id === selectedId ? {...s, schedules: s.schedules.filter(x => x.id !== detailModal.item.id)} : s)); setDetailModal({open: false, item: null}); } }} className="p-8 bg-red-50 text-red-500 rounded-[2.5rem] active:scale-95 transition-colors hover:bg-red-100 shadow-lg font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><Icon name="trash-2" size={36} /></button>
                                     </div>
                                 </div>
                             </div>
@@ -429,27 +440,27 @@
                         <div className="fixed inset-0 bg-slate-900/85 backdrop-blur-2xl flex items-center justify-center z-[200] p-10 font-sans">
                             <div className="bg-white p-16 rounded-[4.5rem] w-full max-w-5xl shadow-2xl border border-white/20 modal-animate max-h-[92vh] overflow-y-auto custom-scrollbar font-sans">
                                 <div className="flex justify-between items-center mb-16 font-sans">
-                                    <h3 className="text-5xl font-black text-slate-800 tracking-tighter uppercase italic">PROTOCOL DESIGN</h3>
-                                    <button onClick={() => setScheduleModal({ open: false, editId: null })} className="text-slate-300 hover:text-slate-900 transition-colors bg-slate-50 p-4 rounded-full"><Icon name="x" size={44} /></button>
+                                    <h3 className="text-5xl font-black text-slate-800 tracking-tighter uppercase italic font-sans font-sans font-sans">PROTOCOL DESIGN</h3>
+                                    <button onClick={() => setScheduleModal({ open: false, editId: null })} className="text-slate-300 hover:text-slate-900 transition-colors bg-slate-50 p-4 rounded-full font-sans font-sans font-sans font-sans"><Icon name="x" size={44} /></button>
                                 </div>
-                                <div className="space-y-16 font-sans">
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 font-sans">
-                                        <div className="space-y-6 font-sans">
-                                            <label className="text-base font-black text-slate-400 uppercase tracking-widest ml-3 italic">Activity Label</label>
-                                            <input type="text" className="w-full border-4 border-slate-50 p-8 rounded-[2.5rem] font-black outline-none focus:border-blue-500 transition-all bg-slate-50 shadow-inner text-3xl font-sans" value={sForm.title} onChange={e => setSForm({...sForm, title: e.target.value})} placeholder="활동 이름" />
+                                <div className="space-y-16 font-sans font-sans font-sans font-sans">
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 font-sans font-sans font-sans font-sans font-sans">
+                                        <div className="space-y-6 font-sans font-sans font-sans font-sans font-sans font-sans">
+                                            <label className="text-base font-black text-slate-400 uppercase tracking-widest ml-3 italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">Activity Label</label>
+                                            <input type="text" className="w-full border-4 border-slate-50 p-8 rounded-[2.5rem] font-black outline-none focus:border-blue-500 transition-all bg-slate-50 shadow-inner text-3xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={sForm.title} onChange={e => setSForm({...sForm, title: e.target.value})} placeholder="활동 이름" />
                                         </div>
-                                        <div className="space-y-6 font-sans">
-                                            <div className="flex justify-between items-center ml-3 font-sans"><label className="text-base font-black text-slate-400 uppercase tracking-widest italic font-sans">Tagging System</label>
-                                                <div className="flex gap-3 bg-white p-2 px-5 rounded-2xl shadow-md border-2 border-slate-100">
-                                                    <input type="text" value={newTagInput} onChange={e => setNewTagInput(e.target.value)} placeholder="+ 추가" className="text-sm font-black outline-none w-28 font-sans" onKeyDown={e => e.key === 'Enter' && (setTags([...tags, newTagInput]), toggleTag(newTagInput), setNewTagInput(''))} />
+                                        <div className="space-y-6 font-sans font-sans font-sans font-sans font-sans font-sans">
+                                            <div className="flex justify-between items-center ml-3 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><label className="text-base font-black text-slate-400 uppercase tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">Tagging System</label>
+                                                <div className="flex gap-3 bg-white p-2 px-5 rounded-2xl shadow-md border-2 border-slate-100 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                                    <input type="text" value={newTagInput} onChange={e => setNewTagInput(e.target.value)} placeholder="+ 추가" className="text-sm font-black outline-none w-28 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" onKeyDown={e => e.key === 'Enter' && (setTags([...tags, newTagInput]), toggleTag(newTagInput), setNewTagInput(''))} />
                                                 </div>
                                             </div>
-                                            <div className="flex flex-wrap gap-4 p-8 bg-slate-50 rounded-[3rem] border-2 border-slate-100 min-h-[130px] shadow-inner font-sans">
+                                            <div className="flex flex-wrap gap-4 p-8 bg-slate-50 rounded-[3rem] border-2 border-slate-100 min-h-[130px] shadow-inner font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
                                                 {tags.map(t => (
                                                     <button 
                                                         key={t} 
                                                         onClick={() => toggleTag(t)} 
-                                                        className={`px-8 py-4 rounded-[1.5rem] text-[15px] font-black transition-all ${(sForm.tags || []).includes(t) ? 'bg-slate-900 text-white shadow-xl scale-110' : 'bg-white text-slate-400 border-2 border-slate-200 shadow-sm hover:border-slate-400'}`}
+                                                        className={`px-8 py-4 rounded-[1.5rem] text-[15px] font-black transition-all font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans ${(sForm.tags || []).includes(t) ? 'bg-slate-900 text-white shadow-xl scale-110' : 'bg-white text-slate-400 border-2 border-slate-200 shadow-sm hover:border-slate-400'}`}
                                                     >
                                                         {t}
                                                     </button>
@@ -457,49 +468,49 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 font-sans">
-                                        <div className="space-y-6 font-sans">
-                                            <label className="text-base font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans">Day Deployment</label>
-                                            <div className="flex gap-3.5 bg-slate-100 p-4 rounded-[2.5rem] shadow-inner">
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                        <div className="space-y-6 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                            <label className="text-base font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">Day Deployment</label>
+                                            <div className="flex gap-3.5 bg-slate-100 p-4 rounded-[2.5rem] shadow-inner font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
                                                 {DAYS.map(d => <button key={d} onClick={() => {
                                                     const curr = sForm.days;
                                                     setSForm({...sForm, days: curr.includes(d) ? curr.filter(x => x !== d) : [...curr, d]});
-                                                }} className={`flex-1 py-7 rounded-[1.5rem] text-[16px] font-black transition-all ${sForm.days.includes(d) ? 'bg-white text-slate-900 shadow-xl scale-105' : 'text-slate-400 hover:text-slate-500 font-sans'}`}>{d}</button>)}
+                                                }} className={`flex-1 py-7 rounded-[1.5rem] text-[16px] font-black transition-all font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans ${sForm.days.includes(d) ? 'bg-white text-slate-900 shadow-xl scale-105' : 'text-slate-400 hover:text-slate-500 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans'}`}>{d}</button>)}
                                             </div>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-12 font-sans">
-                                            <div className="space-y-6 font-sans"><label className="text-base font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans">Start (HH:MM)</label>
-                                                <div className="flex items-center gap-4 bg-slate-50 p-6 rounded-[2.5rem] shadow-inner border-2 border-slate-100 font-sans">
-                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-4xl font-sans" value={sForm.startH} onChange={e => setSForm({...sForm, startH: e.target.value})} />
-                                                    <span className="font-black text-slate-200 text-4xl font-sans">:</span>
-                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-4xl font-sans" value={sForm.startM} onChange={e => setSForm({...sForm, startM: e.target.value})} />
+                                        <div className="grid grid-cols-2 gap-12 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                            <div className="space-y-6 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><label className="text-base font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">Start (HH:MM)</label>
+                                                <div className="flex items-center gap-4 bg-slate-50 p-6 rounded-[2.5rem] shadow-inner border-2 border-slate-100 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-4xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={sForm.startH} onChange={e => setSForm({...sForm, startH: e.target.value})} />
+                                                    <span className="font-black text-slate-200 text-4xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">:</span>
+                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-4xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={sForm.startM} onChange={e => setSForm({...sForm, startM: e.target.value})} />
                                                 </div>
                                             </div>
-                                            <div className="space-y-6 font-sans"><label className="text-base font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans">End (HH:MM)</label>
-                                                <div className="flex items-center gap-4 bg-slate-50 p-6 rounded-[2.5rem] shadow-inner border-2 border-slate-100 font-sans">
-                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-4xl font-sans" value={sForm.endH} onChange={e => setSForm({...sForm, endH: e.target.value})} />
-                                                    <span className="font-black text-slate-200 text-4xl font-sans">:</span>
-                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-4xl font-sans" value={sForm.endM} onChange={e => setSForm({...sForm, endM: e.target.value})} />
+                                            <div className="space-y-6 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><label className="text-base font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">End (HH:MM)</label>
+                                                <div className="flex items-center gap-4 bg-slate-50 p-6 rounded-[2.5rem] shadow-inner border-2 border-slate-100 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-4xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={sForm.endH} onChange={e => setSForm({...sForm, endH: e.target.value})} />
+                                                    <span className="font-black text-slate-200 text-4xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">:</span>
+                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-4xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={sForm.endM} onChange={e => setSForm({...sForm, endM: e.target.value})} />
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 font-sans">
-                                        <div className="space-y-6 font-sans">
-                                            <label className="text-base font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans">Memo Log</label>
-                                            <textarea className="w-full border-4 border-slate-50 p-10 rounded-[3rem] font-bold outline-none focus:border-blue-500 bg-slate-50 shadow-inner h-56 resize-none transition-all font-sans text-2xl" value={sForm.memo} onChange={e => setSForm({...sForm, memo: e.target.value})} placeholder="활동 세부 사항..." />
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                        <div className="space-y-6 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                            <label className="text-base font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">Memo Log</label>
+                                            <textarea className="w-full border-4 border-slate-50 p-10 rounded-[3rem] font-bold outline-none focus:border-blue-500 bg-slate-50 shadow-inner h-56 resize-none transition-all font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans text-2xl" value={sForm.memo} onChange={e => setSForm({...sForm, memo: e.target.value})} placeholder="활동 세부 사항..." />
                                         </div>
-                                        <div className="space-y-6 font-sans">
-                                            <label className="text-base font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans">Visual Energy Index</label>
-                                            <div className="flex flex-wrap gap-5 bg-slate-50 p-10 rounded-[3.5rem] border-2 border-slate-100 items-center shadow-inner font-sans">
+                                        <div className="space-y-6 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                            <label className="text-base font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">Visual Energy Index</label>
+                                            <div className="flex flex-wrap gap-5 bg-slate-50 p-10 rounded-[3.5rem] border-2 border-slate-100 items-center shadow-inner font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
                                                 {[...DEFAULT_COLORS, ...customColors].map(c => (
-                                                    <button key={c} onClick={() => setSForm({...sForm, color: c})} className={`w-14 h-14 rounded-full border-4 transition-all hover:scale-110 ${sForm.color === c ? 'border-slate-800 shadow-2xl scale-110 ring-4 ring-slate-800/10' : 'border-white shadow-md'}`} style={{ backgroundColor: c }} />
+                                                    <button key={c} onClick={() => setSForm({...sForm, color: c})} className={`w-14 h-14 rounded-full border-4 transition-all font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans hover:scale-110 ${sForm.color === c ? 'border-slate-800 shadow-2xl scale-110 ring-4 ring-slate-800/10' : 'border-white shadow-md'}`} style={{ backgroundColor: c }} />
                                                 ))}
-                                                <div className="flex gap-4 items-center bg-white p-3 rounded-3xl border-2 border-slate-200 shadow-lg ml-3 font-sans font-sans">
-                                                    <div className="w-12 h-12 rounded-2xl relative overflow-hidden border-2 border-slate-100 cursor-pointer font-sans">
-                                                        <input type="color" className="absolute -inset-2 cursor-pointer scale-150" value={tempColor} onChange={e => setTempColor(e.target.value)} />
+                                                <div className="flex gap-4 items-center bg-white p-3 rounded-3xl border-2 border-slate-200 shadow-lg ml-3 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                                    <div className="w-12 h-12 rounded-2xl relative overflow-hidden border-2 border-slate-100 cursor-pointer font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                                        <input type="color" className="absolute -inset-2 cursor-pointer scale-150 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={tempColor} onChange={e => setTempColor(e.target.value)} />
                                                     </div>
-                                                    <button onClick={() => { if(!customColors.includes(tempColor)) setCustomColors([...customColors, tempColor]); setSForm({...sForm, color: tempColor}); }} className="bg-slate-900 text-white p-4 rounded-2xl hover:bg-slate-800 active:scale-90 transition-all shadow-xl font-sans font-sans">
+                                                    <button onClick={() => { if(!customColors.includes(tempColor)) setCustomColors([...customColors, tempColor]); setSForm({...sForm, color: tempColor}); }} className="bg-slate-900 text-white p-4 rounded-2xl hover:bg-slate-800 active:scale-90 transition-all shadow-xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
                                                         <Icon name="plus" size={24} />
                                                     </button>
                                                 </div>
@@ -507,9 +518,9 @@
                                         </div>
                                     </div>
                                 </div>
-                                <div className="mt-20 flex gap-8 font-sans">
-                                    <button onClick={() => setScheduleModal({ open: false, editId: null })} className="flex-1 py-8 font-black text-slate-400 uppercase tracking-[0.2em] text-lg italic hover:text-slate-600 transition-colors font-sans">ABORT CHANGES</button>
-                                    <button onClick={handleSaveSchedule} className="flex-[3] py-8 bg-blue-600 text-white rounded-[3rem] font-black shadow-3xl shadow-blue-500/30 active:scale-95 transition-all text-3xl uppercase tracking-tighter italic font-sans">Commit Protocol</button>
+                                <div className="mt-20 flex gap-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                    <button onClick={() => setScheduleModal({ open: false, editId: null })} className="flex-1 py-8 font-black text-slate-400 uppercase tracking-[0.2em] text-lg italic hover:text-slate-600 transition-colors font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">ABORT CHANGES</button>
+                                    <button onClick={handleSaveSchedule} className="flex-[3] py-8 bg-blue-600 text-white rounded-[3rem] font-black shadow-3xl shadow-blue-500/30 active:scale-95 transition-all text-3xl uppercase tracking-tighter italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">Commit Protocol</button>
                                 </div>
                             </div>
                         </div>
@@ -517,13 +528,13 @@
 
                     {/* 학생 정보 모달 */}
                     {studentModal.open && (
-                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-2xl flex items-center justify-center z-[300] p-10 font-sans">
-                            <div className="bg-white p-16 rounded-[4rem] w-full max-w-lg shadow-2xl modal-animate border border-white/20 text-center font-sans">
-                                <h3 className="text-4xl font-black mb-10 text-slate-800 tracking-tight uppercase italic font-sans font-sans">{studentModal.editId ? "UPDATE IDENTITY" : "NEW ENROLLMENT"}</h3>
-                                <input type="text" value={studentModal.name} onChange={e => setStudentModal({...studentModal, name: e.target.value})} className="w-full border-4 border-slate-50 p-8 rounded-[2.5rem] outline-none focus:border-blue-500 font-black mb-12 transition-all bg-slate-50 shadow-inner text-4xl text-center font-sans" placeholder="Name" autoFocus onKeyDown={e => e.key === 'Enter' && handleSaveStudent()} />
-                                <div className="flex gap-6 font-sans">
-                                    <button onClick={() => setStudentModal({ open: false, editId: null, name: '' })} className="flex-1 py-8 font-bold text-slate-400 hover:text-slate-600 transition-colors uppercase italic text-lg font-sans">Cancel</button>
-                                    <button onClick={handleSaveStudent} className="flex-[2] py-8 bg-slate-900 text-white rounded-[2.5rem] font-black shadow-2xl active:scale-95 transition-all text-3xl uppercase tracking-tight font-sans">Confirm</button>
+                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-2xl flex items-center justify-center z-[300] p-10 font-sans font-sans font-sans font-sans">
+                            <div className="bg-white p-16 rounded-[4rem] w-full max-w-lg shadow-2xl modal-animate border border-white/20 text-center font-sans font-sans font-sans font-sans font-sans">
+                                <h3 className="text-4xl font-black mb-10 text-slate-800 tracking-tight uppercase italic font-sans font-sans font-sans font-sans font-sans font-sans">{studentModal.editId ? "UPDATE IDENTITY" : "NEW ENROLLMENT"}</h3>
+                                <input type="text" value={studentModal.name} onChange={e => setStudentModal({...studentModal, name: e.target.value})} className="w-full border-4 border-slate-50 p-8 rounded-[2.5rem] outline-none focus:border-blue-500 font-black mb-12 transition-all bg-slate-50 shadow-inner text-4xl text-center font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" placeholder="Name" autoFocus onKeyDown={e => e.key === 'Enter' && handleSaveStudent()} />
+                                <div className="flex gap-6 font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                    <button onClick={() => setStudentModal({ open: false, editId: null, name: '' })} className="flex-1 py-8 font-bold text-slate-400 hover:text-slate-600 transition-colors uppercase italic text-lg font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">Cancel</button>
+                                    <button onClick={handleSaveStudent} className="flex-[2] py-8 bg-slate-900 text-white rounded-[2.5rem] font-black shadow-2xl active:scale-95 transition-all text-3xl uppercase tracking-tight font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">Confirm</button>
                                 </div>
                             </div>
                         </div>
