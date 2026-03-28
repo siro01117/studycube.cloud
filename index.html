@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>스터디큐브 통합 관리 시스템</title>
+    <title>스터디큐브 통합 관리 시스템 v16.2 (Stable)</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -37,11 +37,13 @@
             grid-template-columns: 0.6fr repeat(7, 1fr) !important;
         }
 
+        /* [MODIFIED] 시각적 계층 구조 최적화 (z-index) */
         .schedule-block { 
             word-break: break-all !important; 
             overflow: visible !important;
-            line-height: 1.1 !important; /* 줄간격 압축 */
-            display: block !important;
+            line-height: 1.2 !important; 
+            position: relative !important;
+            z-index: 10 !important; /* 텍스트를 항상 블록 위에 띄움 */
         }
     </style>
 </head>
@@ -113,52 +115,40 @@
                 return { total, avg: Math.round(total / 7) };
             }, [filteredSchedules]);
 
-            // [ENGINE FIX] 웹폰트 렌더링 오차 강제 보정 버전
+            // [STABLE EXPORT ENGINE v2] - 캡처 시 태그 제거 로직 통합
             const handleExport = () => {
                 if (!captureAreaRef.current || !current) return;
                 
-                // 폰트 로딩 대기 대신, 캡처 시점에 폰트 설정을 '초기화'하여 오차 제거
-                html2canvas(captureAreaRef.current, {
-                    backgroundColor: "#ffffff",
-                    scale: 2, // 3보다 안정적인 2 권장 (메모리 이슈 방지)
-                    useCORS: true,
-                    allowTaint: true,
-                    onclone: (clonedDoc) => {
-                        const area = clonedDoc.querySelector('.export-area');
-                        if (area) {
-                            // 1. 밀림의 주범인 Pretendard를 버리고 시스템 폰트로 강제 변경
-                            // 이렇게 하면 브라우저와 캔버스 간의 높이 계산 오차가 거의 사라집니다.
-                            area.style.fontFamily = 'Arial, sans-serif';
-                            area.style.height = 'auto';
-                            area.style.overflow = 'visible';
+                document.fonts.ready.then(() => {
+                    html2canvas(captureAreaRef.current, {
+                        backgroundColor: "#ffffff",
+                        scale: 2, // 안정적인 scale 2 권장
+                        useCORS: true,
+                        allowTaint: true,
+                        onclone: (clonedDoc) => {
+                            const area = clonedDoc.querySelector('.export-area');
+                            if (area) {
+                                area.style.height = 'auto';
+                                area.style.overflow = 'visible';
 
-                            // 2. 텍스트 컨테이너 정밀 타격 (6px 위로 + 줄간격 압축)
-                            const items = area.querySelectorAll('.schedule-block');
-                            items.forEach(el => {
-                                el.style.overflow = 'visible';
-                                el.style.lineHeight = '1.0'; // 줄간격을 최대한 붙임
-                                el.style.transform = 'translateY(-6px)'; // 요청하신 6px 상단 이동
-                                
-                                // 내부의 시간/제목 텍스트 마진 제거
-                                const children = el.querySelectorAll('*');
-                                children.forEach(child => {
-                                    child.style.marginTop = '0px';
-                                    child.style.marginBottom = '2px';
+                                // [핵심 추가] 캡처 복제본에서 태그 영역을 완전히 제거 (깔끔한 이미지)
+                                const tagAreas = area.querySelectorAll('.tag-area');
+                                tagAreas.forEach(el => el.remove());
+
+                                // 텍스트 컨테이너 미세 상단 조정 (밀림 상쇄)
+                                const items = area.querySelectorAll('.schedule-block');
+                                items.forEach(el => {
+                                    el.style.overflow = 'visible';
+                                    el.style.transform = 'translateY(-4px)'; // 미세 상단 이동
                                 });
-                            });
-
-                            // 3. 블록 내부 여백 압축
-                            const blocks = area.querySelectorAll('.absolute.rounded-3xl');
-                            blocks.forEach(b => {
-                                b.style.paddingTop = '10px';
-                            });
+                            }
                         }
-                    }
-                }).then(canvas => {
-                    const link = document.createElement('a');
-                    link.download = `${current.name}_주간계획표_수정본.png`;
-                    link.href = canvas.toDataURL('image/png', 1.0);
-                    link.click();
+                    }).then(canvas => {
+                        const link = document.createElement('a');
+                        link.download = `${current.name}_주간계획표_수정본.png`;
+                        link.href = canvas.toDataURL('image/png', 1.0);
+                        link.click();
+                    });
                 });
             };
 
@@ -369,24 +359,27 @@
                                                                 
                                                                 return (
                                                                     <div key={a.id} onClick={() => isEditMode ? openScheduleModal(a) : setDetailModal({ open: true, item: a })} 
-                                                                        className={`absolute left-1.5 right-1.5 rounded-3xl p-6 text-slate-900 shadow-xl border border-black/5 flex flex-col justify-start overflow-hidden transition-all hover:scale-[1.04] hover:z-20 cursor-pointer ${isEditMode ? 'ring-4 ring-blue-500/40 ring-offset-2' : ''}`}
+                                                                        // [MODIFIED] 시각적 계층 구조 변경 (bg/shadow를 부모로 이동)
+                                                                        className={`absolute left-1.5 right-1.5 rounded-3xl p-6 shadow-xl transition-all hover:scale-[1.04] hover:z-20 cursor-pointer ${isEditMode ? 'ring-4 ring-blue-500/40 ring-offset-2' : ''}`}
                                                                         style={{ top: `${topPos}px`, height: `${blockH}px`, backgroundColor: a.color }}>
                                                                         
+                                                                        {/* [MODIFIED] 투명한 텍스트 컨테이너 (relative/z-index로 블록 위 배치) */}
                                                                         <div className="flex flex-col h-full pointer-events-none schedule-block">
                                                                             <div className="flex justify-between items-start mb-3">
-                                                                                <span className="truncate leading-tight font-black text-[18px] uppercase tracking-tighter">{a.title}</span>
+                                                                                <span className="truncate leading-tight font-black text-[18px] uppercase tracking-tighter text-slate-900">{a.title}</span>
                                                                             </div>
                                                                             
-                                                                            {/* [MODIFIED] 시간 텍스트 크기 축소 (12px -> 10px) */}
+                                                                            {/* 시간 텍스트 크기 축소 (12px -> 11px) */}
                                                                             {blockH > 65 && (
-                                                                                <div className="text-[12px] font-bold opacity-80 tracking-tighter mb-3 flex items-center gap-2">
+                                                                                <div className="text-[11px] font-bold opacity-80 tracking-tighter mb-3 flex items-center gap-2 text-slate-900">
                                                                                     <Icon name="clock" size={12} className="opacity-40" />
                                                                                     {formatTime(a.startH, a.startM)} → {formatTime(a.endH, a.endM)}
                                                                                 </div>
                                                                             )}
 
+                                                                            {/* [MODIFIED] 태그 영역에 클래스(`tag-area`) 추가 - 캡처 시 식별용 */}
                                                                             {blockH > 90 && a.tags && a.tags.length > 0 && (
-                                                                                <div className="flex flex-wrap gap-1.5 mb-3">
+                                                                                <div className="flex flex-wrap gap-1.5 mb-3 tag-area">
                                                                                     {a.tags.map(tag => (
                                                                                         <span key={tag} className="bg-white/70 px-3 py-1 rounded-xl text-[12px] font-black uppercase shrink-0 border border-black/5 shadow-sm text-slate-800">{tag}</span>
                                                                                     ))}
@@ -394,7 +387,7 @@
                                                                             )}
                                                                             
                                                                             {blockH > 150 && a.memo && (
-                                                                                <div className="text-[14px] font-bold leading-relaxed opacity-60 border-t border-black/10 pt-4 truncate-5">
+                                                                                <div className="text-[14px] font-bold leading-relaxed opacity-60 border-t border-black/10 pt-4 truncate-5 text-slate-900">
                                                                                     {a.memo}
                                                                                 </div>
                                                                             )}
