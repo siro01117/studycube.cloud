@@ -3,12 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>스터디큐브 통합 관리 시스템 v16.1 (Stable)</title>
+    <title>스터디큐브 통합 관리 시스템</title>
+    <!-- 시스템 코어 엔진 로드 -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- 이미지 변환 엔진 로드 -->
     <script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <style>
         @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
@@ -18,34 +20,30 @@
         .modal-animate { animation: modalIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
         @keyframes modalIn { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
         
+        /* 타임테이블 물리적 높이 보정 */
         .time-slot { height: 100px; border-bottom: 1px solid #f1f5f9; }
         
-        /* [CORE FIX] 캔버스 출력용 고정 비율 및 해상도 최적화 */
+        /* 캔버스 출력용 고정 비율 및 해상도 최적화 */
         .export-area { 
             width: 1700px !important; 
             min-width: 1700px !important; 
-            height: auto !important; /* 높이 고정 해제 */
             background: white !important;
             padding: 60px !important;
             display: flex !important;
             flex-direction: column !important;
-            overflow: visible !important; /* 캡처 영역 밖 데이터 방지 */
         }
         
+        /* 시간 열 너비 축소 (약 40% 감소) 및 그리드 비율 조정 */
         .grid-layout {
             display: grid !important;
             grid-template-columns: 0.6fr repeat(7, 1fr) !important;
-            height: auto !important;
         }
 
         .schedule-block { 
-            word-break: break-all !important; /* 텍스트 밀림 방지 */
+            word-break: keep-all; 
             overflow: visible !important;
-            line-height: 1.2 !important; 
+            line-height: 1.4; 
         }
-
-        /* 캡처 시 레이아웃 붕괴 방지용 */
-        .html2canvas-container { width: 1700px !important; height: auto !important; }
     </style>
 </head>
 <body class="overflow-hidden text-slate-900 font-medium">
@@ -93,6 +91,9 @@
             
             const [tags, setTags] = useState(['인강', '자습', '학원', '수업', '과외']);
             const [newTagInput, setNewTagInput] = useState('');
+            const [customColors, setCustomColors] = useState([]);
+            const [tempColor, setTempColor] = useState('#3b82f6');
+
             const [sForm, setSForm] = useState({ title: '', days: [], startH: '09', startM: '00', endH: '10', endM: '00', tags: ['자습'], memo: '', color: DEFAULT_COLORS[0] });
 
             useEffect(() => {
@@ -116,47 +117,28 @@
                 return { total, avg: Math.round(total / 7) };
             }, [filteredSchedules]);
 
-            // [STABLE & ALIGN-UP EXPORT ENGINE]
+            // 이미지 출력 엔진 최적화
             const handleExport = () => {
                 if (!captureAreaRef.current || !current) return;
-                
-                // 폰트 로딩 대기 및 렌더링 동기화
-                document.fonts.ready.then(() => {
-                    html2canvas(captureAreaRef.current, {
-                        backgroundColor: "#ffffff",
-                        scale: 2, // 해상도와 안정성의 최적 지점
-                        useCORS: true,
-                        allowTaint: true,
-                        onclone: (clonedDoc) => {
-                            const area = clonedDoc.querySelector('.export-area');
-                            if (area) {
-                                // 1. 물리적 제약 해제 (잘림 방지)
-                                area.style.height = 'auto';
-                                area.style.overflow = 'visible';
-
-                                // 2. 텍스트 위치 강제 상단 정렬 (밀림 방지 핵심)
-                                const blocks = area.querySelectorAll('.absolute.rounded-3xl');
-                                blocks.forEach(block => {
-                                    block.style.paddingTop = '12px'; // 상단 패딩 축소 (기존 p-6에서 절반으로)
-                                    block.style.display = 'flex';
-                                    block.style.flexDirection = 'column';
-                                    block.style.justifyContent = 'flex-start';
-                                    
-                                    // 내부 스케줄 블록 여백 압축
-                                    const inner = block.querySelector('.schedule-block');
-                                    if (inner) {
-                                        inner.style.marginTop = '0px';
-                                        inner.style.gap = '4px';
-                                    }
-                                });
-                            }
+                html2canvas(captureAreaRef.current, {
+                    backgroundColor: "#ffffff",
+                    scale: 3, 
+                    useCORS: true,
+                    allowTaint: true,
+                    onclone: (clonedDoc) => {
+                        const area = clonedDoc.querySelector('.export-area');
+                        if (area) {
+                            area.style.height = 'auto';
+                            area.style.overflow = 'visible';
+                            const items = area.querySelectorAll('.schedule-block');
+                            items.forEach(el => el.style.overflow = 'visible');
                         }
-                    }).then(canvas => {
-                        const link = document.createElement('a');
-                        link.download = `${current.name}_주간계획표_스터디큐브.png`;
-                        link.href = canvas.toDataURL('image/png', 1.0);
-                        link.click();
-                    });
+                    }
+                }).then(canvas => {
+                    const link = document.createElement('a');
+                    link.download = `${current.name}_주간계획표_스터디큐브.png`;
+                    link.href = canvas.toDataURL('image/png', 1.0);
+                    link.click();
                 });
             };
 
@@ -208,6 +190,7 @@
 
             return (
                 <div className="flex h-screen w-full bg-slate-50 overflow-hidden font-sans" onClick={() => setActiveMenuId(null)}>
+                    {/* 사이드바 */}
                     <aside className="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-30 shadow-md">
                         <div className="p-6 border-b border-slate-100 bg-slate-50/50">
                             <h1 className="text-2xl font-black italic tracking-tighter uppercase text-slate-800 mb-6 text-center">Study Cube</h1>
@@ -261,6 +244,7 @@
                         )}
                     </aside>
 
+                    {/* 메인 캔버스 */}
                     <main className="flex-1 flex flex-col relative bg-white overflow-hidden">
                         {current ? (
                             <>
@@ -294,7 +278,8 @@
                                             </div>
                                         </div>
 
-                                        <div className="flex gap-12 h-full">
+                                        <div className="flex gap-12">
+                                            {/* 리포트 패널 - 자간 및 여백 최적화 */}
                                             <div className="w-80 shrink-0 space-y-10">
                                                 <div className="bg-slate-900 text-white p-10 rounded-[3rem] shadow-2xl relative overflow-hidden">
                                                     <h3 className="text-[14px] font-black uppercase tracking-[0.3em] opacity-30 mb-10">CORE REPORT</h3>
@@ -338,6 +323,7 @@
                                                 </div>
                                             </div>
 
+                                            {/* 타임라인 - 시간 열 너비 축소 및 가로 폭 확장 */}
                                             <div className="flex-1 grid-layout grid divide-x-2 divide-slate-100 border-2 border-slate-100 rounded-[3.5rem] overflow-hidden shadow-2xl bg-white">
                                                 <div className="bg-slate-50/50 flex flex-col text-center">
                                                     <div className="h-20 border-b-4 border-slate-900 flex items-center justify-center text-[14px] font-black text-slate-900 uppercase bg-white italic tracking-tighter">TIME</div>
@@ -372,12 +358,13 @@
                                                                             </div>
                                                                             
                                                                             {blockH > 65 && (
-                                                                                <div className="text-[11px] font-black opacity-80 tracking-tighter mb-3 flex items-center gap-2">
-                                                                                    <Icon name="clock" size={11} className="opacity-40" />
+                                                                                <div className="text-[12px] font-black opacity-80 tracking-tighter mb-3 flex items-center gap-2">
+                                                                                    <Icon name="clock" size={14} className="opacity-40" />
                                                                                     {formatTime(a.startH, a.startM)} → {formatTime(a.endH, a.endM)}
                                                                                 </div>
                                                                             )}
 
+                                                                            {/* 태그 영역 - 시간 하단 배치 */}
                                                                             {blockH > 90 && a.tags && a.tags.length > 0 && (
                                                                                 <div className="flex flex-wrap gap-1.5 mb-3">
                                                                                     {a.tags.map(tag => (
@@ -387,7 +374,7 @@
                                                                             )}
                                                                             
                                                                             {blockH > 150 && a.memo && (
-                                                                                <div className="text-[14px] font-bold leading-relaxed opacity-60 border-t border-black/10 pt-4 line-clamp-3">
+                                                                                <div className="text-[14px] font-bold leading-relaxed opacity-60 border-t border-black/10 pt-4 truncate-5">
                                                                                     {a.memo}
                                                                                 </div>
                                                                             )}
@@ -458,25 +445,25 @@
 
                     {/* 활동 수립 모달 */}
                     {scheduleModal.open && (
-                        <div className="fixed inset-0 bg-slate-900/85 backdrop-blur-2xl flex items-center justify-center z-[200] p-10">
-                            <div className="bg-white p-16 rounded-[4.5rem] w-full max-w-6xl shadow-2xl border border-white/20 modal-animate max-h-[95vh] overflow-y-auto custom-scrollbar">
-                                <div className="flex justify-between items-center mb-16">
+                        <div className="fixed inset-0 bg-slate-900/85 backdrop-blur-2xl flex items-center justify-center z-[200] p-10 font-sans">
+                            <div className="bg-white p-16 rounded-[4.5rem] w-full max-w-6xl shadow-2xl border border-white/20 modal-animate max-h-[95vh] overflow-y-auto custom-scrollbar font-sans">
+                                <div className="flex justify-between items-center mb-16 font-sans">
                                     <h3 className="text-5xl font-black text-slate-800 tracking-tighter uppercase italic">일정 수립 모드</h3>
-                                    <button onClick={() => setScheduleModal({ open: false, editId: null })} className="text-slate-300 hover:text-slate-900 transition-colors bg-slate-50 p-5 rounded-full"><Icon name="x" size={48} /></button>
+                                    <button onClick={() => setScheduleModal({ open: false, editId: null })} className="text-slate-300 hover:text-slate-900 transition-colors bg-slate-50 p-5 rounded-full font-sans"><Icon name="x" size={48} /></button>
                                 </div>
-                                <div className="space-y-16">
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-16">
-                                        <div className="space-y-8">
+                                <div className="space-y-16 font-sans">
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 font-sans">
+                                        <div className="space-y-8 font-sans">
                                             <label className="text-xl font-black text-slate-400 uppercase tracking-widest ml-3 italic">활동 제목</label>
                                             <input type="text" className="w-full border-4 border-slate-50 p-10 rounded-[3rem] font-black outline-none focus:border-blue-500 transition-all bg-slate-50 shadow-inner text-4xl" value={sForm.title} onChange={e => setSForm({...sForm, title: e.target.value})} placeholder="활동 이름" />
                                         </div>
-                                        <div className="space-y-8">
-                                            <div className="flex justify-between items-center ml-3"><label className="text-xl font-black text-slate-400 uppercase tracking-widest italic">태그 시스템</label>
-                                                <div className="flex gap-4 bg-white p-2 px-6 rounded-2xl shadow-md border-2 border-slate-100">
-                                                    <input type="text" value={newTagInput} onChange={e => setNewTagInput(e.target.value)} placeholder="+ 추가" className="text-lg font-black outline-none w-32" onKeyDown={e => e.key === 'Enter' && (setTags([...tags, newTagInput]), toggleTag(newTagInput), setNewTagInput(''))} />
+                                        <div className="space-y-8 font-sans">
+                                            <div className="flex justify-between items-center ml-3 font-sans"><label className="text-xl font-black text-slate-400 uppercase tracking-widest italic font-sans">태그 시스템 (중복 가능)</label>
+                                                <div className="flex gap-4 bg-white p-2 px-6 rounded-2xl shadow-md border-2 border-slate-100 font-sans">
+                                                    <input type="text" value={newTagInput} onChange={e => setNewTagInput(e.target.value)} placeholder="+ 추가" className="text-lg font-black outline-none w-32 font-sans" onKeyDown={e => e.key === 'Enter' && (setTags([...tags, newTagInput]), toggleTag(newTagInput), setNewTagInput(''))} />
                                                 </div>
                                             </div>
-                                            <div className="flex flex-wrap gap-4 p-10 bg-slate-50 rounded-[4rem] border-2 border-slate-100 min-h-[160px] shadow-inner">
+                                            <div className="flex flex-wrap gap-4 p-10 bg-slate-50 rounded-[4rem] border-2 border-slate-100 min-h-[160px] shadow-inner font-sans">
                                                 {tags.map(t => (
                                                     <button 
                                                         key={t} 
@@ -489,9 +476,9 @@
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-16">
-                                        <div className="space-y-8">
-                                            <label className="text-xl font-black text-slate-400 uppercase ml-3 tracking-widest italic">요일 배치</label>
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 font-sans">
+                                        <div className="space-y-8 font-sans">
+                                            <label className="text-xl font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans">요일 배치</label>
                                             <div className="flex gap-4 bg-slate-100 p-5 rounded-[3rem] shadow-inner">
                                                 {DAYS.map(d => <button key={d} onClick={() => {
                                                     const curr = sForm.days;
@@ -499,29 +486,25 @@
                                                 }} className={`flex-1 py-8 rounded-[2rem] text-xl font-black transition-all ${sForm.days.includes(d) ? 'bg-white text-slate-900 shadow-xl scale-105' : 'text-slate-400 hover:text-slate-500'}`}>{d}</button>)}
                                             </div>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-12">
-                                            <div className="space-y-8"><label className="text-xl font-black text-slate-400 uppercase ml-3 tracking-widest italic">시작 (HH:MM)</label>
-                                                <div className="flex items-center gap-6 bg-slate-50 p-8 rounded-[3rem] shadow-inner border-2 border-slate-100">
-                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-5xl" value={sForm.startH} onChange={e => setSForm({...sForm, startH: e.target.value})} />
-                                                    <span className="font-black text-slate-200 text-5xl">:</span>
-                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-5xl" value={sForm.startM} onChange={e => setSForm({...sForm, startM: e.target.value})} />
+                                        <div className="grid grid-cols-2 gap-12 font-sans">
+                                            <div className="space-y-8 font-sans"><label className="text-xl font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans">시작 (HH:MM)</label>
+                                                <div className="flex items-center gap-6 bg-slate-50 p-8 rounded-[3rem] shadow-inner border-2 border-slate-100 font-sans">
+                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-5xl font-sans" value={sForm.startH} onChange={e => setSForm({...sForm, startH: e.target.value})} />
+                                                    <span className="font-black text-slate-200 text-5xl font-sans">:</span>
+                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-5xl font-sans" value={sForm.startM} onChange={e => setSForm({...sForm, startM: e.target.value})} />
                                                 </div>
                                             </div>
-                                            <div className="space-y-8"><label className="text-xl font-black text-slate-400 uppercase ml-3 tracking-widest italic">종료 (HH:MM)</label>
-                                                <div className="flex items-center gap-6 bg-slate-50 p-8 rounded-[3rem] shadow-inner border-2 border-slate-100">
-                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-5xl" value={sForm.endH} onChange={e => setSForm({...sForm, endH: e.target.value})} />
-                                                    <span className="font-black text-slate-200 text-5xl">:</span>
-                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-5xl" value={sForm.endM} onChange={e => setSForm({...sForm, endM: e.target.value})} />
+                                            <div className="space-y-8 font-sans"><label className="text-xl font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans">종료 (HH:MM)</label>
+                                                <div className="flex items-center gap-6 bg-slate-50 p-8 rounded-[3rem] shadow-inner border-2 border-slate-100 font-sans">
+                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-5xl font-sans" value={sForm.endH} onChange={e => setSForm({...sForm, endH: e.target.value})} />
+                                                    <span className="font-black text-slate-200 text-5xl font-sans">:</span>
+                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-5xl font-sans" value={sForm.endM} onChange={e => setSForm({...sForm, endM: e.target.value})} />
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="space-y-8">
-                                        <label className="text-xl font-black text-slate-400 uppercase ml-3 tracking-widest italic">메모 및 세부 사항</label>
-                                        <textarea className="w-full border-4 border-slate-50 p-10 rounded-[3rem] font-bold outline-none focus:border-blue-500 transition-all bg-slate-50 shadow-inner text-2xl h-40" value={sForm.memo} onChange={e => setSForm({...sForm, memo: e.target.value})} placeholder="활동 관련 상세 내용을 입력하세요..." />
-                                    </div>
                                 </div>
-                                <div className="mt-20 flex gap-10">
+                                <div className="mt-20 flex gap-10 font-sans">
                                     <button onClick={() => setScheduleModal({ open: false, editId: null })} className="flex-1 py-10 font-black text-slate-400 uppercase tracking-[0.2em] text-2xl italic hover:text-slate-600 transition-colors">취소</button>
                                     <button onClick={handleSaveSchedule} className="flex-[3] py-10 bg-blue-600 text-white rounded-[4rem] font-black shadow-3xl shadow-blue-500/30 active:scale-95 transition-all text-4xl uppercase tracking-tighter italic">일정 확정</button>
                                 </div>
@@ -531,13 +514,13 @@
 
                     {/* 학생 정보 모달 */}
                     {studentModal.open && (
-                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-2xl flex items-center justify-center z-[300] p-10">
-                            <div className="bg-white p-20 rounded-[5rem] w-full max-w-xl shadow-2xl modal-animate border border-white/20 text-center">
-                                <h3 className="text-5xl font-black mb-12 text-slate-800 tracking-tight uppercase italic">{studentModal.editId ? "이름 변경" : "학생 등록"}</h3>
-                                <input type="text" value={studentModal.name} onChange={e => setStudentModal({...studentModal, name: e.target.value})} className="w-full border-4 border-slate-50 p-10 rounded-[3rem] outline-none focus:border-blue-500 font-black mb-16 transition-all bg-slate-50 shadow-inner text-5xl text-center" placeholder="이름" autoFocus onKeyDown={e => e.key === 'Enter' && handleSaveStudent()} />
-                                <div className="flex gap-8">
-                                    <button onClick={() => setStudentModal({ open: false, editId: null, name: '' })} className="flex-1 py-10 font-bold text-slate-400 hover:text-slate-600 transition-colors uppercase italic text-2xl">취소</button>
-                                    <button onClick={handleSaveStudent} className="flex-[2] py-10 bg-slate-900 text-white rounded-[3rem] font-black shadow-2xl active:scale-95 transition-all text-4xl uppercase tracking-tight">확인</button>
+                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-2xl flex items-center justify-center z-[300] p-10 font-sans">
+                            <div className="bg-white p-20 rounded-[5rem] w-full max-w-xl shadow-2xl modal-animate border border-white/20 text-center font-sans">
+                                <h3 className="text-5xl font-black mb-12 text-slate-800 tracking-tight uppercase italic font-sans">{studentModal.editId ? "이름 변경" : "학생 등록"}</h3>
+                                <input type="text" value={studentModal.name} onChange={e => setStudentModal({...studentModal, name: e.target.value})} className="w-full border-4 border-slate-50 p-10 rounded-[3rem] outline-none focus:border-blue-500 font-black mb-16 transition-all bg-slate-50 shadow-inner text-5xl text-center font-sans" placeholder="이름" autoFocus onKeyDown={e => e.key === 'Enter' && handleSaveStudent()} />
+                                <div className="flex gap-8 font-sans">
+                                    <button onClick={() => setStudentModal({ open: false, editId: null, name: '' })} className="flex-1 py-10 font-bold text-slate-400 hover:text-slate-600 transition-colors uppercase italic text-2xl font-sans">취소</button>
+                                    <button onClick={handleSaveStudent} className="flex-[2] py-10 bg-slate-900 text-white rounded-[3rem] font-black shadow-2xl active:scale-95 transition-all text-4xl uppercase tracking-tight font-sans">확인</button>
                                 </div>
                             </div>
                         </div>
