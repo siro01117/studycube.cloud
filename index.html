@@ -116,26 +116,38 @@
                 return { total, avg: Math.round(total / 7) };
             }, [filteredSchedules]);
 
-            // [STABLE EXPORT ENGINE]
+            // [STABLE & ALIGN-UP EXPORT ENGINE]
             const handleExport = () => {
                 if (!captureAreaRef.current || !current) return;
                 
-                // 폰트가 로드되지 않아 발생하는 텍스트 너비 오차 방지
+                // 폰트 로딩 대기 및 렌더링 동기화
                 document.fonts.ready.then(() => {
                     html2canvas(captureAreaRef.current, {
                         backgroundColor: "#ffffff",
-                        scale: 2, // scale 3은 일부 브라우저에서 메모리 이슈로 하단이 잘릴 수 있음
+                        scale: 2, // 해상도와 안정성의 최적 지점
                         useCORS: true,
                         allowTaint: true,
-                        scrollX: 0,
-                        scrollY: -window.scrollY,
                         onclone: (clonedDoc) => {
                             const area = clonedDoc.querySelector('.export-area');
                             if (area) {
+                                // 1. 물리적 제약 해제 (잘림 방지)
                                 area.style.height = 'auto';
                                 area.style.overflow = 'visible';
-                                area.querySelectorAll('*').forEach(el => {
-                                    el.style.overflow = 'visible';
+
+                                // 2. 텍스트 위치 강제 상단 정렬 (밀림 방지 핵심)
+                                const blocks = area.querySelectorAll('.absolute.rounded-3xl');
+                                blocks.forEach(block => {
+                                    block.style.paddingTop = '12px'; // 상단 패딩 축소 (기존 p-6에서 절반으로)
+                                    block.style.display = 'flex';
+                                    block.style.flexDirection = 'column';
+                                    block.style.justifyContent = 'flex-start';
+                                    
+                                    // 내부 스케줄 블록 여백 압축
+                                    const inner = block.querySelector('.schedule-block');
+                                    if (inner) {
+                                        inner.style.marginTop = '0px';
+                                        inner.style.gap = '4px';
+                                    }
                                 });
                             }
                         }
