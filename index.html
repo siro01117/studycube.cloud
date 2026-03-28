@@ -113,48 +113,52 @@
                 return { total, avg: Math.round(total / 7) };
             }, [filteredSchedules]);
 
-            // [ULTIMATE FIX] 폰트 Baseline 및 렌더링 오차 강제 교정 엔진
+            // [ENGINE FIX] 웹폰트 렌더링 오차 강제 보정 버전
             const handleExport = () => {
                 if (!captureAreaRef.current || !current) return;
                 
-                document.fonts.ready.then(() => {
-                    html2canvas(captureAreaRef.current, {
-                        backgroundColor: "#ffffff",
-                        scale: 2, 
-                        useCORS: true,
-                        allowTaint: true,
-                        onclone: (clonedDoc) => {
-                            const area = clonedDoc.querySelector('.export-area');
-                            if (area) {
-                                area.style.height = 'auto';
-                                area.style.overflow = 'visible';
+                // 폰트 로딩 대기 대신, 캡처 시점에 폰트 설정을 '초기화'하여 오차 제거
+                html2canvas(captureAreaRef.current, {
+                    backgroundColor: "#ffffff",
+                    scale: 2, // 3보다 안정적인 2 권장 (메모리 이슈 방지)
+                    useCORS: true,
+                    allowTaint: true,
+                    onclone: (clonedDoc) => {
+                        const area = clonedDoc.querySelector('.export-area');
+                        if (area) {
+                            // 1. 밀림의 주범인 Pretendard를 버리고 시스템 폰트로 강제 변경
+                            // 이렇게 하면 브라우저와 캔버스 간의 높이 계산 오차가 거의 사라집니다.
+                            area.style.fontFamily = 'Arial, sans-serif';
+                            area.style.height = 'auto';
+                            area.style.overflow = 'visible';
 
-                                // 1. 캡처 시에만 폰트를 시스템 폰트로 일시 변경 (밀림 현상 100% 제거)
-                                // Pretendard의 Canvas 높이 계산 버그를 회피합니다.
-                                area.style.fontFamily = 'sans-serif';
-
-                                const blocks = area.querySelectorAll('.absolute.rounded-3xl');
-                                blocks.forEach(block => {
-                                    // 2. 내부 여백을 0에 가깝게 압축하여 하단 공간 확보
-                                    block.style.padding = '8px 10px'; 
-                                    block.style.display = 'flex';
-                                    block.style.flexDirection = 'column';
-                                    block.style.justifyContent = 'flex-start';
-                                    
-                                    const inner = block.querySelector('.schedule-block');
-                                    if (inner) {
-                                        inner.style.marginTop = '0px';
-                                        inner.style.transform = 'translateY(-2px)'; // 미세 상단 조정
-                                    }
+                            // 2. 텍스트 컨테이너 정밀 타격 (6px 위로 + 줄간격 압축)
+                            const items = area.querySelectorAll('.schedule-block');
+                            items.forEach(el => {
+                                el.style.overflow = 'visible';
+                                el.style.lineHeight = '1.0'; // 줄간격을 최대한 붙임
+                                el.style.transform = 'translateY(-6px)'; // 요청하신 6px 상단 이동
+                                
+                                // 내부의 시간/제목 텍스트 마진 제거
+                                const children = el.querySelectorAll('*');
+                                children.forEach(child => {
+                                    child.style.marginTop = '0px';
+                                    child.style.marginBottom = '2px';
                                 });
-                            }
+                            });
+
+                            // 3. 블록 내부 여백 압축
+                            const blocks = area.querySelectorAll('.absolute.rounded-3xl');
+                            blocks.forEach(b => {
+                                b.style.paddingTop = '10px';
+                            });
                         }
-                    }).then(canvas => {
-                        const link = document.createElement('a');
-                        link.download = `${current.name}_주간계획표_스터디큐브.png`;
-                        link.href = canvas.toDataURL('image/png', 1.0);
-                        link.click();
-                    });
+                    }
+                }).then(canvas => {
+                    const link = document.createElement('a');
+                    link.download = `${current.name}_주간계획표_수정본.png`;
+                    link.href = canvas.toDataURL('image/png', 1.0);
+                    link.click();
                 });
             };
 
