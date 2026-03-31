@@ -1,499 +1,499 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>스터디큐브 통합 관리 시스템</title>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
-    <style>
-        @font-face {
-            font-family: 'Pretendard';
-            src: url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/woff2/Pretendard-Bold.woff2') format('woff2');
-            font-weight: 700; font-display: block;
-        }
-        body { font-family: "Pretendard", sans-serif; -webkit-font-smoothing: antialiased; background-color: #f8fafc; font-size: 18px; }
-        .custom-scrollbar::-webkit-scrollbar { width: 8px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        .modal-animate { animation: modalIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
-        @keyframes modalIn { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
-        
-        .time-slot { height: 100px; border-bottom: 1px solid #f1f5f9; }
-        
-        /* 캡처를 위한 물리적 캔버스 규격 (사용자 화면 크기 무시) */
-        .export-area { 
-            width: 1700px !important; 
-            min-width: 1700px !important; 
-            background: white !important; 
-            padding: 60px !important;
-            box-sizing: border-box !important;
-        }
-        
-        .grid-layout { display: grid !important; grid-template-columns: 0.7fr repeat(7, 1fr) !important; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>스터디큐브 통합 관리 시스템</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <style>
+        @font-face {
+            font-family: 'Pretendard';
+            src: url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/woff2/Pretendard-Bold.woff2') format('woff2');
+            font-weight: 700; font-display: block;
+        }
+        body { font-family: "Pretendard", sans-serif; -webkit-font-smoothing: antialiased; background-color: #f8fafc; font-size: 18px; }
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .modal-animate { animation: modalIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes modalIn { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: scale(1) translateY(0); } }
+        
+        .time-slot { height: 100px; border-bottom: 1px solid #f1f5f9; }
+        
+        /* 캡처를 위한 물리적 캔버스 규격 (사용자 화면 크기 무시) */
+        .export-area { 
+            width: 1700px !important; 
+            min-width: 1700px !important; 
+            background: white !important; 
+            padding: 60px !important;
+            box-sizing: border-box !important;
+        }
+        
+        .grid-layout { display: grid !important; grid-template-columns: 0.7fr repeat(7, 1fr) !important; }
 
-        /* GPT 안정화 3단계 적용 */
-        .stat-container { display: block !important; line-height: 1 !important; }
-        .stat-number { display: inline !important; font-weight: 900; vertical-align: baseline; }
-        .stat-unit { display: inline !important; font-weight: 700; vertical-align: baseline; opacity: 0.3; font-style: italic; }
-        .schedule-block { display: block !important; line-height: 1.2 !important; word-break: keep-all; transform: translateY(-1px); }
-    </style>
+        /* GPT 안정화 3단계 적용 */
+        .stat-container { display: block !important; line-height: 1 !important; }
+        .stat-number { display: inline !important; font-weight: 900; vertical-align: baseline; }
+        .stat-unit { display: inline !important; font-weight: 700; vertical-align: baseline; opacity: 0.3; font-style: italic; }
+        .schedule-block { display: block !important; line-height: 1.2 !important; word-break: keep-all; transform: translateY(-1px); }
+    </style>
 </head>
 <body class="overflow-hidden text-slate-900 font-medium">
-    <div id="root"></div>
+    <div id="root"></div>
 
-    <script type="text/babel">
-        const { useState, useMemo, useEffect, useRef } = React;
+    <script type="text/babel">
+        const { useState, useMemo, useEffect, useRef } = React;
 
-        const Icon = ({ name, size = 20, className = "" }) => {
-            const pascalName = name.split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join('');
-            const iconData = lucide.icons[pascalName] || lucide.icons[name];
-            if (!iconData) return null;
-            return (
-                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}
-                    dangerouslySetInnerHTML={{ __html: iconData.map(item => `<${item[0]} ${Object.entries(item[1]).map(([k, v]) => `${k}="${v}"`).join(' ')}></${item[0]}>`).join('') }}
-                />
-            );
-        };
+        const Icon = ({ name, size = 20, className = "" }) => {
+            const pascalName = name.split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join('');
+            const iconData = lucide.icons[pascalName] || lucide.icons[name];
+            if (!iconData) return null;
+            return (
+                <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className}
+                    dangerouslySetInnerHTML={{ __html: iconData.map(item => `<${item[0]} ${Object.entries(item[1]).map(([k, v]) => `${k}="${v}"`).join(' ')}></${item[0]}>`).join('') }}
+                />
+            );
+        };
 
-        const DAYS = ['월', '화', '수', '목', '금', '토', '일'];
-        const START_HOUR = 7;
-        const END_HOUR = 24;
-        const SLOT_HEIGHT = 100;
-        const TOTAL_MINUTES = (END_HOUR - START_HOUR + 1) * 60;
-        const DEFAULT_COLORS = ['#E59A9A', '#E5B981', '#DEE08C', '#A8D99C', '#8CCEDB', '#89AED9', '#A59BD9', '#D9A9D9', '#C2CDC9'];
+        const DAYS = ['월', '화', '수', '목', '금', '토', '일'];
+        const START_HOUR = 7;
+        const END_HOUR = 24;
+        const SLOT_HEIGHT = 100;
+        const TOTAL_MINUTES = (END_HOUR - START_HOUR + 1) * 60;
+        const DEFAULT_COLORS = ['#E59A9A', '#E5B981', '#DEE08C', '#A8D99C', '#8CCEDB', '#89AED9', '#A59BD9', '#D9A9D9', '#C2CDC9'];
 
-        const App = () => {
-            const captureRef = useRef(null);
-            const [students, setStudents] = useState(() => {
-                const saved = localStorage.getItem('studycube_v_final_ultra');
-                return saved ? JSON.parse(saved) : [{ id: Date.now(), name: '신규 학생', schedules: [], isDeleted: false }];
-            });
+        const App = () => {
+            const captureRef = useRef(null);
+            const [students, setStudents] = useState(() => {
+                const saved = localStorage.getItem('studycube_v_final_ultra');
+                return saved ? JSON.parse(saved) : [{ id: Date.now(), name: '신규 학생', schedules: [], isDeleted: false }];
+            });
 
-            const [selectedId, setSelectedId] = useState(null);
-            const [activeMenuId, setActiveMenuId] = useState(null); 
-            const [isEditMode, setIsEditMode] = useState(false);
-            const [showTrash, setShowTrash] = useState(false);
-            const [searchQuery, setSearchQuery] = useState('');
-            const [filterTitle, setFilterTitle] = useState('');
-            const [filterTag, setFilterTag] = useState('');
+            const [selectedId, setSelectedId] = useState(null);
+            const [activeMenuId, setActiveMenuId] = useState(null); 
+            const [isEditMode, setIsEditMode] = useState(false);
+            const [showTrash, setShowTrash] = useState(false);
+            const [searchQuery, setSearchQuery] = useState('');
+            const [filterTitle, setFilterTitle] = useState('');
+            const [filterTag, setFilterTag] = useState('');
 
-            const [studentModal, setStudentModal] = useState({ open: false, editId: null, name: '' });
-            const [scheduleModal, setScheduleModal] = useState({ open: false, editId: null });
-            const [detailModal, setDetailModal] = useState({ open: false, item: null });
-            
-            const [tags, setTags] = useState(['인강', '자습', '학원', '수업', '과외']);
-            const [newTagInput, setNewTagInput] = useState('');
-            const [customColors, setCustomColors] = useState([]);
-            const [tempColor, setTempColor] = useState('#3b82f6');
+            const [studentModal, setStudentModal] = useState({ open: false, editId: null, name: '' });
+            const [scheduleModal, setScheduleModal] = useState({ open: false, editId: null });
+            const [detailModal, setDetailModal] = useState({ open: false, item: null });
+            
+            const [tags, setTags] = useState(['인강', '자습', '학원', '수업', '과외']);
+            const [newTagInput, setNewTagInput] = useState('');
+            const [customColors, setCustomColors] = useState([]);
+            const [tempColor, setTempColor] = useState('#3b82f6');
 
-            const [sForm, setSForm] = useState({ title: '', days: [], startH: '09', startM: '00', endH: '10', endM: '00', tags: ['자습'], memo: '', color: DEFAULT_COLORS[0] });
+            const [sForm, setSForm] = useState({ title: '', days: [], startH: '09', startM: '00', endH: '10', endM: '00', tags: ['자습'], memo: '', color: DEFAULT_COLORS[0] });
 
-            useEffect(() => { localStorage.setItem('studycube_v_final_ultra', JSON.stringify(students)); }, [students]);
+            useEffect(() => { localStorage.setItem('studycube_v_final_ultra', JSON.stringify(students)); }, [students]);
 
-            const current = useMemo(() => students.find(s => s.id === selectedId), [students, selectedId]);
-            const filteredSchedules = useMemo(() => {
-                if (!current) return [];
-                return current.schedules.filter(s => 
-                    s.title.toLowerCase().includes(filterTitle.toLowerCase()) && 
-                    (filterTag === '' || (s.tags && s.tags.some(t => t.toLowerCase().includes(filterTag.toLowerCase()))))
-                );
-            }, [current, filterTitle, filterTag]);
+            const current = useMemo(() => students.find(s => s.id === selectedId), [students, selectedId]);
+            const filteredSchedules = useMemo(() => {
+                if (!current) return [];
+                return current.schedules.filter(s => 
+                    s.title.toLowerCase().includes(filterTitle.toLowerCase()) && 
+                    (filterTag === '' || (s.tags && s.tags.some(t => t.toLowerCase().includes(filterTag.toLowerCase()))))
+                );
+            }, [current, filterTitle, filterTag]);
 
-            const statistics = useMemo(() => {
-                const total = filteredSchedules.reduce((acc, s) => {
-                    const duration = (parseInt(s.endH)*60+parseInt(s.endM)) - (parseInt(s.startH)*60+parseInt(s.startM));
-                    return acc + (duration * s.days.length);
-                }, 0);
-                return { total, avg: Math.round(total / 7) };
-            }, [filteredSchedules]);
+            const statistics = useMemo(() => {
+                const total = filteredSchedules.reduce((acc, s) => {
+                    const duration = (parseInt(s.endH)*60+parseInt(s.endM)) - (parseInt(s.startH)*60+parseInt(s.startM));
+                    return acc + (duration * s.days.length);
+                }, 0);
+                return { total, avg: Math.round(total / 7) };
+            }, [filteredSchedules]);
 
-            // ✅ 물리적 전체 영역 정밀 캡처 엔진
-            const handleExport = async () => {
-                if (!captureRef.current || !current) return;
-                
-                // 1. 폰트 로딩 상태 동기화
-                await document.fonts.ready;
+            // ✅ 물리적 전체 영역 정밀 캡처 엔진
+            const handleExport = async () => {
+                if (!captureRef.current || !current) return;
+                
+                // 1. 폰트 로딩 상태 동기화
+                await document.fonts.ready;
 
-                // 2. 캡처 실행
-                html2canvas(captureRef.current, {
-                    backgroundColor: "#ffffff",
-                    scale: 3, 
-                    useCORS: true,
-                    allowTaint: true,
-                    // 캡처 전용 가상 캔버스 설정
-                    width: 1700,
-                    windowWidth: 1700,
-                    onclone: (clonedDoc) => {
-                        const area = clonedDoc.querySelector('.export-area');
-                        if (area) {
-                            area.style.height = 'auto'; // 전체 높이 확보
-                            area.style.overflow = 'visible';
-                            
-                            // 모든 하위 텍스트 레이아웃 강제 고정
-                            const allText = area.querySelectorAll('*');
-                            allText.forEach(el => {
-                                el.style.lineHeight = '1.2';
-                                el.style.verticalAlign = 'baseline';
-                            });
+                // 2. 캡처 실행
+                html2canvas(captureRef.current, {
+                    backgroundColor: "#ffffff",
+                    scale: 3, 
+                    useCORS: true,
+                    allowTaint: true,
+                    // 캡처 전용 가상 캔버스 설정
+                    width: 1700,
+                    windowWidth: 1700,
+                    onclone: (clonedDoc) => {
+                        const area = clonedDoc.querySelector('.export-area');
+                        if (area) {
+                            area.style.height = 'auto'; // 전체 높이 확보
+                            area.style.overflow = 'visible';
+                            
+                            // 모든 하위 텍스트 레이아웃 강제 고정
+                            const allText = area.querySelectorAll('*');
+                            allText.forEach(el => {
+                                el.style.lineHeight = '1.2';
+                                el.style.verticalAlign = 'baseline';
+                            });
 
-                            // 통계 컨테이너 간격 강제 보정
-                            const statContainers = area.querySelectorAll('.stat-container');
-                            statContainers.forEach(c => {
-                                c.style.display = 'flex';
-                                c.style.alignItems = 'flex-end';
-                                c.style.gap = '12px'; // 단위 사이 간격 확보
-                            });
-                        }
-                    }
-                }).then(canvas => {
-                    canvas.toBlob((blob) => { if (blob) saveAs(blob, `${current.name}_주간계획표.png`); }, 'image/png', 1.0);
-                });
-            };
+                            // 통계 컨테이너 간격 강제 보정
+                            const statContainers = area.querySelectorAll('.stat-container');
+                            statContainers.forEach(c => {
+                                c.style.display = 'flex';
+                                c.style.alignItems = 'flex-end';
+                                c.style.gap = '12px'; // 단위 사이 간격 확보
+                            });
+                        }
+                    }
+                }).then(canvas => {
+                    canvas.toBlob((blob) => { if (blob) saveAs(blob, `${current.name}_주간계획표.png`); }, 'image/png', 1.0);
+                });
+            };
 
-            const handleSaveStudent = () => {
-                if (!studentModal.name.trim()) return;
-                if (studentModal.editId) {
-                    setStudents(prev => prev.map(s => s.id === studentModal.editId ? { ...s, name: studentModal.name } : s));
-                } else {
-                    setStudents(prev => [...prev, { id: Date.now(), name: studentModal.name, schedules: [], isDeleted: false }]);
-                }
-                setStudentModal({ open: false, editId: null, name: '' });
-                setActiveMenuId(null);
-            };
+            const handleSaveStudent = () => {
+                if (!studentModal.name.trim()) return;
+                if (studentModal.editId) {
+                    setStudents(prev => prev.map(s => s.id === studentModal.editId ? { ...s, name: studentModal.name } : s));
+                } else {
+                    setStudents(prev => [...prev, { id: Date.now(), name: studentModal.name, schedules: [], isDeleted: false }]);
+                }
+                setStudentModal({ open: false, editId: null, name: '' });
+                setActiveMenuId(null);
+            };
 
-            const openScheduleModal = (item = null) => {
-                if (item) {
-                    setSForm({ ...item, tags: item.tags || [] });
-                    setScheduleModal({ open: true, editId: item.id });
-                } else {
-                    setSForm({ title: '', days: [], startH: '09', startM: '00', endH: '10', endM: '00', tags: [tags[0]], memo: '', color: DEFAULT_COLORS[0] });
-                    setScheduleModal({ open: true, editId: null });
-                }
-            };
+            const openScheduleModal = (item = null) => {
+                if (item) {
+                    setSForm({ ...item, tags: item.tags || [] });
+                    setScheduleModal({ open: true, editId: item.id });
+                } else {
+                    setSForm({ title: '', days: [], startH: '09', startM: '00', endH: '10', endM: '00', tags: [tags[0]], memo: '', color: DEFAULT_COLORS[0] });
+                    setScheduleModal({ open: true, editId: null });
+                }
+            };
 
-            const handleSaveSchedule = () => {
-                if (!sForm.title || sForm.days.length === 0) return;
-                const start = parseInt(sForm.startH)*60 + parseInt(sForm.startM);
-                const end = parseInt(sForm.endH)*60 + parseInt(sForm.endM);
-                if (end <= start) { alert("종료 시간은 시작보다 늦어야 합니다."); return; }
+            const handleSaveSchedule = () => {
+                if (!sForm.title || sForm.days.length === 0) return;
+                const start = parseInt(sForm.startH)*60 + parseInt(sForm.startM);
+                const end = parseInt(sForm.endH)*60 + parseInt(sForm.endM);
+                if (end <= start) { alert("종료 시간은 시작보다 늦어야 합니다."); return; }
 
-                const newSchedules = scheduleModal.editId 
-                    ? current.schedules.map(s => s.id === scheduleModal.editId ? { ...sForm, id: s.id } : s)
-                    : [...current.schedules, { ...sForm, id: Date.now() }];
-                
-                setStudents(prev => prev.map(s => s.id === selectedId ? { ...s, schedules: newSchedules } : s));
-                setScheduleModal({ open: false, editId: null });
-            };
+                const newSchedules = scheduleModal.editId 
+                    ? current.schedules.map(s => s.id === scheduleModal.editId ? { ...sForm, id: s.id } : s)
+                    : [...current.schedules, { ...sForm, id: Date.now() }];
+                
+                setStudents(prev => prev.map(s => s.id === selectedId ? { ...s, schedules: newSchedules } : s));
+                setScheduleModal({ open: false, editId: null });
+            };
 
-            const toggleTag = (t) => {
-                const currentTags = sForm.tags || [];
-                setSForm({ ...sForm, tags: currentTags.includes(t) ? currentTags.filter(tag => tag !== t) : [...currentTags, t] });
-            };
+            const toggleTag = (t) => {
+                const currentTags = sForm.tags || [];
+                setSForm({ ...sForm, tags: currentTags.includes(t) ? currentTags.filter(tag => tag !== t) : [...currentTags, t] });
+            };
 
-            const formatTime = (h, m) => `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+            const formatTime = (h, m) => `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 
-            return (
-                <div className="flex h-screen w-full bg-slate-50 overflow-hidden font-sans" onClick={() => setActiveMenuId(null)}>
-                    {/* 사이드바 */}
-                    <aside className="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-30 shadow-md">
-                        <div className="p-6 border-b border-slate-100 bg-slate-50/50">
-                            <h1 className="text-2xl font-black italic tracking-tighter uppercase text-slate-800 mb-6 text-center font-sans">Study Cube</h1>
-                            <button onClick={() => setStudentModal({ open: true, editId: null, name: '' })} className="w-full bg-blue-600 py-4 rounded-2xl font-black text-lg text-white shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3">
-                                <Icon name="user-plus" size={24} /> 학생 등록
-                            </button>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar font-sans">
-                            <div className="relative mb-6">
-                                <Icon name="search" size={20} className="absolute left-4 top-4 text-slate-300" />
-                                <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="학생 검색..." className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 pl-12 pr-4 text-lg focus:ring-2 focus:ring-blue-400 outline-none font-bold shadow-inner" />
-                            </div>
-                            {students.filter(s => s.isDeleted === showTrash && s.name.includes(searchQuery)).map(s => (
-                                <div key={s.id} onClick={() => setSelectedId(s.id)} className={`group p-6 rounded-2xl cursor-pointer border-2 flex items-center justify-between relative transition-all ${selectedId === s.id ? 'bg-blue-50 border-blue-400 shadow-md scale-[1.02]' : 'bg-white border-transparent hover:border-slate-200 hover:bg-slate-50'}`}>
-                                    <div className="font-black text-xl truncate flex-1 text-slate-800 font-sans">{s.name}</div>
-                                    <button onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === s.id ? null : s.id); }} className="p-2 text-slate-300 hover:text-slate-600 transition-colors"><Icon name="more-vertical" size={24} /></button>
-                                    {activeMenuId === s.id && (
-                                        <div className="absolute right-0 top-14 bg-white border border-slate-100 rounded-2xl shadow-2xl z-[100] p-2 w-44 animate-in fade-in zoom-in duration-150">
-                                            <button onClick={(e) => { e.stopPropagation(); setStudentModal({ open: true, editId: s.id, name: s.name }); }} className="w-full flex items-center gap-3 px-4 py-4 text-base font-bold text-slate-600 hover:bg-slate-50 rounded-xl transition-colors font-sans">이름 변경</button>
-                                            <button onClick={(e) => { e.stopPropagation(); setStudents(prev => prev.map(x => x.id === s.id ? {...x, isDeleted: true} : x)); }} className="w-full flex items-center gap-3 px-4 py-4 text-base font-bold text-red-500 hover:bg-red-50 rounded-xl transition-colors font-sans">데이터 삭제</button>
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-                        {selectedId && current && (
-                            <div className="h-[40%] border-t border-slate-200 flex flex-col bg-white overflow-hidden shadow-inner font-sans">
-                                <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-                                    <h3 className="text-base font-black text-slate-500 uppercase tracking-widest font-sans">일정 목록</h3>
-                                    <span className="text-sm font-black text-blue-600 bg-blue-100 px-3 py-1 rounded-full font-sans">{filteredSchedules.length} UNITS</span>
-                                </div>
-                                <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                                    {filteredSchedules.map(sched => (
-                                        <div key={sched.id} onClick={() => setDetailModal({ open: true, item: sched })} className="p-5 rounded-2xl border border-slate-100 hover:border-blue-200 cursor-pointer group bg-slate-50/30 transition-all shadow-sm font-sans">
-                                            <div className="flex items-center gap-3 mb-2 font-sans">
-                                                <div className="w-4 h-4 rounded-full shadow-sm" style={{ backgroundColor: sched.color }}></div>
-                                                <div className="font-black text-lg text-slate-800 truncate font-sans">{sched.title}</div>
-                                            </div>
-                                            <div className="flex flex-wrap gap-1.5 pl-7">
-                                                {(sched.tags || []).map(tag => (
-                                                    <span key={tag} className="text-xs font-black text-blue-500 bg-blue-50 px-2 py-0.5 rounded-md font-sans">{tag}</span>
-                                                ))}
-                                                <span className="bg-slate-100 px-2 py-0.5 rounded text-xs font-black text-slate-500 ml-auto font-sans">{sched.startH}:{sched.startM}</span>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </aside>
+            return (
+                <div className="flex h-screen w-full bg-slate-50 overflow-hidden font-sans" onClick={() => setActiveMenuId(null)}>
+                    {/* 사이드바 */}
+                    <aside className="w-80 bg-white border-r border-slate-200 flex flex-col shrink-0 z-30 shadow-md">
+                        <div className="p-6 border-b border-slate-100 bg-slate-50/50">
+                            <h1 className="text-2xl font-black italic tracking-tighter uppercase text-slate-800 mb-6 text-center font-sans">Study Cube</h1>
+                            <button onClick={() => setStudentModal({ open: true, editId: null, name: '' })} className="w-full bg-blue-600 py-4 rounded-2xl font-black text-lg text-white shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3">
+                                <Icon name="user-plus" size={24} /> 학생 등록
+                            </button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar font-sans">
+                            <div className="relative mb-6">
+                                <Icon name="search" size={20} className="absolute left-4 top-4 text-slate-300" />
+                                <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="학생 검색..." className="w-full bg-slate-50 border border-slate-100 rounded-2xl py-4 pl-12 pr-4 text-lg focus:ring-2 focus:ring-blue-400 outline-none font-bold shadow-inner" />
+                            </div>
+                            {students.filter(s => s.isDeleted === showTrash && s.name.includes(searchQuery)).map(s => (
+                                <div key={s.id} onClick={() => setSelectedId(s.id)} className={`group p-6 rounded-2xl cursor-pointer border-2 flex items-center justify-between relative transition-all ${selectedId === s.id ? 'bg-blue-50 border-blue-400 shadow-md scale-[1.02]' : 'bg-white border-transparent hover:border-slate-200 hover:bg-slate-50'}`}>
+                                    <div className="font-black text-xl truncate flex-1 text-slate-800 font-sans">{s.name}</div>
+                                    <button onClick={(e) => { e.stopPropagation(); setActiveMenuId(activeMenuId === s.id ? null : s.id); }} className="p-2 text-slate-300 hover:text-slate-600 transition-colors"><Icon name="more-vertical" size={24} /></button>
+                                    {activeMenuId === s.id && (
+                                        <div className="absolute right-0 top-14 bg-white border border-slate-100 rounded-2xl shadow-2xl z-[100] p-2 w-44 animate-in fade-in zoom-in duration-150">
+                                            <button onClick={(e) => { e.stopPropagation(); setStudentModal({ open: true, editId: s.id, name: s.name }); }} className="w-full flex items-center gap-3 px-4 py-4 text-base font-bold text-slate-600 hover:bg-slate-50 rounded-xl transition-colors font-sans">이름 변경</button>
+                                            <button onClick={(e) => { e.stopPropagation(); setStudents(prev => prev.map(x => x.id === s.id ? {...x, isDeleted: true} : x)); }} className="w-full flex items-center gap-3 px-4 py-4 text-base font-bold text-red-500 hover:bg-red-50 rounded-xl transition-colors font-sans">데이터 삭제</button>
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                        {selectedId && current && (
+                            <div className="h-[40%] border-t border-slate-200 flex flex-col bg-white overflow-hidden shadow-inner font-sans">
+                                <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                                    <h3 className="text-base font-black text-slate-500 uppercase tracking-widest font-sans">일정 목록</h3>
+                                    <span className="text-sm font-black text-blue-600 bg-blue-100 px-3 py-1 rounded-full font-sans">{filteredSchedules.length} UNITS</span>
+                                </div>
+                                <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                                    {filteredSchedules.map(sched => (
+                                        <div key={sched.id} onClick={() => setDetailModal({ open: true, item: sched })} className="p-5 rounded-2xl border border-slate-100 hover:border-blue-200 cursor-pointer group bg-slate-50/30 transition-all shadow-sm font-sans">
+                                            <div className="flex items-center gap-3 mb-2 font-sans">
+                                                <div className="w-4 h-4 rounded-full shadow-sm" style={{ backgroundColor: sched.color }}></div>
+                                                <div className="font-black text-lg text-slate-800 truncate font-sans">{sched.title}</div>
+                                            </div>
+                                            <div className="flex flex-wrap gap-1.5 pl-7">
+                                                {(sched.tags || []).map(tag => (
+                                                    <span key={tag} className="text-xs font-black text-blue-500 bg-blue-50 px-2 py-0.5 rounded-md font-sans">{tag}</span>
+                                                ))}
+                                                <span className="bg-slate-100 px-2 py-0.5 rounded text-xs font-black text-slate-500 ml-auto font-sans">{sched.startH}:{sched.startM}</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </aside>
 
-                    <main className="flex-1 flex flex-col relative bg-white overflow-hidden font-sans">
-                        {current ? (
-                            <>
-                                <header className="h-24 border-b border-slate-100 flex items-center justify-between px-10 shrink-0 bg-white z-10 shadow-sm font-sans">
-                                    <div className="flex items-center gap-6">
-                                        <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-2xl border border-slate-100 shadow-inner">
-                                            <input type="text" placeholder="제목 필터" value={filterTitle} onChange={e => setFilterTitle(e.target.value)} className="bg-transparent px-4 py-2 text-lg font-black outline-none border-r border-slate-200 w-48 font-sans" />
-                                            <input type="text" placeholder="태그 필터" value={filterTag} onChange={e => setFilterTag(e.target.value)} className="bg-transparent px-4 py-2 text-lg font-black outline-none w-48 font-sans" />
-                                        </div>
-                                        <h2 className="text-2xl font-black text-slate-800 tracking-tighter uppercase italic font-sans">{current.name} 시간표</h2>
-                                    </div>
-                                    <div className="flex items-center gap-4">
-                                        <button onClick={handleExport} className="flex items-center gap-3 px-10 py-4 bg-emerald-500 text-white rounded-2xl font-black text-lg shadow-xl active:scale-95 transition-all hover:bg-emerald-600 font-sans"><Icon name="download" size={24} /> 이미지 저장</button>
-                                        <button onClick={() => setIsEditMode(!isEditMode)} className={`flex items-center gap-3 px-10 py-4 rounded-2xl font-black text-lg transition-all shadow-xl font-sans ${isEditMode ? 'bg-slate-900 text-white shadow-slate-300' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}><Icon name={isEditMode ? "check" : "edit-3"} size={24} /> {isEditMode ? '저장 종료' : '일정 편집'}</button>
-                                    </div>
-                                </header>
-                                
-                                <div className="flex-1 overflow-auto bg-slate-50/50 p-12 custom-scrollbar font-sans">
-                                    <div ref={captureRef} className="export-area bg-white p-16 rounded-[4rem] shadow-2xl border border-slate-100 mx-auto font-sans">
-                                        <div className="mb-12 border-b-4 border-slate-900 pb-10 flex justify-between items-end font-sans">
-                                            <h1 className="text-4xl font-black text-slate-900 tracking-tight italic uppercase font-sans">{current.name} 주간 계획표</h1>
-                                            <span className="text-slate-400 font-black text-xl uppercase tracking-widest leading-none font-sans">| 스터디큐브</span>
-                                        </div>
+                    <main className="flex-1 flex flex-col relative bg-white overflow-hidden font-sans">
+                        {current ? (
+                            <>
+                                <header className="h-24 border-b border-slate-100 flex items-center justify-between px-10 shrink-0 bg-white z-10 shadow-sm font-sans">
+                                    <div className="flex items-center gap-6">
+                                        <div className="flex items-center gap-3 bg-slate-50 p-2 rounded-2xl border border-slate-100 shadow-inner">
+                                            <input type="text" placeholder="제목 필터" value={filterTitle} onChange={e => setFilterTitle(e.target.value)} className="bg-transparent px-4 py-2 text-lg font-black outline-none border-r border-slate-200 w-48 font-sans" />
+                                            <input type="text" placeholder="태그 필터" value={filterTag} onChange={e => setFilterTag(e.target.value)} className="bg-transparent px-4 py-2 text-lg font-black outline-none w-48 font-sans" />
+                                        </div>
+                                        <h2 className="text-2xl font-black text-slate-800 tracking-tighter uppercase italic font-sans">{current.name} 시간표</h2>
+                                    </div>
+                                    <div className="flex items-center gap-4">
+                                        <button onClick={handleExport} className="flex items-center gap-3 px-10 py-4 bg-emerald-500 text-white rounded-2xl font-black text-lg shadow-xl active:scale-95 transition-all hover:bg-emerald-600 font-sans"><Icon name="download" size={24} /> 이미지 저장</button>
+                                        <button onClick={() => setIsEditMode(!isEditMode)} className={`flex items-center gap-3 px-10 py-4 rounded-2xl font-black text-lg transition-all shadow-xl font-sans ${isEditMode ? 'bg-slate-900 text-white shadow-slate-300' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}><Icon name={isEditMode ? "check" : "edit-3"} size={24} /> {isEditMode ? '저장 종료' : '일정 편집'}</button>
+                                    </div>
+                                </header>
+                                
+                                <div className="flex-1 overflow-auto bg-slate-50/50 p-12 custom-scrollbar font-sans">
+                                    <div ref={captureRef} className="export-area bg-white p-16 rounded-[4rem] shadow-2xl border border-slate-100 mx-auto font-sans">
+                                        <div className="mb-12 border-b-4 border-slate-900 pb-10 flex justify-between items-end font-sans">
+                                            <h1 className="text-4xl font-black text-slate-900 tracking-tight italic uppercase font-sans">{current.name} 주간 계획표</h1>
+                                            <span className="text-slate-400 font-black text-xl uppercase tracking-widest leading-none font-sans">| 스터디큐브</span>
+                                        </div>
 
-                                        <div className="flex gap-12 font-sans">
-                                            <div className="w-80 shrink-0 space-y-10 font-sans">
-                                                <div className="bg-slate-900 text-white p-10 rounded-[3rem] shadow-2xl relative overflow-hidden font-sans">
-                                                    <h3 className="text-[14px] font-black uppercase tracking-[0.3em] opacity-30 mb-10 font-sans">CORE REPORT</h3>
-                                                    <div className="space-y-12 font-sans">
-                                                        <div className="flex flex-col font-sans">
-                                                            <p className="text-[12px] font-black opacity-40 uppercase mb-4 font-sans">Weekly Focus</p>
-                                                            <div className="stat-container font-black font-sans">
-                                                                <span className="text-6xl tracking-tighter stat-number font-sans">{Math.floor(statistics.total/60)}</span>
-                                                                <span className="text-2xl stat-unit font-sans">H</span>
-                                                                <span className="text-6xl tracking-tighter stat-number ml-12 font-sans">{statistics.total%60}</span>
-                                                                <span className="text-2xl stat-unit font-sans">M</span>
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex flex-col font-sans">
-                                                            <p className="text-[12px] font-black opacity-40 uppercase mb-4 font-sans">Daily Average</p>
-                                                            <div className="stat-container text-blue-400 font-black font-sans">
-                                                                <span className="text-6xl tracking-tighter stat-number font-sans">{Math.floor(statistics.avg/60)}</span>
-                                                                <span className="text-2xl stat-unit font-sans">H</span>
-                                                                <span className="text-6xl tracking-tighter stat-number ml-12 font-sans">{statistics.avg%60}</span>
-                                                                <span className="text-2xl stat-unit font-sans">M</span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                <div className="space-y-5 font-sans">
-                                                    <h3 className="text-[14px] font-black text-slate-400 uppercase tracking-widest ml-1 font-sans">INDEXING</h3>
-                                                    {filteredSchedules.map(sched => (
-                                                        <div key={sched.id} className="p-6 rounded-[2rem] border-2 border-slate-50 flex items-start gap-5 bg-white shadow-sm transition-transform hover:translate-x-1 font-sans">
-                                                            <div className="w-3 h-16 rounded-full shrink-0 font-sans" style={{ backgroundColor: sched.color }}></div>
-                                                            <div className="overflow-hidden flex-1 pt-1 font-sans">
-                                                                <p className="font-black text-xl text-slate-800 truncate mb-1.5 font-sans">{sched.title}</p>
-                                                                <div className="flex flex-wrap gap-1.5 font-sans font-sans">
-                                                                    {(sched.tags || []).map(tag => (
-                                                                        <span key={tag} className="text-[10px] font-black text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded font-sans">{tag}</span>
-                                                                    ))}
-                                                                    <span className="text-[10px] font-black text-slate-400 uppercase ml-auto font-sans">{sched.startH}:{sched.startM}</span>
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
+                                        <div className="flex gap-12 font-sans">
+                                            <div className="w-80 shrink-0 space-y-10 font-sans">
+                                                <div className="bg-slate-900 text-white p-10 rounded-[3rem] shadow-2xl relative overflow-hidden font-sans">
+                                                    <h3 className="text-[14px] font-black uppercase tracking-[0.3em] opacity-30 mb-10 font-sans">CORE REPORT</h3>
+                                                    <div className="space-y-12 font-sans">
+                                                        <div className="flex flex-col font-sans">
+                                                            <p className="text-[12px] font-black opacity-40 uppercase mb-4 font-sans">Weekly Focus</p>
+                                                            <div className="stat-container font-black font-sans">
+                                                                <span className="text-6xl tracking-tighter stat-number font-sans">{Math.floor(statistics.total/60)}</span>
+                                                                <span className="text-2xl stat-unit font-sans">H</span>
+                                                                <span className="text-6xl tracking-tighter stat-number ml-12 font-sans">{statistics.total%60}</span>
+                                                                <span className="text-2xl stat-unit font-sans">M</span>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex flex-col font-sans">
+                                                            <p className="text-[12px] font-black opacity-40 uppercase mb-4 font-sans">Daily Average</p>
+                                                            <div className="stat-container text-blue-400 font-black font-sans">
+                                                                <span className="text-6xl tracking-tighter stat-number font-sans">{Math.floor(statistics.avg/60)}</span>
+                                                                <span className="text-2xl stat-unit font-sans">H</span>
+                                                                <span className="text-6xl tracking-tighter stat-number ml-12 font-sans">{statistics.avg%60}</span>
+                                                                <span className="text-2xl stat-unit font-sans">M</span>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="space-y-5 font-sans">
+                                                    <h3 className="text-[14px] font-black text-slate-400 uppercase tracking-widest ml-1 font-sans">INDEXING</h3>
+                                                    {filteredSchedules.map(sched => (
+                                                        <div key={sched.id} className="p-6 rounded-[2rem] border-2 border-slate-50 flex items-start gap-5 bg-white shadow-sm transition-transform hover:translate-x-1 font-sans">
+                                                            <div className="w-3 h-16 rounded-full shrink-0 font-sans" style={{ backgroundColor: sched.color }}></div>
+                                                            <div className="overflow-hidden flex-1 pt-1 font-sans">
+                                                                <p className="font-black text-xl text-slate-800 truncate mb-1.5 font-sans">{sched.title}</p>
+                                                                <div className="flex flex-wrap gap-1.5 font-sans font-sans">
+                                                                    {(sched.tags || []).map(tag => (
+                                                                        <span key={tag} className="text-[10px] font-black text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded font-sans">{tag}</span>
+                                                                    ))}
+                                                                    <span className="text-[10px] font-black text-slate-400 uppercase ml-auto font-sans">{sched.startH}:{sched.startM}</span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
 
-                                            <div className="flex-1 grid-layout grid divide-x-2 divide-slate-100 border-2 border-slate-100 rounded-[3.5rem] overflow-hidden shadow-2xl bg-white font-sans">
-                                                <div className="bg-slate-50/50 flex flex-col text-center font-sans">
-                                                    <div className="h-20 border-b-4 border-slate-900 flex items-center justify-center text-[14px] font-black text-slate-900 uppercase bg-white italic tracking-tighter font-sans">TIME</div>
-                                                    {Array.from({ length: END_HOUR - START_HOUR + 1 }).map((_, i) => (
-                                                        <div key={i} className="time-slot flex items-start justify-center pt-6 text-[18px] font-black text-slate-300 font-sans">
-                                                            {START_HOUR + i < 24 ? START_HOUR + i : START_HOUR + i - 24}
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                                {DAYS.map(day => (
-                                                    <div key={day} className="flex flex-col relative group min-w-[160px] font-sans">
-                                                        <div className="h-20 border-b-4 border-slate-900 flex items-center justify-center text-xl font-black text-slate-900 bg-white uppercase tracking-tighter font-sans">{day}요일</div>
-                                                        <div className="flex-1 relative bg-white/40 font-sans">
-                                                            {Array.from({ length: END_HOUR - START_HOUR + 1 }).map((_, i) => (<div key={i} className="time-slot border-dotted border-b border-slate-100 font-sans"></div>))}
-                                                            {filteredSchedules.filter(a => a.days.includes(day)).map(a => {
-                                                                const start = (parseInt(a.startH) * 60 + parseInt(a.startM)) - (START_HOUR * 60);
-                                                                const dur = (parseInt(a.endH) * 60 + parseInt(a.endM)) - (parseInt(a.startH) * 60 + parseInt(a.startM));
-                                                                const totalH = (END_HOUR - START_HOUR + 1) * SLOT_HEIGHT;
-                                                                const topPos = (start / TOTAL_MINUTES) * totalH;
-                                                                const blockH = (dur / TOTAL_MINUTES) * totalH;
-                                                                return (
-                                                                    <div key={a.id} onClick={() => isEditMode ? openScheduleModal(a) : setDetailModal({ open: true, item: a })} 
-                                                                        className={`absolute left-1.5 right-1.5 rounded-3xl p-6 text-slate-900 shadow-xl border border-black/5 flex flex-col justify-start overflow-hidden transition-all hover:scale-[1.04] hover:z-20 cursor-pointer font-sans ${isEditMode ? 'ring-4 ring-blue-500/40 ring-offset-2' : ''}`}
-                                                                        style={{ top: `${topPos}px`, height: `${blockH}px`, backgroundColor: a.color }}>
-                                                                        <div className="flex flex-col h-full pointer-events-none schedule-block font-sans">
-                                                                            <div className="flex justify-between items-start mb-2 font-sans font-sans">
-                                                                                <span className="truncate leading-tight font-black text-[18px] uppercase tracking-tighter font-sans">{a.title}</span>
-                                                                            </div>
-                                                                            {blockH > 65 && (
-                                                                                <div className="text-[12px] font-black opacity-80 tracking-tighter mb-2 flex items-center gap-1.5 whitespace-nowrap overflow-visible font-sans">
-                                                                                    <Icon name="clock" size={14} className="opacity-40 font-sans" />
-                                                                                    {formatTime(a.startH, a.startM)} → {formatTime(a.endH, a.endM)}
-                                                                                </div>
-                                                                            )}
-                                                                            {blockH > 85 && a.tags && a.tags.length > 0 && (
-                                                                                <div className="flex flex-wrap gap-1 mb-2 font-sans">
-                                                                                    {a.tags.map(tag => (<span key={tag} className="bg-white/70 px-2 py-0.5 rounded-lg text-[10px] font-black uppercase shrink-0 border border-black/5 shadow-sm text-slate-800 font-sans">{tag}</span>))}
-                                                                                </div>
-                                                                            )}
-                                                                            {blockH > 130 && a.memo && (<div className="text-[12px] font-bold leading-relaxed opacity-60 border-t border-black/10 pt-3 truncate-5 font-sans">{a.memo}</div>)}
-                                                                        </div>
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
+                                            <div className="flex-1 grid-layout grid divide-x-2 divide-slate-100 border-2 border-slate-100 rounded-[3.5rem] overflow-hidden shadow-2xl bg-white font-sans">
+                                                <div className="bg-slate-50/50 flex flex-col text-center font-sans">
+                                                    <div className="h-20 border-b-4 border-slate-900 flex items-center justify-center text-[14px] font-black text-slate-900 uppercase bg-white italic tracking-tighter font-sans">TIME</div>
+                                                    {Array.from({ length: END_HOUR - START_HOUR + 1 }).map((_, i) => (
+                                                        <div key={i} className="time-slot flex items-start justify-center pt-6 text-[18px] font-black text-slate-300 font-sans">
+                                                            {START_HOUR + i < 24 ? START_HOUR + i : START_HOUR + i - 24}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                {DAYS.map(day => (
+                                                    <div key={day} className="flex flex-col relative group min-w-[160px] font-sans">
+                                                        <div className="h-20 border-b-4 border-slate-900 flex items-center justify-center text-xl font-black text-slate-900 bg-white uppercase tracking-tighter font-sans">{day}요일</div>
+                                                        <div className="flex-1 relative bg-white/40 font-sans">
+                                                            {Array.from({ length: END_HOUR - START_HOUR + 1 }).map((_, i) => (<div key={i} className="time-slot border-dotted border-b border-slate-100 font-sans"></div>))}
+                                                            {filteredSchedules.filter(a => a.days.includes(day)).map(a => {
+                                                                const start = (parseInt(a.startH) * 60 + parseInt(a.startM)) - (START_HOUR * 60);
+                                                                const dur = (parseInt(a.endH) * 60 + parseInt(a.endM)) - (parseInt(a.startH) * 60 + parseInt(a.startM));
+                                                                const totalH = (END_HOUR - START_HOUR + 1) * SLOT_HEIGHT;
+                                                                const topPos = (start / TOTAL_MINUTES) * totalH;
+                                                                const blockH = (dur / TOTAL_MINUTES) * totalH;
+                                                                return (
+                                                                    <div key={a.id} onClick={() => isEditMode ? openScheduleModal(a) : setDetailModal({ open: true, item: a })} 
+                                                                        className={`absolute left-1.5 right-1.5 rounded-3xl p-6 text-slate-900 shadow-xl border border-black/5 flex flex-col justify-start overflow-hidden transition-all hover:scale-[1.04] hover:z-20 cursor-pointer font-sans ${isEditMode ? 'ring-4 ring-blue-500/40 ring-offset-2' : ''}`}
+                                                                        style={{ top: `${topPos}px`, height: `${blockH}px`, backgroundColor: a.color }}>
+                                                                        <div className="flex flex-col h-full pointer-events-none schedule-block font-sans">
+                                                                            <div className="flex justify-between items-start mb-2 font-sans font-sans">
+                                                                                <span className="truncate leading-tight font-black text-[18px] uppercase tracking-tighter font-sans">{a.title}</span>
+                                                                            </div>
+                                                                            {blockH > 65 && (
+                                                                                <div className="text-[12px] font-black opacity-80 tracking-tighter mb-2 flex items-center gap-1.5 whitespace-nowrap overflow-visible font-sans">
+                                                                                    <Icon name="clock" size={14} className="opacity-40 font-sans" />
+                                                                                    {formatTime(a.startH, a.startM)} → {formatTime(a.endH, a.endM)}
+                                                                                </div>
+                                                                            )}
+                                                                            {blockH > 85 && a.tags && a.tags.length > 0 && (
+                                                                                <div className="flex flex-wrap gap-1 mb-2 font-sans">
+                                                                                    {a.tags.map(tag => (<span key={tag} className="bg-white/70 px-2 py-0.5 rounded-lg text-[10px] font-black uppercase shrink-0 border border-black/5 shadow-sm text-slate-800 font-sans">{tag}</span>))}
+                                                                                </div>
+                                                                            )}
+                                                                            {blockH > 130 && a.memo && (<div className="text-[12px] font-bold leading-relaxed opacity-60 border-t border-black/10 pt-3 truncate-5 font-sans">{a.memo}</div>)}
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
 
-                                {isEditMode && (<button onClick={() => openScheduleModal()} className="absolute bottom-12 right-12 w-28 h-28 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-all z-20 hover:bg-blue-700 shadow-blue-500/40 font-sans"><Icon name="plus" size={56} /></button>)}
-                            </>
-                        ) : (
-                            <div className="flex-1 flex flex-col items-center justify-center text-slate-300 bg-slate-50 font-sans font-sans">
-                                <div className="w-56 h-56 bg-white rounded-[5rem] flex items-center justify-center shadow-inner mb-12 border border-slate-100 font-sans font-sans"><Icon name="users" size={100} className="opacity-20 text-slate-400 font-sans" /></div>
-                                <p className="font-black text-3xl text-slate-400 uppercase tracking-widest italic font-sans font-sans">학생 데이터를 먼저 선택해 주십시오</p>
-                            </div>
-                        )}
-                    </main>
+                                {isEditMode && (<button onClick={() => openScheduleModal()} className="absolute bottom-12 right-12 w-28 h-28 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center active:scale-90 transition-all z-20 hover:bg-blue-700 shadow-blue-500/40 font-sans"><Icon name="plus" size={56} /></button>)}
+                            </>
+                        ) : (
+                            <div className="flex-1 flex flex-col items-center justify-center text-slate-300 bg-slate-50 font-sans font-sans">
+                                <div className="w-56 h-56 bg-white rounded-[5rem] flex items-center justify-center shadow-inner mb-12 border border-slate-100 font-sans font-sans"><Icon name="users" size={100} className="opacity-20 text-slate-400 font-sans" /></div>
+                                <p className="font-black text-3xl text-slate-400 uppercase tracking-widest italic font-sans font-sans">학생 데이터를 먼저 선택해 주십시오</p>
+                            </div>
+                        )}
+                    </main>
 
-                    {/* 모달 윈도우 프로토콜 유지 (상세내용 생략) */}
-                    {detailModal.open && detailModal.item && (
-                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xl flex items-center justify-center z-[150] p-10 font-sans">
-                            <div className="bg-white rounded-[4rem] w-full max-w-xl shadow-2xl overflow-hidden modal-animate border border-white/20 font-sans font-sans font-sans font-sans font-sans">
-                                <div className="h-52 relative font-sans font-sans font-sans font-sans font-sans" style={{ backgroundColor: detailModal.item.color }}>
-                                    <button onClick={() => setDetailModal({ open: false, item: null })} className="absolute top-10 right-10 p-4 bg-black/20 text-white rounded-full transition-all hover:bg-black/40 font-sans font-sans font-sans"><Icon name="x" size={32} /></button>
-                                    <div className="absolute -bottom-10 left-16 bg-white p-7 rounded-[2.5rem] shadow-2xl border border-slate-50 font-sans font-sans font-sans font-sans font-sans font-sans"><Icon name="bookmark" className="text-slate-800 font-sans font-sans font-sans font-sans font-sans" size={44} /></div>
-                                </div>
-                                <div className="p-16 pt-20 space-y-12 text-slate-800 font-sans font-sans font-sans font-sans font-sans font-sans">
-                                    <div><h3 className="text-5xl font-black mb-5 italic tracking-tighter text-slate-900 font-sans font-sans font-sans font-sans font-sans font-sans font-sans">{detailModal.item.title}</h3>
-                                        <div className="flex flex-wrap gap-4 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                            {(detailModal.item.tags || []).map(tag => (<span key={tag} className="px-6 py-2.5 bg-slate-900 text-white rounded-2xl text-[16px] font-black uppercase tracking-widest font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">{tag}</span>))}
-                                            {detailModal.item.days.map(d => <span key={d} className="px-6 py-2.5 bg-slate-100 rounded-2xl text-[16px] font-black text-slate-600 font-sans font-sans font-sans font-sans font-sans font-sans font-sans">{d}요일</span>)}</div></div>
-                                    <div className="bg-slate-50 p-10 rounded-[3rem] border-2 border-slate-100 shadow-inner space-y-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                        <div className="flex items-center gap-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                            <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-md text-slate-400 border border-slate-100 font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><Icon name="clock" size={32} /></div>
-                                            <div className="text-4xl font-black italic tracking-tighter text-slate-800 font-sans font-sans font-sans font-sans font-sans font-sans font-sans">{formatTime(detailModal.item.startH, detailModal.item.startM)} → {formatTime(detailModal.item.endH, detailModal.item.endM)}</div></div>
-                                        {detailModal.item.memo && (<div className="flex gap-8 pt-8 border-t-2 border-slate-200/50 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                                <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-md text-slate-400 shrink-0 border border-slate-100 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><Icon name="file-text" size={32} /></div>
-                                                <p className="text-xl font-bold text-slate-600 leading-relaxed pt-2 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">{detailModal.item.memo}</p></div>)}</div>
-                                    <div className="flex gap-6 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                        <button onClick={() => { openScheduleModal(detailModal.item); setDetailModal({ open: false, item: null }); setIsEditMode(true); }} className="flex-1 py-7 bg-slate-900 text-white rounded-[2.5rem] font-black shadow-2xl active:scale-95 transition-all text-lg uppercase tracking-tight font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">수정하기</button>
-                                        <button onClick={() => { if(confirm("삭제하시겠습니까?")) { setStudents(prev => prev.map(s => s.id === selectedId ? {...s, schedules: s.schedules.filter(x => x.id !== detailModal.item.id)} : s)); setDetailModal({open: false, item: null}); } }} className="p-8 bg-red-50 text-red-500 rounded-[2.5rem] active:scale-95 transition-colors hover:bg-red-100 shadow-lg font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><Icon name="trash-2" size={36} /></button></div>
-                                </div>
-                            </div>
-                        </div>
-                    )}
+                    {/* 모달 윈도우 프로토콜 유지 (상세내용 생략) */}
+                    {detailModal.open && detailModal.item && (
+                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xl flex items-center justify-center z-[150] p-10 font-sans">
+                            <div className="bg-white rounded-[4rem] w-full max-w-xl shadow-2xl overflow-hidden modal-animate border border-white/20 font-sans font-sans font-sans font-sans font-sans">
+                                <div className="h-52 relative font-sans font-sans font-sans font-sans font-sans" style={{ backgroundColor: detailModal.item.color }}>
+                                    <button onClick={() => setDetailModal({ open: false, item: null })} className="absolute top-10 right-10 p-4 bg-black/20 text-white rounded-full transition-all hover:bg-black/40 font-sans font-sans font-sans"><Icon name="x" size={32} /></button>
+                                    <div className="absolute -bottom-10 left-16 bg-white p-7 rounded-[2.5rem] shadow-2xl border border-slate-50 font-sans font-sans font-sans font-sans font-sans font-sans"><Icon name="bookmark" className="text-slate-800 font-sans font-sans font-sans font-sans font-sans" size={44} /></div>
+                                </div>
+                                <div className="p-16 pt-20 space-y-12 text-slate-800 font-sans font-sans font-sans font-sans font-sans font-sans">
+                                    <div><h3 className="text-5xl font-black mb-5 italic tracking-tighter text-slate-900 font-sans font-sans font-sans font-sans font-sans font-sans font-sans">{detailModal.item.title}</h3>
+                                        <div className="flex flex-wrap gap-4 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                            {(detailModal.item.tags || []).map(tag => (<span key={tag} className="px-6 py-2.5 bg-slate-900 text-white rounded-2xl text-[16px] font-black uppercase tracking-widest font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">{tag}</span>))}
+                                            {detailModal.item.days.map(d => <span key={d} className="px-6 py-2.5 bg-slate-100 rounded-2xl text-[16px] font-black text-slate-600 font-sans font-sans font-sans font-sans font-sans font-sans font-sans">{d}요일</span>)}</div></div>
+                                    <div className="bg-slate-50 p-10 rounded-[3rem] border-2 border-slate-100 shadow-inner space-y-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                        <div className="flex items-center gap-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                            <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-md text-slate-400 border border-slate-100 font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><Icon name="clock" size={32} /></div>
+                                            <div className="text-4xl font-black italic tracking-tighter text-slate-800 font-sans font-sans font-sans font-sans font-sans font-sans font-sans">{formatTime(detailModal.item.startH, detailModal.item.startM)} → {formatTime(detailModal.item.endH, detailModal.item.endM)}</div></div>
+                                        {detailModal.item.memo && (<div className="flex gap-8 pt-8 border-t-2 border-slate-200/50 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                                <div className="w-16 h-16 bg-white rounded-3xl flex items-center justify-center shadow-md text-slate-400 shrink-0 border border-slate-100 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><Icon name="file-text" size={32} /></div>
+                                                <p className="text-xl font-bold text-slate-600 leading-relaxed pt-2 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">{detailModal.item.memo}</p></div>)}</div>
+                                    <div className="flex gap-6 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                        <button onClick={() => { openScheduleModal(detailModal.item); setDetailModal({ open: false, item: null }); setIsEditMode(true); }} className="flex-1 py-7 bg-slate-900 text-white rounded-[2.5rem] font-black shadow-2xl active:scale-95 transition-all text-lg uppercase tracking-tight font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">수정하기</button>
+                                        <button onClick={() => { if(confirm("삭제하시겠습니까?")) { setStudents(prev => prev.map(s => s.id === selectedId ? {...s, schedules: s.schedules.filter(x => x.id !== detailModal.item.id)} : s)); setDetailModal({open: false, item: null}); } }} className="p-8 bg-red-50 text-red-500 rounded-[2.5rem] active:scale-95 transition-colors hover:bg-red-100 shadow-lg font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><Icon name="trash-2" size={36} /></button></div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
-                    {scheduleModal.open && (
-                        <div className="fixed inset-0 bg-slate-900/85 backdrop-blur-2xl flex items-center justify-center z-[200] p-10 font-sans font-sans font-sans font-sans font-sans font-sans">
-                            <div className="bg-white p-16 rounded-[4.5rem] w-full max-w-6xl shadow-2xl border border-white/20 modal-animate max-h-[95vh] overflow-y-auto custom-scrollbar font-sans font-sans font-sans font-sans font-sans font-sans">
-                                <div className="flex justify-between items-center mb-16 font-sans font-sans font-sans font-sans font-sans font-sans">
-                                    <h3 className="text-5xl font-black text-slate-800 tracking-tighter uppercase italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans">일정 수립 모드</h3>
-                                    <button onClick={() => setScheduleModal({ open: false, editId: null })} className="text-slate-300 hover:text-slate-900 transition-colors bg-slate-50 p-5 rounded-full font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><Icon name="x" size={48} /></button></div>
-                                <div className="space-y-16 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                        <div className="space-y-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                            <label className="text-xl font-black text-slate-400 uppercase tracking-widest ml-3 italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">활동 제목</label>
-                                            <input type="text" className="w-full border-4 border-slate-50 p-10 rounded-[3rem] font-black outline-none focus:border-blue-500 transition-all bg-slate-50 shadow-inner text-4xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={sForm.title} onChange={e => setSForm({...sForm, title: e.target.value})} placeholder="활동 이름" /></div>
-                                        <div className="space-y-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                            <div className="flex justify-between items-center ml-3 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><label className="text-xl font-black text-slate-400 uppercase tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">태그 시스템 (중복 가능)</label>
-                                                <div className="flex gap-4 bg-white p-2 px-6 rounded-2xl shadow-md border-2 border-slate-100 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                                    <input type="text" value={newTagInput} onChange={e => setNewTagInput(e.target.value)} placeholder="+ 추가" className="text-lg font-black outline-none w-32 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" onKeyDown={e => e.key === 'Enter' && (setTags([...tags, newTagInput]), toggleTag(newTagInput), setNewTagInput(''))} /></div></div>
-                                            <div className="flex flex-wrap gap-4 p-10 bg-slate-50 rounded-[4rem] border-2 border-slate-100 min-h-[160px] shadow-inner font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                                {tags.map(t => (<button key={t} onClick={() => toggleTag(t)} className={`px-10 py-5 rounded-[2rem] text-xl font-black transition-all font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans ${(sForm.tags || []).includes(t) ? 'bg-slate-900 text-white shadow-xl scale-110' : 'bg-white text-slate-400 border-2 border-slate-200 shadow-sm hover:border-slate-400 font-sans font-sans font-sans'}`}>{t}</button>))}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                        <div className="space-y-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                            <label className="text-xl font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">요일 배치</label>
-                                            <div className="flex gap-4 bg-slate-100 p-5 rounded-[3rem] shadow-inner font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                                {DAYS.map(d => <button key={d} onClick={() => { const curr = sForm.days; setSForm({...sForm, days: curr.includes(d) ? curr.filter(x => x !== d) : [...curr, d]}); }} className={`flex-1 py-8 rounded-[2rem] text-xl font-black transition-all font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans ${sForm.days.includes(d) ? 'bg-white text-slate-900 shadow-xl scale-105' : 'text-slate-400 hover:text-slate-500 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans'}`}>{d}</button>)}
-                                            </div>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-12 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                            <div className="space-y-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><label className="text-xl font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">Start (HH:MM)</label>
-                                                <div className="flex items-center gap-6 bg-slate-50 p-8 rounded-[3rem] shadow-inner border-2 border-slate-100 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-5xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={sForm.startH} onChange={e => setSForm({...sForm, startH: e.target.value})} />
-                                                    <span className="font-black text-slate-200 text-5xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">:</span>
-                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-5xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={sForm.startM} onChange={e => setSForm({...sForm, startM: e.target.value})} /></div></div>
-                                            <div className="space-y-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><label className="text-xl font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">End (HH:MM)</label>
-                                                <div className="flex items-center gap-6 bg-slate-50 p-8 rounded-[3rem] shadow-inner border-2 border-slate-100 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-5xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={sForm.endH} onChange={e => setSForm({...sForm, endH: e.target.value})} />
-                                                    <span className="font-black text-slate-200 text-5xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">:</span>
-                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-5xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={sForm.endM} onChange={e => setSForm({...sForm, endM: e.target.value})} /></div></div>
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                        <div className="space-y-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                            <label className="text-xl font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">Memo Log</label>
-                                            <textarea className="w-full border-4 border-slate-50 p-10 rounded-[3rem] font-bold outline-none focus:border-blue-500 bg-slate-50 shadow-inner h-56 resize-none transition-all font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans text-2xl font-sans" value={sForm.memo} onChange={e => setSForm({...sForm, memo: e.target.value})} placeholder="활동 세부 사항..." /></div>
-                                        <div className="space-y-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                            <label className="text-base font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">Visual Energy Index</label>
-                                            <div className="flex flex-wrap gap-5 bg-slate-50 p-10 rounded-[3.5rem] border-2 border-slate-100 items-center shadow-inner font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                                {[...DEFAULT_COLORS, ...customColors].map(c => (<button key={c} onClick={() => setSForm({...sForm, color: c})} className={`w-14 h-14 rounded-full border-4 transition-all font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans hover:scale-110 ${sForm.color === c ? 'border-slate-800 shadow-2xl scale-110 ring-4 ring-slate-800/10' : 'border-white shadow-md font-sans font-sans'}`} style={{ backgroundColor: c }} />))}
-                                                <div className="flex gap-4 items-center bg-white p-3 rounded-3xl border-2 border-slate-200 shadow-lg ml-3 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                                    <div className="w-12 h-12 rounded-2xl relative overflow-hidden border-2 border-slate-100 cursor-pointer font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                                        <input type="color" className="absolute -inset-2 cursor-pointer scale-150 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={tempColor} onChange={e => setTempColor(e.target.value)} /></div>
-                                                    <button onClick={() => { if(!customColors.includes(tempColor)) setCustomColors([...customColors, tempColor]); setSForm({...sForm, color: tempColor}); }} className="bg-slate-900 text-white p-4 rounded-2xl hover:bg-slate-800 active:scale-90 transition-all shadow-xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                                        <Icon name="plus" size={24} />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="mt-20 flex gap-10 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                    <button onClick={() => setScheduleModal({ open: false, editId: null })} className="flex-1 py-10 font-black text-slate-400 uppercase tracking-[0.2em] text-2xl italic hover:text-slate-600 transition-colors font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">취소</button>
-                                    <button onClick={handleSaveSchedule} className="flex-[3] py-10 bg-blue-600 text-white rounded-[4rem] font-black shadow-3xl shadow-blue-500/30 active:scale-95 transition-all text-4xl uppercase tracking-tighter italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">일정 확정</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
+                    {scheduleModal.open && (
+                        <div className="fixed inset-0 bg-slate-900/85 backdrop-blur-2xl flex items-center justify-center z-[200] p-10 font-sans font-sans font-sans font-sans font-sans font-sans">
+                            <div className="bg-white p-16 rounded-[4.5rem] w-full max-w-6xl shadow-2xl border border-white/20 modal-animate max-h-[95vh] overflow-y-auto custom-scrollbar font-sans font-sans font-sans font-sans font-sans font-sans">
+                                <div className="flex justify-between items-center mb-16 font-sans font-sans font-sans font-sans font-sans font-sans">
+                                    <h3 className="text-5xl font-black text-slate-800 tracking-tighter uppercase italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans">일정 수립 모드</h3>
+                                    <button onClick={() => setScheduleModal({ open: false, editId: null })} className="text-slate-300 hover:text-slate-900 transition-colors bg-slate-50 p-5 rounded-full font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><Icon name="x" size={48} /></button></div>
+                                <div className="space-y-16 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                        <div className="space-y-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                            <label className="text-xl font-black text-slate-400 uppercase tracking-widest ml-3 italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">활동 제목</label>
+                                            <input type="text" className="w-full border-4 border-slate-50 p-10 rounded-[3rem] font-black outline-none focus:border-blue-500 transition-all bg-slate-50 shadow-inner text-4xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={sForm.title} onChange={e => setSForm({...sForm, title: e.target.value})} placeholder="활동 이름" /></div>
+                                        <div className="space-y-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                            <div className="flex justify-between items-center ml-3 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><label className="text-xl font-black text-slate-400 uppercase tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">태그 시스템 (중복 가능)</label>
+                                                <div className="flex gap-4 bg-white p-2 px-6 rounded-2xl shadow-md border-2 border-slate-100 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                                    <input type="text" value={newTagInput} onChange={e => setNewTagInput(e.target.value)} placeholder="+ 추가" className="text-lg font-black outline-none w-32 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" onKeyDown={e => e.key === 'Enter' && (setTags([...tags, newTagInput]), toggleTag(newTagInput), setNewTagInput(''))} /></div></div>
+                                            <div className="flex flex-wrap gap-4 p-10 bg-slate-50 rounded-[4rem] border-2 border-slate-100 min-h-[160px] shadow-inner font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                                {tags.map(t => (<button key={t} onClick={() => toggleTag(t)} className={`px-10 py-5 rounded-[2rem] text-xl font-black transition-all font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans ${(sForm.tags || []).includes(t) ? 'bg-slate-900 text-white shadow-xl scale-110' : 'bg-white text-slate-400 border-2 border-slate-200 shadow-sm hover:border-slate-400 font-sans font-sans font-sans'}`}>{t}</button>))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                        <div className="space-y-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                            <label className="text-xl font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">요일 배치</label>
+                                            <div className="flex gap-4 bg-slate-100 p-5 rounded-[3rem] shadow-inner font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                                {DAYS.map(d => <button key={d} onClick={() => { const curr = sForm.days; setSForm({...sForm, days: curr.includes(d) ? curr.filter(x => x !== d) : [...curr, d]}); }} className={`flex-1 py-8 rounded-[2rem] text-xl font-black transition-all font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans ${sForm.days.includes(d) ? 'bg-white text-slate-900 shadow-xl scale-105' : 'text-slate-400 hover:text-slate-500 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans'}`}>{d}</button>)}
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-12 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                            <div className="space-y-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><label className="text-xl font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">Start (HH:MM)</label>
+                                                <div className="flex items-center gap-6 bg-slate-50 p-8 rounded-[3rem] shadow-inner border-2 border-slate-100 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-5xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={sForm.startH} onChange={e => setSForm({...sForm, startH: e.target.value})} />
+                                                    <span className="font-black text-slate-200 text-5xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">:</span>
+                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-5xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={sForm.startM} onChange={e => setSForm({...sForm, startM: e.target.value})} /></div></div>
+                                            <div className="space-y-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans"><label className="text-xl font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">End (HH:MM)</label>
+                                                <div className="flex items-center gap-6 bg-slate-50 p-8 rounded-[3rem] shadow-inner border-2 border-slate-100 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-5xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={sForm.endH} onChange={e => setSForm({...sForm, endH: e.target.value})} />
+                                                    <span className="font-black text-slate-200 text-5xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">:</span>
+                                                    <input type="text" maxLength="2" className="w-full bg-transparent text-center font-black outline-none text-5xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={sForm.endM} onChange={e => setSForm({...sForm, endM: e.target.value})} /></div></div>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                        <div className="space-y-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                            <label className="text-xl font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">Memo Log</label>
+                                            <textarea className="w-full border-4 border-slate-50 p-10 rounded-[3rem] font-bold outline-none focus:border-blue-500 bg-slate-50 shadow-inner h-56 resize-none transition-all font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans text-2xl font-sans" value={sForm.memo} onChange={e => setSForm({...sForm, memo: e.target.value})} placeholder="활동 세부 사항..." /></div>
+                                        <div className="space-y-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                            <label className="text-base font-black text-slate-400 uppercase ml-3 tracking-widest italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">Visual Energy Index</label>
+                                            <div className="flex flex-wrap gap-5 bg-slate-50 p-10 rounded-[3.5rem] border-2 border-slate-100 items-center shadow-inner font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                                {[...DEFAULT_COLORS, ...customColors].map(c => (<button key={c} onClick={() => setSForm({...sForm, color: c})} className={`w-14 h-14 rounded-full border-4 transition-all font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans hover:scale-110 ${sForm.color === c ? 'border-slate-800 shadow-2xl scale-110 ring-4 ring-slate-800/10' : 'border-white shadow-md font-sans font-sans'}`} style={{ backgroundColor: c }} />))}
+                                                <div className="flex gap-4 items-center bg-white p-3 rounded-3xl border-2 border-slate-200 shadow-lg ml-3 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                                    <div className="w-12 h-12 rounded-2xl relative overflow-hidden border-2 border-slate-100 cursor-pointer font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                                        <input type="color" className="absolute -inset-2 cursor-pointer scale-150 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" value={tempColor} onChange={e => setTempColor(e.target.value)} /></div>
+                                                    <button onClick={() => { if(!customColors.includes(tempColor)) setCustomColors([...customColors, tempColor]); setSForm({...sForm, color: tempColor}); }} className="bg-slate-900 text-white p-4 rounded-2xl hover:bg-slate-800 active:scale-90 transition-all shadow-xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                                        <Icon name="plus" size={24} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="mt-20 flex gap-10 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                    <button onClick={() => setScheduleModal({ open: false, editId: null })} className="flex-1 py-10 font-black text-slate-400 uppercase tracking-[0.2em] text-2xl italic hover:text-slate-600 transition-colors font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">취소</button>
+                                    <button onClick={handleSaveSchedule} className="flex-[3] py-10 bg-blue-600 text-white rounded-[4rem] font-black shadow-3xl shadow-blue-500/30 active:scale-95 transition-all text-4xl uppercase tracking-tighter italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">일정 확정</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
-                    {studentModal.open && (
-                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-2xl flex items-center justify-center z-[300] p-10 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                            <div className="bg-white p-20 rounded-[5rem] w-full max-w-xl shadow-2xl modal-animate border border-white/20 text-center font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                <h3 className="text-5xl font-black mb-10 text-slate-800 tracking-tight uppercase italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">{studentModal.editId ? "이름 변경" : "학생 등록"}</h3>
-                                <input type="text" value={studentModal.name} onChange={e => setStudentModal({...studentModal, name: e.target.value})} className="w-full border-4 border-slate-50 p-10 rounded-[3rem] outline-none focus:border-blue-500 font-black mb-16 transition-all bg-slate-50 shadow-inner text-5xl text-center font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" placeholder="이름" autoFocus onKeyDown={e => e.key === 'Enter' && handleSaveStudent()} />
-                                <div className="flex gap-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
-                                    <button onClick={() => setStudentModal({ open: false, editId: null, name: '' })} className="flex-1 py-10 font-bold text-slate-400 hover:text-slate-600 transition-colors uppercase italic text-2xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">취소</button>
-                                    <button onClick={handleSaveStudent} className="flex-[2] py-10 bg-slate-900 text-white rounded-[3rem] font-black shadow-2xl active:scale-95 transition-all text-4xl uppercase tracking-tight font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">확인</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-            );
-        };
+                    {studentModal.open && (
+                        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-2xl flex items-center justify-center z-[300] p-10 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                            <div className="bg-white p-20 rounded-[5rem] w-full max-w-xl shadow-2xl modal-animate border border-white/20 text-center font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                <h3 className="text-5xl font-black mb-10 text-slate-800 tracking-tight uppercase italic font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">{studentModal.editId ? "이름 변경" : "학생 등록"}</h3>
+                                <input type="text" value={studentModal.name} onChange={e => setStudentModal({...studentModal, name: e.target.value})} className="w-full border-4 border-slate-50 p-10 rounded-[3rem] outline-none focus:border-blue-500 font-black mb-16 transition-all bg-slate-50 shadow-inner text-5xl text-center font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans" placeholder="이름" autoFocus onKeyDown={e => e.key === 'Enter' && handleSaveStudent()} />
+                                <div className="flex gap-8 font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">
+                                    <button onClick={() => setStudentModal({ open: false, editId: null, name: '' })} className="flex-1 py-10 font-bold text-slate-400 hover:text-slate-600 transition-colors uppercase italic text-2xl font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">취소</button>
+                                    <button onClick={handleSaveStudent} className="flex-[2] py-10 bg-slate-900 text-white rounded-[3rem] font-black shadow-2xl active:scale-95 transition-all text-4xl uppercase tracking-tight font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans font-sans">확인</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
 </body>
 </html>
