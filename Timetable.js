@@ -1,11 +1,11 @@
 const { useState, useMemo, useEffect, useRef } = React;
 
 // [시스템 상수 및 초기 데이터]
-const START_HOUR = 9;
+const START_HOUR = 7;
 const END_HOUR = 24;
 const SLOT_HEIGHT = 80; // 1시간당 픽셀(px) 기준
-const DAYS = ['월', '화', '수', '목', '금'];
-const DEFAULT_TAGS = ['전공', '교양', '자습', '동아리'];
+const DAYS = ['월', '화', '수', '목', '금', '토', '일'];
+const DEFAULT_TAGS = ['자습', '인강', '외부 학원', '수업', '상담'];
 const DEFAULT_COLORS = ['#ff7675', '#74b9ff', '#55efc4', '#ffeaa7', '#a29bfe', '#dfe6e9'];
 
 const App = () => {
@@ -207,7 +207,22 @@ const App = () => {
                             {/* 우측 패널: A4 캡처 대상 시간표 그리드 (A, D 구역) */}
                             <div className="flex-1 overflow-auto bg-slate-200 p-8 rounded-2xl shadow-inner relative flex justify-center">
                                 <div ref={captureRef} className="export-area bg-white shadow-lg relative w-[1000px] min-w-[1000px] h-fit p-10 box-border">
-                                    <h1 className="text-3xl font-black mb-8 text-center uppercase tracking-widest">{current.name} TIMETABLE</h1>
+                                    
+                                    {/* 캡처 영역 상단: 타이틀 및 통계 데이터 연산 (수정됨) */}
+                                    <div className="mb-8 flex justify-between items-end border-b-4 border-slate-900 pb-6">
+                                        <h1 className="text-3xl font-black uppercase tracking-widest">{current.name} TIMETABLE</h1>
+                                        <div className="flex gap-6 text-right">
+                                            <div className="flex flex-col">
+                                                <span className="text-[12px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Weekly Total</span>
+                                                <span className="text-2xl font-black text-blue-600">{formatMinToTime(stats.total)}</span>
+                                            </div>
+                                            <div className="flex flex-col">
+                                                <span className="text-[12px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Daily Avg</span>
+                                                <span className="text-2xl font-black text-slate-800">{formatMinToTime(stats.avg)}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
                                     <div className="flex border-2 border-slate-800 rounded-xl overflow-hidden bg-white">
                                         {/* Y축 시간표시 */}
                                         <div className="w-16 bg-slate-50 border-r-2 border-slate-800 flex flex-col text-center">
@@ -226,16 +241,33 @@ const App = () => {
                                                     {Array.from({ length: END_HOUR - START_HOUR + 1 }).map((_, i) => (
                                                         <div key={i} className="border-b border-slate-100" style={{height: `${SLOT_HEIGHT}px`}}></div>
                                                     ))}
-                                                    {/* 블록 절대 좌표 매핑 */}
-                                                    {filteredSchedules.filter(s => s.days.includes(day)).map(s => (
-                                                        <div key={s.id} 
-                                                            onClick={() => isEditMode ? setScheduleModal({open:true, id:s.id}) : setDetailModal({open:true, item:s})}
-                                                            className={`absolute left-[1px] right-[1px] p-2 rounded-md shadow-sm border border-black/10 flex flex-col overflow-hidden cursor-pointer hover:brightness-95 transition-all ${isEditMode ? 'ring-2 ring-blue-500 z-10' : ''}`}
-                                                            style={getRect(s)}>
-                                                            <span className="font-bold text-sm text-slate-900 leading-tight">{s.title}</span>
-                                                            <span className="text-[10px] font-medium text-slate-800/60 mt-1">{s.startH}:{s.startM}</span>
-                                                        </div>
-                                                    ))}
+                                                    
+                                                    {/* 블록 절대 좌표 매핑 및 조건부 태그 (수정됨) */}
+                                                    {filteredSchedules.filter(s => s.days.includes(day)).map(s => {
+                                                        const durMin = (parseInt(s.endH) * 60 + parseInt(s.endM)) - (parseInt(s.startH) * 60 + parseInt(s.startM));
+                                                        
+                                                        return (
+                                                            <div key={s.id} 
+                                                                onClick={() => isEditMode ? setScheduleModal({open:true, id:s.id}) : setDetailModal({open:true, item:s})}
+                                                                className={`absolute left-[1px] right-[1px] p-2 rounded-md shadow-sm border border-black/10 flex flex-col overflow-hidden cursor-pointer hover:brightness-95 transition-all ${isEditMode ? 'ring-2 ring-blue-500 z-10' : ''}`}
+                                                                style={getRect(s)}>
+                                                                
+                                                                <span className="font-bold text-sm text-slate-900 leading-tight truncate">{s.title}</span>
+                                                                <span className="text-[10px] font-medium text-slate-800/60 mt-0.5">{s.startH}:{s.startM}</span>
+                                                                
+                                                                {/* 45분 이상일 때 태그 노출 연산 */}
+                                                                {durMin >= 45 && s.tags && s.tags.length > 0 && (
+                                                                    <div className="mt-auto flex flex-wrap gap-1 overflow-hidden max-h-[16px]">
+                                                                        {s.tags.map(t => (
+                                                                            <span key={t} className="text-[9px] font-bold bg-white/60 px-1 rounded truncate text-slate-800">
+                                                                                #{t}
+                                                                            </span>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
                                                 </div>
                                             </div>
                                         ))}
