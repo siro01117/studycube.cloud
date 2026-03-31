@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>STUDY CUBE :: Portal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -17,46 +18,68 @@
             transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1); 
             box-shadow: -10px 0 30px rgba(0,0,0,0.03);
             z-index: 1;
+            background-color: rgba(241, 245, 249, 0.5); /* slate-100/50 */
         }
-        .tab-slot:hover { 
-            transform: translateX(-15px); /* 왼쪽으로 살짝 밀리며 입체감 강조 */
-            box-shadow: -30px 0 60px rgba(0,0,0,0.15);
-            z-index: 10;
-            background-color: #ffffff;
+
+        /* 데스크톱 가로 배치 시 상호작용 */
+        @media (min-width: 1024px) {
+            .tab-slot:hover { 
+                transform: translateX(-15px);
+                box-shadow: -30px 0 60px rgba(0,0,0,0.15);
+                z-index: 10;
+                background-color: #ffffff;
+            }
         }
+
+        /* 4행(세로) 배치 시 하단 선 제거 및 레이아웃 조정 */
+        @media (max-width: 1023px) {
+            .double-line { display: none !important; }
+            .tab-slot { border-right: none !important; border-bottom: 1px solid #e2e8f0; }
+            body { overflow-y: auto; }
+        }
+
         .double-line { border-bottom: 4px double #1E1E22; width: 100%; margin-top: auto; }
+        
+        .logo-glow {
+            filter: drop-shadow(0 0 15px rgba(255, 255, 255, 0.2));
+            transition: all 0.5s ease;
+        }
     </style>
 </head>
-<body class="flex h-screen w-full select-none">
+<body class="flex flex-col lg:flex-row h-screen w-full select-none">
 
-    <div class="w-[22%] bg-[#1E1E22] flex flex-col items-center justify-center p-10 text-white z-20">
-        <div class="w-40 h-40 border-4 border-white/20 mb-16 flex items-center justify-center rotate-45 group hover:rotate-[225deg] transition-transform duration-700">
-            <div class="w-20 h-20 bg-white shadow-[0_0_30px_rgba(255,255,255,0.5)]"></div>
+    <div class="w-full lg:w-[22%] bg-[#1E1E22] flex flex-col items-center justify-center p-10 text-white z-20 shrink-0">
+        <div class="w-32 h-32 lg:w-48 lg:h-48 mb-8 lg:mb-16 flex items-center justify-center">
+            <img src="1.png" alt="LOGO" class="logo-glow w-full h-full object-contain invert">
         </div>
         <div class="text-center tracking-tighter uppercase italic leading-[0.85]">
-            <h1 class="text-7xl font-black">STUDY</h1>
-            <h1 class="text-7xl font-black mt-2">CUBE</h1>
+            <h1 class="text-5xl lg:text-7xl font-black">STUDY</h1>
+            <h1 class="text-5xl lg:text-7xl font-black mt-2">CUBE</h1>
         </div>
     </div>
 
-    <a href="Timetable.html" class="tab-slot flex-1 bg-slate-50 border-r border-slate-200 p-14 flex flex-col no-underline text-inherit group">
-        <h2 class="text-5xl font-black text-[#1E1E22] mt-10 transition-transform group-hover:scale-105 origin-left">Timetable</h2>
-        <div class="double-line mb-10 opacity-20 group-hover:opacity-100 transition-opacity"></div>
-    </a>
+    <div class="flex flex-col lg:flex-row flex-1 h-full">
+        
+        <a href="Timetable.html" class="tab-slot flex-1 bg-slate-50 border-r border-slate-200 p-8 lg:p-14 flex flex-col no-underline text-inherit group">
+            <h2 class="text-3xl lg:text-5xl font-black text-[#1E1E22] mt-4 lg:mt-10 transition-transform group-hover:scale-105 origin-left">Timetable</h2>
+            <div class="double-line mb-4 lg:mb-10 opacity-20 group-hover:opacity-100 transition-opacity"></div>
+        </a>
 
-    <div class="tab-slot flex-1 bg-slate-100/50 border-r border-slate-200 p-14 flex flex-col opacity-60">
-        <h2 class="text-5xl font-black text-[#1E1E22] mt-28">Task List</h2>
-        <div class="double-line mb-16 opacity-10"></div>
-    </div>
+        <div class="tab-slot flex-1 border-r border-slate-200 p-8 lg:p-14 flex flex-col opacity-60">
+            <h2 class="text-3xl lg:text-5xl font-black text-[#1E1E22] mt-4 lg:mt-28">Task List</h2>
+            <div class="double-line mb-4 lg:mb-16 opacity-10"></div>
+        </div>
 
-    <div class="tab-slot flex-1 bg-slate-100/50 border-r border-slate-200 p-14 flex flex-col opacity-40">
-        <h2 class="text-5xl font-black text-[#1E1E22] mt-10">IDEA</h2>
-        <div class="double-line mb-20 opacity-10"></div>
-    </div>
+        <div class="tab-slot flex-1 border-r border-slate-200 p-8 lg:p-14 flex flex-col opacity-40">
+            <h2 class="text-3xl lg:text-5xl font-black text-[#1E1E22] mt-4 lg:mt-10">IDEA</h2>
+            <div class="double-line mb-4 lg:mb-20 opacity-10"></div>
+        </div>
 
-    <div class="tab-slot flex-1 bg-slate-100/50 p-14 flex flex-col opacity-20">
-        <h2 class="text-5xl font-black text-[#1E1E22] mt-28">SURVEY</h2>
-        <div class="double-line mb-24 opacity-10"></div>
+        <div class="tab-slot flex-1 p-8 lg:p-14 flex flex-col opacity-20">
+            <h2 class="text-3xl lg:text-5xl font-black text-[#1E1E22] mt-4 lg:mt-28">SURVEY</h2>
+            <div class="double-line mb-4 lg:mb-24 opacity-10"></div>
+        </div>
+
     </div>
 
 </body>
