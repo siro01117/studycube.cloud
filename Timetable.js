@@ -13,10 +13,9 @@ const DEFAULT_COLORS = ['#ff7675', '#74b9ff', '#55efc4', '#ffeaa7', '#a29bfe', '
 
 const App = () => {
     // [2. 시스템 상태 관리]
-    const [isAuth, setIsAuth] = useState(false); 
     const [dbClient, setDbClient] = useState(null);
     const [students, setStudents] = useState([]);
-    const [isInitialLoading, setIsInitialLoading] = useState(true); 
+    const [isLoading, setIsLoading] = useState(true); 
 
     const [selectedId, setSelectedId] = useState(null);
     const [trashMode, setTrashMode] = useState(false);
@@ -26,23 +25,27 @@ const App = () => {
     
     const [customTags, setCustomTags] = useState(DEFAULT_TAGS);
     const [customColors, setCustomColors] = useState(DEFAULT_COLORS);
-    const [dragItem, setDragItem] = useState(null);
 
     const [studentModal, setStudentModal] = useState({ open: false, id: null, name: '' });
     const [scheduleModal, setScheduleModal] = useState({ open: false, id: null });
     const [detailModal, setDetailModal] = useState({ open: false, item: null });
-    const [sForm, setSForm] = useState({ title: '', days: [], startH: '09', startM: '00', endH: '10', endM: '00', tags: [], color: DEFAULT_COLORS[0], memo: '' });
+    
+    // 일정 입력 폼 상태
+    const [sForm, setSForm] = useState({ 
+        title: '', days: [], startH: '09', startM: '00', endH: '10', endM: '00', 
+        tags: [], color: DEFAULT_COLORS[0], memo: '' 
+    });
     
     const captureRef = useRef(null);
 
     // [3. 클라우드 DB 연동 엔진]
     useEffect(() => {
-        if (isAuth && window.supabase) {
+        if (window.supabase) {
             const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
             setDbClient(client);
             
             client.from('schedules').select('*').then(({ data, error }) => {
-                if (error) console.error("API Error:", error);
+                if (error) console.error("Cloud Connection Error:", error);
                 if (data) {
                     setStudents(data.map(row => ({
                         id: row.id, 
@@ -51,10 +54,10 @@ const App = () => {
                         isDeleted: row.data?.isDeleted || false
                     })));
                 }
-                setIsInitialLoading(false); 
+                setIsLoading(false); 
             });
         }
-    }, [isAuth]);
+    }, []);
 
     const syncToDB = async (updatedStudents, targetStudent) => {
         setStudents(updatedStudents);
@@ -68,16 +71,78 @@ const App = () => {
         }
     };
 
-    // [4. 데이터 연산 및 헬퍼]
+    // [4. 데이터 연산 및 필터링]
     const current = useMemo(() => students.find(s => s.id === selectedId) || null, [students, selectedId]);
     
     const { filteredSchedules, stats } = useMemo(() => {
         if (!current || !current.schedules) return { filteredSchedules: [], stats: { total: 0, avg: 0 } };
-        const filtered = current.schedules.filter(s => (s.title || "").includes(filterTitle) && (filterTag === '' || (s.tags && s.tags.includes(filterTag))));
+        
+        const filtered = current.schedules.filter(s => 
+            (s.title || "").includes(filterTitle) && 
+            (filterTag === '' || (s.tags && s.tags.includes(filterTag)))
+        );
+
         let totalMin = 0;
-        filtered.forEach(s => totalMin += ((parseInt(s.endH)*60 + parseInt(s.endM)) - (parseInt(s.startH)*60 + parseInt(s.startM))) * (s.days ? s.days.length : 0));
+        filtered.forEach(s => {
+            const duration = ((parseInt(s.endH) * 60 + parseInt(s.endM)) - (parseInt(s.startH) * 60 + parseInt(s.startM)));
+            totalMin += duration * (s.days ? s.days.length : 0);
+        });
+
         return { filteredSchedules: filtered, stats: { total: totalMin, avg: Math.floor(totalMin / 7) } };
     }, [current, filterTitle, filterTag]);
+
+    // [5. 핸들러 로직]
+    const handleStudentAction = (id, action) => {
+        const target = students.find(s => s.id === id);
+        if (!target) return;
+        
+        let updatedStudents;
+        if (action === 'delete') {
+            const updatedTarget = { ...target, isDeleted: true };
+            updatedStudents = students.map(s => s.id === id ? updatedTarget : s);
+            syncToDB(updatedStudents, updatedTarget);
+        } else if (action === 'restore') {
+            const updatedTarget = { ...target, isDeleted: false };
+            updatedStudents = students.map(s => s.id === id ? updatedTarget : s);
+            syncToDB(updatedStudents, updatedTarget);
+        } else if (action === 'hardDelete') {
+            if (!confirm("정말로 영구 삭제하시겠습니까?")) return;
+            updatedStudents = students.filter(s => s.id !== id);
+            setStudents(updatedStudents);
+            if (dbClient) dbClient.from('schedules').delete().eq('id', id).then();
+            if (selectedId === id) setSelectedId(null);
+        }
+    };
+
+    const saveStudent = () => {
+        if (!studentModal.name.trim()) return;
+        let newOrUpdated;
+        let nextStudents;
+
+        if (studentModal.id) {
+            newOrUpdated = { ...students.find(s => s.id === studentModal.id), name: studentModal.name };
+            nextStudents = students.map(s => s.id === studentModal.id ? newOrUpdated : s);
+        } else {
+            newOrUpdated = { id: Date.now(), name: studentModal.name, schedules: [], isDeleted: false };
+            nextStudents = [...students, newOrUpdated];
+        }
+
+        syncToDB(nextStudents, newOrUpdated);
+        setStudentModal({ open: false, id: null, name: '' });
+    };
+
+    const saveSchedule = () => {
+        if (!sForm.title || !sForm.days.length) return alert('제목과 요일을 입력하세요.');
+        
+        const newSch = { ...sForm, id: scheduleModal.id || Date.now() };
+        const updatedSchList = scheduleModal.id 
+            ? current.schedules.map(s => s.id === scheduleModal.id ? newSch : s)
+            : [...current.schedules, newSch];
+            
+        const updatedStudent = { ...current, schedules: updatedSchList };
+        syncToDB(students.map(s => s.id === selectedId ? updatedStudent : s), updatedStudent);
+        setScheduleModal({ open: false, id: null });
+    };
 
     const formatMinToTime = (min) => `${Math.floor(min/60).toString().padStart(2,'0')}h ${(min%60).toString().padStart(2,'0')}m`;
     const getRect = (s) => ({
@@ -86,88 +151,33 @@ const App = () => {
         backgroundColor: s.color
     });
 
-    const handleStudentAction = (id, action) => {
-        const target = students.find(s => s.id === id);
-        if (!target) return;
-        let updatedTarget = { ...target };
-        if (action === 'delete') updatedTarget.isDeleted = true;
-        if (action === 'restore') updatedTarget.isDeleted = false;
-        
-        if (action === 'hardDelete') {
-            const nextStudents = students.filter(s => s.id !== id);
-            setStudents(nextStudents);
-            if (dbClient) dbClient.from('schedules').delete().eq('id', id).then();
-            if (selectedId === id) setSelectedId(null);
+    const handleExport = (format) => { 
+        if (window.ExportSystem && captureRef.current) {
+            window.ExportSystem.generate(captureRef.current, current.name, format); 
         } else {
-            const nextStudents = students.map(s => s.id === id ? updatedTarget : s);
-            syncToDB(nextStudents, updatedTarget);
+            alert("출력 모듈(Export.js)이 로드되지 않았습니다.");
         }
     };
 
-    const saveStudent = () => {
-        if (!studentModal.name.trim()) return;
-        let newOrUpdated;
-        let nextStudents;
-        if (studentModal.id) {
-            newOrUpdated = { ...students.find(s => s.id === studentModal.id), name: studentModal.name };
-            nextStudents = students.map(s => s.id === studentModal.id ? newOrUpdated : s);
-        } else {
-            newOrUpdated = { id: Date.now(), name: studentModal.name, schedules: [], isDeleted: false };
-            nextStudents = [...students, newOrUpdated];
-        }
-        syncToDB(nextStudents, newOrUpdated);
-        setStudentModal({ open: false, id: null, name: '' });
-    };
-
-    const saveSchedule = () => {
-        if (!sForm.title || !sForm.days || sForm.days.length === 0) return alert('제목과 요일을 지정하십시오.');
-        const start = parseInt(sForm.startH)*60 + parseInt(sForm.startM);
-        const end = parseInt(sForm.endH)*60 + parseInt(sForm.endM);
-        if (end <= start) return alert('종료 시간 연산 오류');
-
-        const newSch = { ...sForm, id: scheduleModal.id || Date.now() };
-        const updatedSchList = scheduleModal.id ? current.schedules.map(s => s.id === scheduleModal.id ? newSch : s) : [...current.schedules, newSch];
-        const updatedStudent = { ...current, schedules: updatedSchList };
-        
-        syncToDB(students.map(s => s.id === selectedId ? updatedStudent : s), updatedStudent);
-        setScheduleModal({ open: false, id: null });
-    };
-
-    const handleExport = (format) => { if (window.ExportSystem && captureRef.current) window.ExportSystem.generate(captureRef.current, current.name, format); };
-
-    // [5. 렌더링 분기]
-    if (!isAuth) {
-        if (window.AuthSystem && typeof window.AuthSystem.renderGate === 'function') {
-            const AuthUI = window.AuthSystem.renderGate(setIsAuth);
-            if (AuthUI) return AuthUI;
-        }
+    // [6. 시스템 렌더링 가드]
+    if (isLoading) {
         return (
-            <div className="flex h-screen w-full items-center justify-center bg-slate-900">
-                <div className="text-white font-black text-xl animate-pulse tracking-[0.3em] uppercase">Security Initializing...</div>
-            </div>
-        );
-    }
-
-    if (isInitialLoading) {
-        return (
-            <div className="flex h-screen items-center justify-center bg-[#0f172a] text-white">
-                <div className="text-center">
-                    <div className="text-4xl font-black mb-4 animate-pulse uppercase tracking-[0.2em]">Connecting DB</div>
-                    <div className="text-slate-500 font-bold uppercase text-[10px] tracking-widest leading-loose">STUDY CUBE CLOUD ENGINE</div>
-                </div>
+            <div className="flex h-screen items-center justify-center bg-[#0f172a] text-white font-black animate-pulse uppercase tracking-[0.2em]">
+                System Initializing...
             </div>
         );
     }
 
     return (
         <div className="flex h-screen w-full bg-slate-100 font-sans overflow-hidden">
+            {/* 사이드바 */}
             <aside className="w-72 bg-white border-r border-slate-200 flex flex-col z-20 shadow-sm no-print">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center">
                     <h1 className="text-xl font-bold tracking-tight text-slate-800 italic">STUDY CUBE</h1>
                     <button onClick={() => setTrashMode(!trashMode)} className={`text-xs font-bold px-3 py-1 rounded transition-all ${trashMode ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'}`}>{trashMode ? '휴지통' : '목록'}</button>
                 </div>
                 <div className="p-4 border-b border-slate-100">
-                    {!trashMode && <button onClick={() => setStudentModal({open:true, id:null, name:''})} className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all active:scale-95 shadow-lg">학생 등록</button>}
+                    {!trashMode && <button onClick={() => setStudentModal({open:true, id:null, name:''})} className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 active:scale-95 shadow-lg">학생 등록</button>}
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
                     {students.filter(s => s.isDeleted === trashMode).map(s => (
@@ -175,9 +185,15 @@ const App = () => {
                             <span className="font-bold text-slate-700 truncate mr-2">{s.name}</span>
                             <div className="hidden group-hover:flex gap-1 shrink-0">
                                 {!trashMode ? (
-                                    <button onClick={(e) => { e.stopPropagation(); setStudentModal({open:true, id:s.id, name:s.name}); }} className="p-1 bg-slate-200 rounded hover:bg-slate-300 transition-colors"><lucide.icons.Edit2 size={12}/></button>
+                                    <>
+                                        <button onClick={(e) => { e.stopPropagation(); setStudentModal({open:true, id:s.id, name:s.name}); }} className="p-1 bg-slate-100 text-slate-500 rounded hover:bg-slate-200"><lucide.icons.Edit2 size={12}/></button>
+                                        <button onClick={(e) => { e.stopPropagation(); handleStudentAction(s.id, 'delete'); }} className="p-1 bg-red-100 text-red-600 rounded hover:bg-red-200"><lucide.icons.Trash2 size={12}/></button>
+                                    </>
                                 ) : (
-                                    <button onClick={() => handleStudentAction(s.id, 'restore')} className="p-1 bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors"><lucide.icons.RotateCcw size={12}/></button>
+                                    <>
+                                        <button onClick={() => handleStudentAction(s.id, 'restore')} className="p-1 bg-green-100 text-green-700 rounded hover:bg-green-200"><lucide.icons.RotateCcw size={12}/></button>
+                                        <button onClick={() => handleStudentAction(s.id, 'hardDelete')} className="p-1 bg-slate-900 text-white rounded hover:bg-black"><lucide.icons.X size={12}/></button>
+                                    </>
                                 )}
                             </div>
                         </div>
@@ -185,6 +201,7 @@ const App = () => {
                 </div>
             </aside>
 
+            {/* 메인 시스템 */}
             <main className="flex-1 flex flex-col bg-slate-50 relative">
                 {current ? (
                     <>
@@ -199,15 +216,24 @@ const App = () => {
                                 </button>
                             </div>
                         </header>
+
                         <div className="flex-1 flex overflow-hidden p-6 gap-6">
                             <div className="w-80 flex flex-col gap-4 no-print">
                                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                                    <div className="flex flex-col gap-2 font-sans">
+                                    <div className="mb-6 space-y-2">
+                                        <input type="text" placeholder="제목 검색" value={filterTitle} onChange={e => setFilterTitle(e.target.value)} className="w-full bg-slate-100 p-3 rounded-lg text-sm font-bold outline-none border-2 border-transparent focus:border-blue-400" />
+                                        <select value={filterTag} onChange={e => setFilterTag(e.target.value)} className="w-full bg-slate-100 p-3 rounded-lg text-sm font-bold outline-none">
+                                            <option value="">전체 태그</option>
+                                            {customTags.map(t => <option key={t} value={t}>{t}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="flex flex-col gap-2 border-t pt-4 font-sans">
                                         <div className="flex justify-between items-end"><span className="text-[10px] font-black text-slate-300 uppercase">Weekly Total</span><span className="text-xl font-black text-blue-600 tabular-nums">{formatMinToTime(stats.total)}</span></div>
                                         <div className="flex justify-between items-end"><span className="text-[10px] font-black text-slate-300 uppercase">Daily Avg</span><span className="text-lg font-black text-slate-700 tabular-nums">{formatMinToTime(stats.avg)}</span></div>
                                     </div>
                                 </div>
                             </div>
+
                             <div className="flex-1 overflow-auto bg-slate-200 p-8 rounded-2xl shadow-inner relative flex justify-center custom-scrollbar">
                                 <div ref={captureRef} className="export-area bg-white shadow-2xl relative w-[1000px] min-w-[1000px] h-fit p-12 box-border rounded-[3rem] font-sans">
                                     <div className="mb-10 flex justify-between items-end border-b-[6px] border-slate-900 pb-8">
@@ -227,17 +253,14 @@ const App = () => {
                                                 <div className="h-14 border-b-[4px] border-slate-900 flex items-center justify-center font-black text-slate-900 text-xl italic">{day}</div>
                                                 <div className="flex-1 relative bg-white">
                                                     {Array.from({ length: END_HOUR - START_HOUR + 1 }).map((_, i) => (<div key={i} className="border-b border-slate-50 shrink-0" style={{height: `${SLOT_HEIGHT}px`}}></div>))}
-                                                    {(current.schedules || []).filter(s => s.days && s.days.includes(day)).map(s => {
-                                                        const durMin = (parseInt(s.endH) * 60 + parseInt(s.endM)) - (parseInt(s.startH) * 60 + parseInt(s.startM));
-                                                        return (
-                                                            <div key={s.id} onClick={() => isEditMode ? setScheduleModal({open:true, id:s.id}) : setDetailModal({open:true, item:s})}
-                                                                className={`absolute left-[3px] right-[3px] p-3 rounded-2xl shadow-xl border-2 border-black/5 flex flex-col overflow-hidden cursor-pointer transition-all hover:scale-[1.03] hover:z-10 ${isEditMode ? 'ring-4 ring-blue-500 ring-offset-2' : ''}`}
-                                                                style={getRect(s)}>
-                                                                <span className="font-black text-[14px] text-slate-900 leading-tight truncate uppercase italic">{s.title}</span>
-                                                                <span className="text-[10px] font-bold text-slate-900/40 mt-1 tabular-nums">{s.startH}:{s.startM}</span>
-                                                            </div>
-                                                        );
-                                                    })}
+                                                    {filteredSchedules.filter(s => s.days && s.days.includes(day)).map(s => (
+                                                        <div key={s.id} onClick={() => isEditMode ? (setSForm(s), setScheduleModal({open:true, id:s.id})) : setDetailModal({open:true, item:s})}
+                                                            className={`absolute left-[3px] right-[3px] p-3 rounded-2xl shadow-xl border-2 border-black/5 flex flex-col overflow-hidden cursor-pointer transition-all hover:scale-[1.03] hover:z-10 ${isEditMode ? 'ring-4 ring-blue-500' : ''}`}
+                                                            style={getRect(s)}>
+                                                            <span className="font-black text-[14px] text-slate-900 leading-tight truncate uppercase italic">{s.title}</span>
+                                                            <span className="text-[10px] font-bold text-black/30">{s.startH}:{s.startM}</span>
+                                                        </div>
+                                                    ))}
                                                 </div>
                                             </div>
                                         ))}
@@ -248,20 +271,20 @@ const App = () => {
 
                         {isEditMode && (
                             <button onClick={() => { setSForm({title:'', days:[], startH:'09', startM:'00', endH:'10', endM:'00', tags:[], color:customColors[0], memo:''}); setScheduleModal({open:true, id:null}); }} 
-                                className="absolute bottom-10 right-10 w-20 h-20 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center text-4xl font-light hover:bg-blue-700 active:scale-90 hover:rotate-90 transition-all z-30">+</button>
+                                className="absolute bottom-10 right-10 w-20 h-20 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center text-4xl font-light hover:bg-blue-700 active:scale-90 hover:rotate-90 transition-all z-30 shadow-blue-200">+</button>
                         )}
                     </>
                 ) : <div className="flex-1 flex flex-col items-center justify-center text-slate-300 font-black text-3xl tracking-[0.5em] uppercase opacity-10 italic">Select Student Identity</div>}
             </main>
 
-            {/* [모달 3종] */}
+            {/* [모달 섹션] */}
             {studentModal.open && (
                 <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-xl flex items-center justify-center z-[500]">
-                    <div className="bg-white p-16 rounded-[4rem] w-full max-w-lg shadow-2xl text-center animate-in zoom-in duration-300">
+                    <div className="bg-white p-16 rounded-[4rem] w-full max-w-lg shadow-2xl text-center">
                         <h3 className="text-3xl font-black mb-10 uppercase text-slate-800 italic">Identity Form</h3>
                         <input type="text" value={studentModal.name} onChange={e=>setStudentModal({...studentModal, name:e.target.value})} className="w-full border-b-8 border-slate-50 p-6 rounded-3xl text-center text-4xl font-black mb-12 outline-none focus:border-blue-500 bg-slate-50" autoFocus placeholder="이름 입력" onKeyDown={e=>e.key==='Enter'&&saveStudent()} />
                         <div className="flex gap-4">
-                            <button onClick={()=>setStudentModal({open:false, id:null, name:''})} className="flex-1 py-6 bg-slate-100 rounded-3xl font-black text-slate-400 uppercase tracking-widest">Cancel</button>
+                            <button onClick={()=>setStudentModal({open:false, id:null, name:''})} className="flex-1 py-6 bg-slate-100 rounded-3xl font-black text-slate-400">Cancel</button>
                             <button onClick={saveStudent} className="flex-[2] py-6 bg-blue-600 text-white rounded-3xl font-black text-xl shadow-xl active:scale-95 transition-all">Confirm</button>
                         </div>
                     </div>
@@ -293,8 +316,20 @@ const App = () => {
                                     <div className="flex gap-2"><input type="text" maxLength="2" value={sForm.endH} onChange={e=>setSForm({...sForm, endH:e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl text-center font-black text-xl outline-none focus:ring-2 focus:ring-blue-500" /> <span className="flex items-center font-black text-slate-200">:</span> <input type="text" maxLength="2" value={sForm.endM} onChange={e=>setSForm({...sForm, endM:e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl text-center font-black text-xl outline-none focus:ring-2 focus:ring-blue-500" /></div>
                                 </div>
                             </div>
+                            <div>
+                                <label className="text-[10px] font-black text-slate-300 mb-3 block uppercase tracking-[0.2em]">Tags & Color</label>
+                                <div className="flex flex-wrap gap-2 mb-4">
+                                    {customTags.map(t => (
+                                        <button key={t} onClick={() => setSForm({...sForm, tags: sForm.tags.includes(t) ? sForm.tags.filter(x=>x!==t) : [...sForm.tags, t]})}
+                                                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${sForm.tags.includes(t) ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>#{t}</button>
+                                    ))}
+                                </div>
+                                <div className="flex gap-2">
+                                    {customColors.map(c => <div key={c} onClick={()=>setSForm({...sForm, color:c})} className={`w-8 h-8 rounded-full cursor-pointer transition-all ${sForm.color === c ? 'ring-4 ring-slate-200 scale-110' : 'hover:scale-110'}`} style={{backgroundColor: c}}></div>)}
+                                </div>
+                            </div>
                         </div>
-                        <div className="flex p-6 bg-slate-50 gap-4">
+                        <div className="flex p-6 bg-slate-50 gap-4 mt-auto">
                             <button onClick={()=>setScheduleModal({open:false, id:null})} className="flex-1 py-5 font-black text-slate-400 hover:text-slate-600 transition-colors uppercase tracking-widest">Cancel</button>
                             <button onClick={saveSchedule} className="flex-[2] py-5 font-black text-white bg-blue-600 rounded-2xl hover:bg-blue-700 shadow-xl active:scale-95 transition-all uppercase tracking-widest">Confirm</button>
                         </div>
@@ -307,10 +342,10 @@ const App = () => {
                     <div className="bg-white rounded-[3.5rem] p-12 max-w-md w-full shadow-2xl transform animate-in zoom-in duration-200" onClick={e=>e.stopPropagation()}>
                         <h3 className="text-4xl font-black text-slate-900 mb-3 tracking-tighter uppercase italic">{detailModal.item.title}</h3>
                         <p className="text-sm font-black text-slate-400 mb-8 uppercase italic">{detailModal.item.days.join(', ')} | {detailModal.item.startH}:{detailModal.item.startM} - {detailModal.item.endH}:{detailModal.item.endM}</p>
-                        <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 min-h-[150px] text-base font-bold text-slate-600 whitespace-pre-wrap leading-relaxed shadow-inner">
+                        <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 min-h-[150px] text-base font-bold text-slate-600 whitespace-pre-wrap leading-relaxed shadow-inner mb-8">
                             {detailModal.item.memo || '작성된 메모가 없습니다.'}
                         </div>
-                        <div className="flex gap-4 mt-10">
+                        <div className="flex gap-4">
                             <button onClick={() => {
                                 setSForm(detailModal.item); 
                                 setDetailModal({open:false, item:null}); 
