@@ -2,7 +2,7 @@ const { useState, useMemo, useEffect, useRef } = React;
 
 // [1. 시스템 환경 설정]
 const SUPABASE_URL = 'https://ovnabmmofgujgefuamzn.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_Sr-c62OzsZHne3xYwFuymw_qCz3fhy9'; // 제공해주신 anon 키
+const SUPABASE_KEY = 'sb_publishable_Sr-c62OzsZHne3xYwFuymw_qCz3fhy9'; 
 
 const START_HOUR = 7;
 const END_HOUR = 24;
@@ -13,7 +13,7 @@ const DEFAULT_COLORS = ['#ff7675', '#74b9ff', '#55efc4', '#ffeaa7', '#a29bfe', '
 
 const App = () => {
     // [2. 시스템 상태 관리]
-    const [isAuth, setIsAuth] = useState(false); // Auth.js에서 제어
+    const [isAuth, setIsAuth] = useState(false); 
     const [dbClient, setDbClient] = useState(null);
     const [students, setStudents] = useState([]);
     const [selectedId, setSelectedId] = useState(null);
@@ -38,21 +38,16 @@ const App = () => {
         if (isAuth && window.supabase) {
             const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
             setDbClient(client);
-            fetchDB(client);
+            client.from('schedules').select('*').then(({ data }) => {
+                if (data) setStudents(data.map(row => ({
+                    id: row.id, 
+                    name: row.student_name, 
+                    schedules: row.data?.schedules || [], 
+                    isDeleted: row.data?.isDeleted || false
+                })));
+            });
         }
     }, [isAuth]);
-
-    const fetchDB = async (client) => {
-        const { data, error } = await client.from('schedules').select('*');
-        if (data) {
-            setStudents(data.map(row => ({
-                id: row.id, 
-                name: row.student_name, 
-                schedules: row.data?.schedules || [], 
-                isDeleted: row.data?.isDeleted || false
-            })));
-        }
-    };
 
     const syncToDB = async (updatedStudents, targetStudent) => {
         setStudents(updatedStudents);
@@ -136,22 +131,22 @@ const App = () => {
         setScheduleModal({ open: false, id: null });
     };
 
-    // [6. 출력 엔진]
     const handleExport = (format) => {
         if (window.ExportSystem && captureRef.current) {
             window.ExportSystem.generate(captureRef.current, current.name, format);
         }
     };
 
-    // [7. 보안 게이트웨이 호출 (Auth.js 연동)]
+    // [6. 보안 게이트웨이 연동 (Auth.js)]
     if (!isAuth) {
-        // window.AuthSystem이 정의되어 있어야 합니다.
-        return window.AuthSystem ? window.AuthSystem.renderGate(setIsAuth) : <div className="p-10 font-black">Auth Module Loading...</div>;
+        if (window.AuthSystem && typeof window.AuthSystem.renderGate === 'function') {
+            return window.AuthSystem.renderGate(setIsAuth);
+        }
+        return <div className="flex h-screen items-center justify-center font-black bg-slate-900 text-white">System Loading...</div>;
     }
 
     return (
         <div className="flex h-screen w-full bg-slate-100 font-sans overflow-hidden">
-            {/* 사이드바 */}
             <aside className="w-72 bg-white border-r border-slate-200 flex flex-col z-20 shadow-sm no-print">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center">
                     <h1 className="text-xl font-bold tracking-tight text-slate-800">STUDY CUBE</h1>
@@ -182,7 +177,6 @@ const App = () => {
                 </div>
             </aside>
 
-            {/* 메인 화면 */}
             <main className="flex-1 flex flex-col bg-slate-50 relative">
                 {current ? (
                     <>
@@ -202,7 +196,6 @@ const App = () => {
                         </header>
 
                         <div className="flex-1 flex overflow-hidden p-6 gap-6">
-                            {/* 좌측 리스트/필터 */}
                             <div className="w-80 flex flex-col gap-4 no-print">
                                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                                     <div className="mb-6 space-y-2">
@@ -237,7 +230,6 @@ const App = () => {
                                 </div>
                             </div>
 
-                            {/* 우측 시간표 그리드 */}
                             <div className="flex-1 overflow-auto bg-slate-200 p-8 rounded-2xl shadow-inner relative flex justify-center custom-scrollbar">
                                 <div ref={captureRef} className="export-area bg-white shadow-lg relative w-[1000px] min-w-[1000px] h-fit p-10 box-border rounded-xl font-sans">
                                     <div className="mb-8 flex justify-between items-end border-b-4 border-slate-900 pb-6">
@@ -253,7 +245,7 @@ const App = () => {
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="flex border-2 border-slate-800 rounded-xl overflow-hidden bg-white grid-layout">
+                                    <div className="flex border-2 border-slate-800 rounded-xl overflow-hidden bg-white">
                                         <div className="w-16 bg-slate-50 border-r-2 border-slate-800 flex flex-col text-center shrink-0">
                                             <div className="h-12 border-b-2 border-slate-800"></div>
                                             {Array.from({ length: END_HOUR - START_HOUR + 1 }).map((_, i) => (
@@ -306,7 +298,6 @@ const App = () => {
                 )}
             </main>
 
-            {/* [모달 1: 일정 폼] */}
             {scheduleModal.open && (
                 <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
                     <div className="bg-white rounded-[3rem] w-[650px] overflow-hidden shadow-2xl flex flex-col animate-in zoom-in duration-200">
@@ -364,7 +355,6 @@ const App = () => {
                 </div>
             )}
 
-            {/* [모달 2: 상세 뷰어] */}
             {detailModal.open && detailModal.item && (
                 <div className="fixed inset-0 bg-slate-900/70 flex items-center justify-center z-[100] p-4 backdrop-blur-md animate-in fade-in duration-300" onClick={()=>setDetailModal({open:false, item:null})}>
                     <div className="bg-white rounded-[3.5rem] p-12 max-w-md w-full shadow-2xl transform animate-in zoom-in duration-200" onClick={e=>e.stopPropagation()}>
@@ -389,7 +379,6 @@ const App = () => {
                 </div>
             )}
 
-            {/* [모달 3: 학생 폼] */}
             {studentModal.open && (
                 <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-xl flex items-center justify-center z-[500] animate-in fade-in duration-300">
                     <div className="bg-white p-16 rounded-[4rem] w-full max-w-lg shadow-2xl text-center transform animate-in zoom-in duration-200">
