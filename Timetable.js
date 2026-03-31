@@ -38,21 +38,26 @@ const App = () => {
     // [3. 클라우드 DB 연동 엔진]
     useEffect(() => {
         if (isAuth && window.supabase) {
-            const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-            setDbClient(client);
-            
-            client.from('schedules').select('*').then(({ data, error }) => {
-                if (error) console.error("API Error:", error);
-                if (data) {
-                    setStudents(data.map(row => ({
-                        id: row.id, 
-                        name: row.student_name || "이름 없음", 
-                        schedules: row.data?.schedules || [], 
-                        isDeleted: row.data?.isDeleted || false
-                    })));
-                }
-                setIsInitialLoading(false); 
-            });
+            try {
+                const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                setDbClient(client);
+                
+                client.from('schedules').select('*').then(({ data, error }) => {
+                    if (error) console.error("DB Fetch Error:", error);
+                    if (data) {
+                        setStudents(data.map(row => ({
+                            id: row.id, 
+                            name: row.student_name || "이름 없음", 
+                            schedules: row.data?.schedules || [], 
+                            isDeleted: row.data?.isDeleted || false
+                        })));
+                    }
+                    setIsInitialLoading(false); 
+                });
+            } catch (e) {
+                console.error("Supabase Init Error:", e);
+                setIsInitialLoading(false);
+            }
         }
     }, [isAuth]);
 
@@ -135,9 +140,19 @@ const App = () => {
 
     const handleExport = (format) => { if (window.ExportSystem && captureRef.current) window.ExportSystem.generate(captureRef.current, current.name, format); };
 
-    // [5. 렌더링 분기]
+    // [5. 핵심 가드: 보안 및 로딩 분기]
     if (!isAuth) {
-        return window.AuthSystem ? window.AuthSystem.renderGate(setIsAuth) : <div className="p-10 font-black">Auth Loading...</div>;
+        // window.AuthSystem이 유효한지 2중으로 검사합니다 (Error #300 방지)
+        if (window.AuthSystem && typeof window.AuthSystem.renderGate === 'function') {
+            const AuthUI = window.AuthSystem.renderGate(setIsAuth);
+            if (AuthUI) return AuthUI;
+        }
+        // 로딩 중이거나 AuthSystem이 없을 때 반환할 안전한 JSX
+        return (
+            <div className="flex h-screen w-full items-center justify-center bg-slate-900">
+                <div className="text-white font-black text-xl animate-pulse tracking-[0.3em] uppercase">Security Initializing...</div>
+            </div>
+        );
     }
 
     if (isInitialLoading) {
@@ -145,15 +160,15 @@ const App = () => {
             <div className="flex h-screen items-center justify-center bg-[#0f172a] text-white">
                 <div className="text-center">
                     <div className="text-4xl font-black mb-4 animate-pulse uppercase tracking-[0.2em]">Connecting DB</div>
-                    <div className="text-slate-500 font-bold uppercase text-xs tracking-widest leading-loose">STUDY CUBE CLOUD ENGINE</div>
+                    <div className="text-slate-500 font-bold uppercase text-[10px] tracking-widest">STUDY CUBE CLOUD ENGINE</div>
                 </div>
             </div>
         );
     }
 
+    // [6. 메인 시스템 렌더링]
     return (
         <div className="flex h-screen w-full bg-slate-100 font-sans overflow-hidden">
-            {/* 사이드바 */}
             <aside className="w-72 bg-white border-r border-slate-200 flex flex-col z-20 shadow-sm no-print">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center">
                     <h1 className="text-xl font-bold tracking-tight text-slate-800 italic">STUDY CUBE</h1>
@@ -178,7 +193,6 @@ const App = () => {
                 </div>
             </aside>
 
-            {/* 메인 시스템 */}
             <main className="flex-1 flex flex-col bg-slate-50 relative">
                 {current ? (
                     <>
@@ -196,14 +210,7 @@ const App = () => {
                         <div className="flex-1 flex overflow-hidden p-6 gap-6">
                             <div className="w-80 flex flex-col gap-4 no-print">
                                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                                    <div className="mb-6 space-y-2">
-                                        <input type="text" placeholder="제목 검색" value={filterTitle} onChange={e => setFilterTitle(e.target.value)} className="w-full bg-slate-100 p-3 rounded-lg text-sm font-bold outline-none border-2 border-transparent focus:border-blue-400" />
-                                        <select value={filterTag} onChange={e => setFilterTag(e.target.value)} className="w-full bg-slate-100 p-3 rounded-lg text-sm font-bold outline-none">
-                                            <option value="">전체 태그</option>
-                                            {customTags.map(t => <option key={t} value={t}>{t}</option>)}
-                                        </select>
-                                    </div>
-                                    <div className="flex flex-col gap-2 border-t pt-4 font-sans">
+                                    <div className="flex flex-col gap-2 font-sans">
                                         <div className="flex justify-between items-end"><span className="text-[10px] font-black text-slate-300 uppercase">Weekly Total</span><span className="text-xl font-black text-blue-600 tabular-nums">{formatMinToTime(stats.total)}</span></div>
                                         <div className="flex justify-between items-end"><span className="text-[10px] font-black text-slate-300 uppercase">Daily Avg</span><span className="text-lg font-black text-slate-700 tabular-nums">{formatMinToTime(stats.avg)}</span></div>
                                     </div>
@@ -249,20 +256,20 @@ const App = () => {
 
                         {isEditMode && (
                             <button onClick={() => { setSForm({title:'', days:[], startH:'09', startM:'00', endH:'10', endM:'00', tags:[], color:customColors[0], memo:''}); setScheduleModal({open:true, id:null}); }} 
-                                className="absolute bottom-10 right-10 w-16 h-16 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center text-4xl font-light hover:bg-blue-700 active:scale-90 transition-all z-30">+</button>
+                                className="absolute bottom-10 right-10 w-20 h-20 bg-blue-600 text-white rounded-full shadow-2xl flex items-center justify-center text-4xl font-light hover:bg-blue-700 active:scale-90 hover:rotate-90 transition-all z-30">+</button>
                         )}
                     </>
-                ) : <div className="flex-1 flex flex-col items-center justify-center text-slate-300 font-black text-3xl tracking-[0.5em] uppercase opacity-10 italic">Select Student</div>}
+                ) : <div className="flex-1 flex flex-col items-center justify-center text-slate-300 font-black text-3xl tracking-[0.5em] uppercase opacity-10 italic">Select Student Identity</div>}
             </main>
 
-            {/* 모달 섹션 */}
+            {/* [모달 3종] */}
             {studentModal.open && (
                 <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-xl flex items-center justify-center z-[500]">
-                    <div className="bg-white p-16 rounded-[4rem] w-full max-w-lg shadow-2xl text-center animate-in zoom-in duration-300">
-                        <h3 className="text-3xl font-black mb-10 uppercase text-slate-800">New Identity</h3>
+                    <div className="bg-white p-16 rounded-[4rem] w-full max-w-lg shadow-2xl text-center">
+                        <h3 className="text-3xl font-black mb-10 uppercase text-slate-800 italic">New Identity</h3>
                         <input type="text" value={studentModal.name} onChange={e=>setStudentModal({...studentModal, name:e.target.value})} className="w-full border-b-8 border-slate-50 p-6 rounded-3xl text-center text-4xl font-black mb-12 outline-none focus:border-blue-500 bg-slate-50" autoFocus placeholder="이름 입력" onKeyDown={e=>e.key==='Enter'&&saveStudent()} />
                         <div className="flex gap-4">
-                            <button onClick={()=>setStudentModal({open:false, id:null, name:''})} className="flex-1 py-6 bg-slate-100 rounded-3xl font-black text-slate-400">Cancel</button>
+                            <button onClick={()=>setStudentModal({open:false, id:null, name:''})} className="flex-1 py-6 bg-slate-100 rounded-3xl font-black text-slate-400 uppercase tracking-widest">Cancel</button>
                             <button onClick={saveStudent} className="flex-[2] py-6 bg-blue-600 text-white rounded-3xl font-black text-xl shadow-xl active:scale-95 transition-all">Confirm</button>
                         </div>
                     </div>
@@ -274,24 +281,24 @@ const App = () => {
                     <div className="bg-white rounded-[3rem] w-[650px] overflow-hidden shadow-2xl flex flex-col animate-in zoom-in duration-200">
                         <div className="h-6 w-full" style={{backgroundColor: sForm.color}}></div>
                         <div className="p-10 space-y-8">
-                            <input type="text" placeholder="일정 제목 입력" value={sForm.title} onChange={e=>setSForm({...sForm, title:e.target.value})} className="w-full text-4xl font-black border-b-4 border-slate-100 pb-4 outline-none focus:border-blue-500 transition-all tracking-tighter" />
+                            <input type="text" placeholder="일정 제목 입력" value={sForm.title} onChange={e=>setSForm({...sForm, title:e.target.value})} className="w-full text-4xl font-black border-b-4 border-slate-100 pb-4 outline-none focus:border-blue-500 transition-all tracking-tighter italic" />
                             <div>
-                                <label className="text-xs font-black text-slate-400 mb-3 block uppercase tracking-widest">Select Days</label>
+                                <label className="text-[10px] font-black text-slate-300 mb-3 block uppercase tracking-[0.2em]">Select Days</label>
                                 <div className="flex gap-2">
                                     {DAYS.map(d => (
                                         <button key={d} onClick={() => setSForm({...sForm, days: sForm.days.includes(d) ? sForm.days.filter(x=>x!==d) : [...sForm.days, d]})}
-                                                className={`flex-1 py-3 rounded-xl font-bold transition-all ${sForm.days.includes(d) ? 'bg-slate-900 text-white scale-105 shadow-lg' : 'bg-slate-50 text-slate-400'}`}>{d}</button>
+                                                className={`flex-1 py-3 rounded-xl font-bold transition-all ${sForm.days.includes(d) ? 'bg-slate-900 text-white scale-105 shadow-lg' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>{d}</button>
                                     ))}
                                 </div>
                             </div>
                             <div className="grid grid-cols-2 gap-8">
                                 <div>
-                                    <label className="text-xs font-black text-slate-400 mb-3 block uppercase tracking-widest">Start Time</label>
-                                    <div className="flex gap-2"><input type="text" maxLength="2" value={sForm.startH} onChange={e=>setSForm({...sForm, startH:e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl text-center font-black text-xl outline-none" /> <span className="flex items-center font-black text-slate-200">:</span> <input type="text" maxLength="2" value={sForm.startM} onChange={e=>setSForm({...sForm, startM:e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl text-center font-black text-xl outline-none" /></div>
+                                    <label className="text-[10px] font-black text-slate-300 mb-3 block uppercase tracking-[0.2em]">Start Time</label>
+                                    <div className="flex gap-2"><input type="text" maxLength="2" value={sForm.startH} onChange={e=>setSForm({...sForm, startH:e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl text-center font-black text-xl outline-none focus:ring-2 focus:ring-blue-500" /> <span className="flex items-center font-black text-slate-200">:</span> <input type="text" maxLength="2" value={sForm.startM} onChange={e=>setSForm({...sForm, startM:e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl text-center font-black text-xl outline-none focus:ring-2 focus:ring-blue-500" /></div>
                                 </div>
                                 <div>
-                                    <label className="text-xs font-black text-slate-400 mb-3 block uppercase tracking-widest">End Time</label>
-                                    <div className="flex gap-2"><input type="text" maxLength="2" value={sForm.endH} onChange={e=>setSForm({...sForm, endH:e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl text-center font-black text-xl outline-none" /> <span className="flex items-center font-black text-slate-200">:</span> <input type="text" maxLength="2" value={sForm.endM} onChange={e=>setSForm({...sForm, endM:e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl text-center font-black text-xl outline-none" /></div>
+                                    <label className="text-[10px] font-black text-slate-300 mb-3 block uppercase tracking-[0.2em]">End Time</label>
+                                    <div className="flex gap-2"><input type="text" maxLength="2" value={sForm.endH} onChange={e=>setSForm({...sForm, endH:e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl text-center font-black text-xl outline-none focus:ring-2 focus:ring-blue-500" /> <span className="flex items-center font-black text-slate-200">:</span> <input type="text" maxLength="2" value={sForm.endM} onChange={e=>setSForm({...sForm, endM:e.target.value})} className="w-full bg-slate-50 p-4 rounded-2xl text-center font-black text-xl outline-none focus:ring-2 focus:ring-blue-500" /></div>
                                 </div>
                             </div>
                         </div>
