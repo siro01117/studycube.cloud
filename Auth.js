@@ -109,7 +109,7 @@ window.AuthSystem = {
                             boxShadow: '0 10px 20px rgba(0,0,0,0.2)'
                         }}
                     >
-                        VERIFY SYSTEM
+                        ENTER
                     </button>
 
                     <p style={{ marginTop: '50px', color: '#94a3b8', fontSize: '12px', fontWeight: 700, letterSpacing: '0.5em', opacity: 0.6 }}>STUDY CUBE PROTECTED AREA</p>
