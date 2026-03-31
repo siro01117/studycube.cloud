@@ -1,16 +1,35 @@
-// Auth.js: 보안 게이트웨이 시스템
+// Auth.js: 외부 의존성 없는 독립형 보안 시스템
 window.AuthSystem = {
     ACCESS_PW: "R040117!",
     
     renderGate: (setIsAuth) => {
-        const [displayValue, setDisplayValue] = React.useState(""); // 화면에 보여줄 문자열 (* 또는 실제글자)
-        const [realValue, setRealValue] = React.useState("");       // 실제 저장된 비밀번호
+        const [displayValue, setDisplayValue] = React.useState(""); // 화면 노출용 (● + 마지막 글자)
+        const [realValue, setRealValue] = React.useState("");       // 실제 비밀번호 데이터
         const timerRef = React.useRef(null);
+
+        // [내부 전용 스타일 주입]
+        React.useEffect(() => {
+            const styleId = 'auth-internal-style';
+            if (!document.getElementById(styleId)) {
+                const style = document.createElement('style');
+                style.id = styleId;
+                style.innerHTML = `
+                    @keyframes authSlideUp {
+                        from { opacity: 0; transform: translateY(30px) scale(0.95); }
+                        to { opacity: 1; transform: translateY(0) scale(1); }
+                    }
+                    .auth-card { animation: authSlideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
+                    .auth-input::placeholder { color: #cbd5e1 !important; opacity: 1; }
+                    .auth-input:focus { border-color: #2563eb !important; background: #ffffff !important; }
+                `;
+                document.head.appendChild(style);
+            }
+        }, []);
 
         const handleInput = (e) => {
             const val = e.target.value;
             
-            // 삭제 대응
+            // 1. 삭제 처리
             if (val.length < realValue.length) {
                 const newReal = realValue.slice(0, val.length);
                 setRealValue(newReal);
@@ -18,20 +37,20 @@ window.AuthSystem = {
                 return;
             }
 
-            // 신규 글자 추출
+            // 2. 신규 글자 추가
             const char = val.slice(-1);
             const newReal = realValue + char;
             setRealValue(newReal);
 
-            // 현재 글자 보여주기 로직: 이전 글자들은 가리고 마지막 글자만 노출
+            // 3. 지연 마스킹: 이전 글자들은 ●로, 마지막 글자만 노출
             const masked = "●".repeat(realValue.length) + char;
             setDisplayValue(masked);
 
-            // 0.8초 후 마지막 글자도 가리기 (다음 글자 입력 시 즉시 가려짐)
+            // 4. 타이머 설정: 0.7초 후 마지막 글자도 마스킹
             if (timerRef.current) clearTimeout(timerRef.current);
             timerRef.current = setTimeout(() => {
                 setDisplayValue("●".repeat(newReal.length));
-            }, 800);
+            }, 700);
         };
 
         const verify = () => {
@@ -45,41 +64,68 @@ window.AuthSystem = {
         };
 
         return (
-            <div className="h-screen w-full bg-[#1E1E22] flex items-center justify-center p-6">
-                <div className="bg-white p-12 lg:p-24 rounded-[5rem] shadow-2xl text-center max-w-2xl w-full modal-animate border border-white/10">
-                    <div className="mb-10">
-                        <div className="flex justify-center mb-6">
-                            <div className="p-5 bg-slate-50 rounded-full shadow-inner">
-                                <lucide.icons.Lock size={48} className="text-slate-800" />
-                            </div>
-                        </div>
-                        <h2 className="text-2xl font-black mb-4 text-slate-300 uppercase tracking-[0.3em] italic">Security Protocol</h2>
-                        <h1 className="text-5xl font-black text-slate-800 tracking-tighter">접근 코드가 필요합니다</h1>
+            <div style={{
+                height: '100vh', width: '100vw', backgroundColor: '#1E1E22',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                position: 'fixed', top: 0, left: 0, zIndex: 9999, overflow: 'hidden'
+            }}>
+                <div className="auth-card" style={{
+                    backgroundColor: '#ffffff', padding: '80px 60px', borderRadius: '80px',
+                    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)', textAlign: 'center',
+                    maxWidth: '600px', width: '90%'
+                }}>
+                    
+                    {/* 타이틀 영역 */}
+                    <div style={{ marginBottom: '60px' }}>
+                        <p style={{ 
+                            color: '#cbd5e1', fontWeight: 900, letterSpacing: '0.4em', 
+                            fontSize: '14px', marginBottom: '16px', fontStyle: 'italic' 
+                        }}>SECURITY PROTOCOL</p>
+                        <h1 style={{ 
+                            fontSize: '42px', fontWeight: 900, color: '#1e293b', 
+                            margin: 0, letterSpacing: '-0.02em' 
+                        }}>접근 코드가 필요합니다</h1>
                     </div>
 
-                    <div className="relative group">
+                    {/* 입력 영역 */}
+                    <div style={{ position: 'relative', marginBottom: '40px' }}>
                         <input 
                             type="text" 
                             placeholder="Enter Code" 
                             autoFocus
                             value={displayValue}
                             onChange={handleInput}
-                            className="w-full border-4 border-slate-100 p-10 rounded-[3rem] text-center text-5xl font-black mb-12 bg-slate-50 outline-none focus:border-blue-600 transition-all shadow-inner placeholder:text-slate-200"
                             onKeyDown={(e) => e.key === 'Enter' && verify()}
+                            className="auth-input"
+                            style={{
+                                width: '100%', border: '6px solid #f1f5f9', padding: '35px',
+                                borderRadius: '40px', textAlign: 'center', fontSize: '48px',
+                                fontWeight: 900, backgroundColor: '#f8fafc', outline: 'none',
+                                transition: 'all 0.3s ease', boxSizing: 'border-box'
+                            }}
                         />
-                        <div className="absolute inset-y-0 right-10 flex items-center mb-12">
-                            <div className={`w-3 h-3 rounded-full transition-colors ${realValue.length > 0 ? 'bg-blue-500 animate-pulse' : 'bg-slate-200'}`}></div>
-                        </div>
                     </div>
 
+                    {/* 액션 버튼 */}
                     <button 
-                        onClick={verify} 
-                        className="w-full bg-slate-900 text-white py-10 rounded-[3rem] text-3xl font-black shadow-2xl active:scale-95 transition-all hover:bg-black uppercase tracking-widest"
+                        onClick={verify}
+                        style={{
+                            width: '100%', backgroundColor: '#0f172a', color: '#ffffff',
+                            padding: '30px', borderRadius: '40px', fontSize: '24px',
+                            fontWeight: 900, border: 'none', cursor: 'pointer',
+                            boxShadow: '0 10px 20px rgba(0,0,0,0.2)', transition: 'transform 0.2s ease',
+                            letterSpacing: '0.1em'
+                        }}
+                        onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.96)'}
+                        onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
                     >
-                        Verify System
+                        VERIFY SYSTEM
                     </button>
-                    
-                    <p className="mt-12 text-slate-300 font-bold uppercase tracking-[0.4em] text-sm italic">Study Cube Managed Session</p>
+
+                    <p style={{ 
+                        marginTop: '50px', color: '#94a3b8', fontSize: '12px', 
+                        fontWeight: 700, letterSpacing: '0.5em', opacity: 0.6 
+                    }}>STUDY CUBE PROTECTED AREA</p>
                 </div>
             </div>
         );
