@@ -4,45 +4,40 @@ export default function Loading() {
       className="fixed inset-0 z-[9999] flex flex-col items-center justify-center"
       style={{ background: "var(--sc-bg)" }}
     >
-      {/* 큐브 아이콘 애니메이션 */}
+      {/* 큐브 로고 애니메이션 — 테마별 로고 파일 전환 */}
       <div style={{ animation: "sc-pulse 1.6s ease-in-out infinite" }}>
-        <svg width="48" height="48" viewBox="0 0 28 28" fill="none">
-          <polygon
-            points="14,3 25,9 25,21 14,27 3,21 3,9"
-            stroke="#00FF85"
-            strokeWidth="1.6"
-            fill="none"
-            strokeLinejoin="round"
-            style={{ animation: "sc-draw 1.6s ease-in-out infinite" }}
-          />
-          <polyline
-            points="3,9 14,15 25,9"
-            stroke="#00FF85"
-            strokeWidth="1.6"
-            fill="none"
-            strokeLinejoin="round"
-          />
-          <line
-            x1="14" y1="15" x2="14" y2="27"
-            stroke="#00FF85"
-            strokeWidth="1.6"
-            strokeLinecap="round"
-          />
-        </svg>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/dark_logo.png"
+          alt="StudyCUBE"
+          width={72}
+          height={72}
+          className="sc-logo-dark"
+          style={{ width: 72, height: 72, objectFit: "contain" }}
+        />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/lite_logo.png"
+          alt="StudyCUBE"
+          width={72}
+          height={72}
+          className="sc-logo-lite"
+          style={{ width: 72, height: 72, objectFit: "contain" }}
+        />
       </div>
 
       {/* 로고 텍스트 */}
       <p
-        className="mt-4 text-sm font-black tracking-widest"
-        style={{ color: "var(--sc-dim)", letterSpacing: "0.2em" }}
+        className="mt-5 font-black tracking-widest"
+        style={{ color: "var(--sc-dim)", letterSpacing: "0.2em", fontSize: 18 }}
       >
         Study<span style={{ color: "var(--sc-green)" }}>CUBE</span>
       </p>
 
       {/* 로딩 바 */}
       <div
-        className="mt-6 rounded-full overflow-hidden"
-        style={{ width: 80, height: 2, background: "var(--sc-border)" }}
+        className="mt-7 rounded-full overflow-hidden"
+        style={{ width: 100, height: 2.5, background: "var(--sc-border)" }}
       >
         <div
           style={{
@@ -54,7 +49,11 @@ export default function Loading() {
         />
       </div>
 
-      <style>{`
+      <style dangerouslySetInnerHTML={{ __html: `
+        html.dark .sc-logo-dark { display: block; }
+        html.dark .sc-logo-lite { display: none; }
+        html:not(.dark) .sc-logo-dark { display: none; }
+        html:not(.dark) .sc-logo-lite { display: block; }
         @keyframes sc-pulse {
           0%, 100% { opacity: 1; transform: scale(1); }
           50%       { opacity: 0.6; transform: scale(0.92); }
@@ -64,7 +63,7 @@ export default function Loading() {
           50%  { width: 60%;  margin-left: 20%; }
           100% { width: 0%;   margin-left: 100%; }
         }
-      `}</style>
+      ` }} />
     </div>
   );
 }

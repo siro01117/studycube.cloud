@@ -2,8 +2,10 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import ScheduleClient from "@/components/classroom-schedule/ScheduleClient";
 
+const MIN_LOAD = new Promise((r) => setTimeout(r, 500));
+
 export default async function ClassroomSchedulePage() {
-  const supabase = await createClient();
+  const [, supabase] = await Promise.all([MIN_LOAD, createClient()]);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 

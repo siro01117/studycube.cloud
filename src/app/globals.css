@@ -8,18 +8,18 @@
    CSS 변수 - 라이트 모드 (기본값)
 ──────────────────────────────────────────────────────────── */
 :root {
-  --sc-bg:      #F5F5F3;
+  --sc-bg:      #F2F2F0;
   --sc-surface: #FFFFFF;
-  --sc-raised:  #EFEFED;
-  --sc-border:  #E5E5E3;
-  --sc-white:   #141414;   /* 텍스트 색 */
-  --sc-gray:    #666666;
-  --sc-dim:     #AAAAAA;
-  --sc-green:   #00B85C;
-  --sc-green-d: #009A4C;
+  --sc-raised:  #E8E8E6;
+  --sc-border:  #D8D8D6;
+  --sc-white:   #111111;   /* 텍스트 색 */
+  --sc-gray:    #555555;
+  --sc-dim:     #6E6E6E;   /* 라이트 모드: 대비 강화 */
+  --sc-green:   #008A44;   /* 매트한 녹색 (형광 제거) */
+  --sc-green-d: #006E35;
   /* 카드 전용 */
-  --card-spot:  rgba(0, 184, 92, 0.08);
-  --card-glow:  rgba(0, 184, 92, 0.15);
+  --card-spot:  rgba(0, 138, 68, 0.07);
+  --card-glow:  rgba(0, 138, 68, 0.18);
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -32,7 +32,7 @@
   --sc-border:  #2A2A2A;
   --sc-white:   #FFFFFF;
   --sc-gray:    #999999;
-  --sc-dim:     #555555;
+  --sc-dim:     #909090;   /* 다크 모드: 대비 강화 (기존 #555 → #909) */
   --sc-green:   #00FF85;
   --sc-green-d: #00CC6A;
   --card-spot:  rgba(0, 255, 133, 0.08);
@@ -54,7 +54,7 @@
     color: var(--sc-white);
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     -webkit-font-smoothing: antialiased;
-  }
+}
 }
 
 /* ────────────────────────────────────────────────────────────

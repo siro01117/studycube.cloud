@@ -4,6 +4,7 @@ import { redirect }          from "next/navigation";
 import Link                  from "next/link";
 import UserManager, { UserRow } from "@/components/admin/UserManager";
 import RoleManager               from "@/components/admin/RoleManager";
+import ThemeToggle               from "@/components/ui/ThemeToggle";
 import { RoleRow }               from "@/types";
 
 function HomeIcon() {
@@ -16,12 +17,14 @@ function HomeIcon() {
   );
 }
 
+const MIN_LOAD = new Promise((r) => setTimeout(r, 500));
+
 export default async function AdminUsersPage({
   searchParams,
 }: {
   searchParams: Promise<{ tab?: string }>;
 }) {
-  const params = await searchParams;
+  const [, params] = await Promise.all([MIN_LOAD, searchParams]);
   const tab    = params.tab === "roles" ? "roles" : "users";
 
   const supabase = await createClient();
@@ -95,15 +98,18 @@ export default async function AdminUsersPage({
       <div className="sticky top-0 z-30 px-8 pt-6 pb-4"
            style={{ background: "var(--sc-bg)", borderBottom: "1px solid var(--sc-border)", backdropFilter: "blur(12px)" }}>
 
-        {/* 브레드크럼 */}
-        <div className="flex items-center gap-1.5 mb-4">
-          <Link href="/portal"
-            className="flex items-center gap-1.5 text-xs font-semibold hover:opacity-100 transition-opacity"
-            style={{ color: "var(--sc-dim)", opacity: 0.6 }}>
-            <HomeIcon /> 홈
-          </Link>
-          <span style={{ color: "var(--sc-border)" }}>/</span>
-          <span className="text-xs font-semibold" style={{ color: "var(--sc-dim)" }}>유저 관리</span>
+        {/* 브레드크럼 + 테마 토글 */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-1.5">
+            <Link href="/portal"
+              className="flex items-center gap-1.5 text-xs font-semibold hover:opacity-100 transition-opacity"
+              style={{ color: "var(--sc-dim)", opacity: 0.6 }}>
+              <HomeIcon /> 홈
+            </Link>
+            <span style={{ color: "var(--sc-border)" }}>/</span>
+            <span className="text-xs font-semibold" style={{ color: "var(--sc-dim)" }}>유저 관리</span>
+          </div>
+          <ThemeToggle />
         </div>
 
         <div>

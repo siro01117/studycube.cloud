@@ -618,7 +618,7 @@ export default function UserManager({ users: initialUsers, roles, currentUserId 
                     <button onClick={() => handleApprove(u.id)}
                       className="w-7 h-7 rounded-lg flex items-center justify-center transition-all hover:scale-110"
                       title="승인"
-                      style={{ background:"rgba(0,255,133,0.1)", color:"var(--sc-green)", border:"1px solid rgba(0,255,133,0.3)" }}>
+                      style={{ background:"var(--card-spot)", color:"var(--sc-green)", border:"1px solid var(--card-spot)" }}>
                       <CheckIcon />
                     </button>
                   )}

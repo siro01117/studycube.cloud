@@ -7,15 +7,8 @@ import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-function CubeIcon({ size = 26 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 28 28" fill="none">
-      <polygon points="14,3 25,9 25,21 14,27 3,21 3,9" stroke="#00FF85" strokeWidth="1.6" fill="none" strokeLinejoin="round"/>
-      <polyline points="3,9 14,15 25,9" stroke="#00FF85" strokeWidth="1.6" fill="none" strokeLinejoin="round"/>
-      <line x1="14" y1="15" x2="14" y2="27" stroke="#00FF85" strokeWidth="1.6" strokeLinecap="round"/>
-    </svg>
-  );
-}
+import CubeIcon from "@/components/ui/CubeIcon";
+import ThemeToggle from "@/components/ui/ThemeToggle";
 
 // ── 아이디/비번 찾기 팝업 ──────────────────────────────────────────
 function ForgotPopup({ onClose }: { onClose: () => void }) {
@@ -30,9 +23,9 @@ function ForgotPopup({ onClose }: { onClose: () => void }) {
            onClick={(e) => e.stopPropagation()}>
         {/* 아이콘 */}
         <div className="w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-4"
-             style={{ background: "rgba(0,255,133,0.1)", border: "1px solid rgba(0,255,133,0.2)" }}>
+             style={{ background: "var(--card-spot)", border: "1px solid var(--card-glow)" }}>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
-               stroke="#00FF85" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+               style={{ stroke: "var(--sc-green)" }} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="12" cy="12" r="10"/>
             <line x1="12" y1="8" x2="12" y2="12"/>
             <line x1="12" y1="16" x2="12.01" y2="16"/>
@@ -94,6 +87,11 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-sc-bg flex items-center justify-center px-6">
+      {/* 우측 상단 테마 토글 */}
+      <div className="fixed top-5 right-6 z-50">
+        <ThemeToggle />
+      </div>
+
       <div className="w-full max-w-[360px]">
 
         {/* 로고 */}

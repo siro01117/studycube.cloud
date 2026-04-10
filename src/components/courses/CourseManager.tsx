@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import InstructorManager, { Instructor } from "./InstructorManager";
+import ThemeToggle from "@/components/ui/ThemeToggle";
 
 // ── 타입 ──────────────────────────────────────────────────────
 interface CourseRow {
@@ -422,8 +423,6 @@ function saveCourseFilter(patch: Record<string, unknown>) {
 export default function CourseManager() {
   const supabase = createClient();
 
-  const savedF = typeof window !== "undefined" ? loadCourseFilter() : {};
-
   const [courses,     setCourses]     = useState<CourseRow[]>([]);
   const [instructors, setInstructors] = useState<Instructor[]>([]);
   const [loading,     setLoading]     = useState(true);
@@ -433,8 +432,15 @@ export default function CourseManager() {
   const [deleteTarget,      setDeleteTarget]      = useState<CourseRow | null>(null);
   const [showInstructorMgr, setShowInstructorMgr] = useState(false);
   const [search,            setSearch]            = useState("");
-  const [filterMode,        setFilterModeRaw]     = useState<FilterMode>(savedF.filterMode ?? "all");
-  const [filterValue,       setFilterValueRaw]    = useState<string>(savedF.filterValue ?? "all");
+  const [filterMode,        setFilterModeRaw]     = useState<FilterMode>("all");
+  const [filterValue,       setFilterValueRaw]    = useState<string>("all");
+
+  // sessionStorage 복원 (hydration 오류 방지: useEffect 내에서만 읽기)
+  useEffect(() => {
+    const savedF = loadCourseFilter();
+    if (savedF.filterMode)  setFilterModeRaw(savedF.filterMode as FilterMode);
+    if (savedF.filterValue) setFilterValueRaw(savedF.filterValue);
+  }, []);
 
   function setFilterMode(m: FilterMode) { setFilterModeRaw(m); saveCourseFilter({ filterMode: m }); }
   function setFilterValue(v: string)    { setFilterValueRaw(v); saveCourseFilter({ filterValue: v }); }
@@ -548,23 +554,26 @@ export default function CourseManager() {
       {/* 헤더 */}
       <div className="sticky top-0 z-30 px-8 pt-6 pb-4"
            style={{ background: "var(--sc-bg)", borderBottom: "1px solid var(--sc-border)", backdropFilter: "blur(12px)" }}>
-        {/* 브레드크럼 */}
-        <div className="flex items-center gap-4 mb-5">
-          <Link href="/portal"
-            className="flex items-center gap-1.5 text-xs font-semibold transition-all hover:opacity-100 w-fit"
-            style={{ color: "var(--sc-dim)", opacity: 0.6 }}
-            onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
-            onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.6")}>
-            <HomeIcon /> 홈
-          </Link>
-          <span style={{ color: "var(--sc-border)" }}>·</span>
-          <Link href="/manage/classroom-schedule"
-            className="text-xs font-semibold transition-all hover:opacity-100"
-            style={{ color: "var(--sc-dim)", opacity: 0.6 }}
-            onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
-            onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.6")}>
-            교실 시간표
-          </Link>
+        {/* 브레드크럼 + 테마 토글 */}
+        <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center gap-4">
+            <Link href="/portal"
+              className="flex items-center gap-1.5 text-xs font-semibold transition-all hover:opacity-100 w-fit"
+              style={{ color: "var(--sc-dim)", opacity: 0.6 }}
+              onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+              onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.6")}>
+              <HomeIcon /> 홈
+            </Link>
+            <span style={{ color: "var(--sc-border)" }}>·</span>
+            <Link href="/manage/classroom-schedule"
+              className="text-xs font-semibold transition-all hover:opacity-100"
+              style={{ color: "var(--sc-dim)", opacity: 0.6 }}
+              onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+              onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.6")}>
+              교실 시간표
+            </Link>
+          </div>
+          <ThemeToggle />
         </div>
 
         <div className="flex items-center justify-between gap-4 flex-wrap">

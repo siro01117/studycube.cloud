@@ -261,7 +261,7 @@ function RoleFormModal({
                       </span>
                       <div className="w-4 h-4 rounded flex items-center justify-center flex-shrink-0"
                            style={{
-                             background: allOn ? "var(--sc-green)" : someOn ? "rgba(0,255,133,0.3)" : "var(--sc-surface)",
+                             background: allOn ? "var(--sc-green)" : someOn ? "var(--card-spot)" : "var(--sc-surface)",
                              border: `1px solid ${allOn || someOn ? "var(--sc-green)" : "var(--sc-border)"}`,
                            }}>
                         {(allOn || someOn) && (
@@ -284,8 +284,8 @@ function RoleFormModal({
                             onClick={() => toggleModule(cat.id, m.key)}
                             className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-left transition-all"
                             style={{
-                              background: on ? "rgba(0,255,133,0.08)" : "var(--sc-raised)",
-                              border:     `1px solid ${on ? "rgba(0,255,133,0.25)" : "var(--sc-border)"}`,
+                              background: on ? "var(--card-spot)" : "var(--sc-raised)",
+                              border:     `1px solid ${on ? "var(--card-spot)" : "var(--sc-border)"}`,
                             }}>
                             <div className="w-3.5 h-3.5 rounded flex items-center justify-center flex-shrink-0"
                                  style={{ background: on ? "var(--sc-green)" : "var(--sc-surface)", border: `1px solid ${on ? "var(--sc-green)" : "var(--sc-border)"}` }}>
@@ -448,7 +448,7 @@ export default function RoleManager({ roles: initialRoles }: Props) {
                     </span>
                     {isReserved && (
                       <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider"
-                            style={{ background: "rgba(0,255,133,0.08)", color: "var(--sc-green)", border: "1px solid rgba(0,255,133,0.2)" }}>
+                            style={{ background: "var(--card-spot)", color: "var(--sc-green)", border: "1px solid var(--card-spot)" }}>
                         기본
                       </span>
                     )}

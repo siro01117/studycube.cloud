@@ -34,29 +34,46 @@ interface CellInfo {
   endTime?:      string;
 }
 
+interface Classroom { id: string; name: string; }
+
+interface ExistingSchedule {
+  classroom_id: string;
+  day:          string;
+  start_time:   string;
+  end_time:     string;
+  course_name?: string;
+  course_subject?: string;
+}
+
 interface Props {
   cell:               CellInfo | null;
   courses:            Course[];
   preselectedCourse?: Course | null;
   onClose:            () => void;
   onSave:             (data: SaveData) => void;
+  // 선생님 뷰 지원
+  viewMode?:          string;
+  activeTeacher?:     string;
+  classrooms?:        Classroom[];
+  existingSchedules?: ExistingSchedule[];
 }
 
 export interface SaveData {
-  cell:          CellInfo;
-  action:        "add" | "delete";
+  cell:              CellInfo;
+  action:            "add" | "delete";
   // 추가
-  addType?:      AddType;
-  selectedDays?: DayKey[];
-  startTime?:    string;
-  endTime?:      string;
-  courseId?:     string;
-  newCourseName?: string;
+  addType?:          AddType;
+  selectedDays?:     DayKey[];
+  startTime?:        string;
+  endTime?:          string;
+  courseId?:         string;
+  newCourseName?:    string;
+  classroomOverride?: string;  // 선생님 뷰에서 교실 직접 지정
   // 삭제
-  deleteType?:   DeleteType;
+  deleteType?:       DeleteType;
   // 임시 공통
-  tempScope?:    TempScope;
-  weeksCount?:   number;
+  tempScope?:        TempScope;
+  weeksCount?:       number;
 }
 
 const DAY_LABEL: Record<string, string> = {
@@ -68,6 +85,84 @@ function addHour(t: string) {
   const nh = Math.floor((h * 60 + m + 60) / 60) % 24;
   const nm = (h * 60 + m + 60) % 60;
   return `${String(nh).padStart(2,"0")}:${String(nm).padStart(2,"0")}`;
+}
+
+/** HH:MM → 분 */
+function toMin(t: string) {
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + m;
+}
+
+// ── 교실 선택 드롭다운 (테마 스타일) ──────────────────────────
+const crDropdownScrollCSS = `
+.cr-dropdown-list::-webkit-scrollbar { width: 6px; }
+.cr-dropdown-list::-webkit-scrollbar-track { background: transparent; }
+.cr-dropdown-list::-webkit-scrollbar-thumb { background: var(--sc-border); border-radius: 3px; }
+.cr-dropdown-list::-webkit-scrollbar-thumb:hover { background: var(--sc-dim); }
+`;
+
+function ClassroomDropdown({ classrooms, value, onSelect }: {
+  classrooms: { id: string; name: string }[];
+  value:      string;
+  onSelect:   (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const fn = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", fn);
+    return () => document.removeEventListener("mousedown", fn);
+  }, []);
+
+  const selected = classrooms.find((cr) => cr.id === value);
+  const label = selected ? selected.name : "교실 선택...";
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <style dangerouslySetInnerHTML={{ __html: crDropdownScrollCSS }} />
+      <div className="sc-input text-sm w-full flex items-center justify-between"
+           style={{ padding: "10px 12px", cursor: "pointer", color: selected ? "var(--sc-white)" : "var(--sc-dim)", fontWeight: selected ? 700 : 400 }}
+           onClick={() => setOpen(!open)}>
+        <span className="truncate">{label}</span>
+        {/* 화살표 아이콘 */}
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+             style={{ flexShrink: 0, opacity: 0.5, transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </div>
+      {open && (
+        <div className="cr-dropdown-list" style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 100,
+          background: "var(--sc-surface)", border: "1px solid var(--sc-border)",
+          borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+          maxHeight: 220, overflowY: "auto",
+        }}>
+          {classrooms.map((cr) => {
+            const active = cr.id === value;
+            return (
+              <button key={cr.id}
+                onClick={() => { onSelect(cr.id); setOpen(false); }}
+                className="w-full text-left"
+                style={{
+                  padding: "10px 14px", display: "block",
+                  borderBottom: "1px solid var(--sc-border)",
+                  background: active ? "var(--sc-raised)" : "transparent",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--sc-raised)")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = active ? "var(--sc-raised)" : "transparent")}
+              >
+                <p style={{ fontSize: 13, fontWeight: 700, color: active ? "var(--sc-green)" : "var(--sc-white)" }}>{cr.name}</p>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── 수업 검색 ─────────────────────────────────────────────────
@@ -99,30 +194,14 @@ function CourseSearchInput({ courses, value, onSelect }: {
     <div className="sc-input" style={{ padding: "10px 12px" }}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          {/* 과목 */}
+          {/* 선생님T - 과목 */}
           <p className="text-sm font-bold truncate" style={{ color: "var(--sc-white)" }}>
-            {courseLabel(value)}
+            {value.instructorName ? `${value.instructorName}T - ${courseLabel(value)}` : courseLabel(value)}
           </p>
-          {/* 선생님 + 학생 수 */}
-          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-            {value.instructorName && (
-              <span className="flex items-center gap-1 text-xs" style={{ color: "var(--sc-dim)" }}>
-                <span style={{ display:"inline-block", width:6, height:6, borderRadius:"50%",
-                               background: value.instructorColor ?? "#888" }} />
-                {value.instructorName}
-              </span>
-            )}
-            {(value.enrolledNames?.length ?? 0) > 0 && (
-              <span className="text-xs" style={{ color: "var(--sc-dim)" }}>
-                · 학생 {value.enrolledNames!.length}명
-              </span>
-            )}
-          </div>
-          {/* 학생 이름 미리보기 */}
+          {/* 학생 이름 콤마 구분 */}
           {(value.enrolledNames?.length ?? 0) > 0 && (
-            <p className="text-xs mt-0.5 truncate" style={{ color: "rgba(255,255,255,0.35)" }}>
-              {value.enrolledNames!.slice(0, 5).join(", ")}
-              {value.enrolledNames!.length > 5 && ` 외 ${value.enrolledNames!.length - 5}명`}
+            <p className="text-xs mt-0.5 truncate" style={{ color: "var(--sc-dim)" }}>
+              {value.enrolledNames!.join(", ")}
             </p>
           )}
         </div>
@@ -163,30 +242,14 @@ function CourseSearchInput({ courses, value, onSelect }: {
               onMouseEnter={(e) => (e.currentTarget.style.background = "var(--sc-raised)")}
               onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
             >
-              {/* 과목명 */}
+              {/* (이름)T - (과목) */}
               <p style={{ fontSize: 13, fontWeight: 700, color: "var(--sc-white)", marginBottom: 3 }}>
-                {courseLabel(c)}
+                {c.instructorName ? `${c.instructorName}T - ${courseLabel(c)}` : courseLabel(c)}
               </p>
-              {/* 선생님 + 학생 수 */}
-              <div className="flex items-center gap-2 flex-wrap">
-                {c.instructorName && (
-                  <span className="flex items-center gap-1" style={{ fontSize: 11, color: "var(--sc-dim)" }}>
-                    <span style={{ display:"inline-block", width:6, height:6, borderRadius:"50%",
-                                   background: c.instructorColor ?? "#888" }} />
-                    {c.instructorName}
-                  </span>
-                )}
-                {(c.enrolledNames?.length ?? 0) > 0 && (
-                  <span style={{ fontSize: 11, color: "var(--sc-dim)" }}>
-                    학생 {c.enrolledNames!.length}명
-                  </span>
-                )}
-              </div>
-              {/* 학생 이름 */}
+              {/* 학생 이름 콤마 구분 */}
               {(c.enrolledNames?.length ?? 0) > 0 && (
-                <p style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>
-                  {c.enrolledNames!.slice(0, 4).join(" · ")}
-                  {c.enrolledNames!.length > 4 && ` 외 ${c.enrolledNames!.length - 4}명`}
+                <p style={{ fontSize: 11, color: "var(--sc-dim)", marginTop: 2 }}>
+                  {c.enrolledNames!.join(", ")}
                 </p>
               )}
             </button>
@@ -251,15 +314,25 @@ function TempScopeSelector({ scope, setScope, weeks, setWeeks }: {
 }
 
 // ── 메인 모달 ─────────────────────────────────────────────────
-export default function EditModal({ cell, courses, preselectedCourse, onClose, onSave }: Props) {
+export default function EditModal({
+  cell, courses, preselectedCourse, onClose, onSave,
+  viewMode, activeTeacher, classrooms = [], existingSchedules = [],
+}: Props) {
   const isEdit = !!cell?.scheduleId;
+  const isTeacherView = viewMode === "teacher";
 
   // 추가 상태
-  const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
-  const [selectedDays,   setSelectedDays]   = useState<DayKey[]>([]);
-  const [startTime,      setStartTime]      = useState("14:00");
-  const [endTime,        setEndTime]        = useState("15:00");
-  const [addType,        setAddType]        = useState<AddType>("permanent");
+  const [selectedCourse,   setSelectedCourse]   = useState<Course | null>(null);
+  const [selectedDays,     setSelectedDays]      = useState<DayKey[]>([]);
+  const [startTime,        setStartTime]         = useState("14:00");
+  const [endTime,          setEndTime]           = useState("15:00");
+  const [addType,          setAddType]           = useState<AddType>("permanent");
+  // 선생님 뷰: 교실 선택
+  const [selectedClassroomId, setSelectedClassroomId] = useState<string>("");
+  // 선생님 뷰: 선생님 선택 (필터용)
+  const [filterTeacher,    setFilterTeacher]     = useState<string>(activeTeacher ?? "");
+  // 충돌 에러
+  const [conflictError,    setConflictError]     = useState<string | null>(null);
 
   // 삭제 상태
   const [deleteType, setDeleteType] = useState<DeleteType>("temporary");
@@ -270,9 +343,7 @@ export default function EditModal({ cell, courses, preselectedCourse, onClose, o
 
   // preselectedCourse가 들어오면 자동 선택
   useEffect(() => {
-    if (preselectedCourse) {
-      setSelectedCourse(preselectedCourse);
-    }
+    if (preselectedCourse) setSelectedCourse(preselectedCourse);
   }, [preselectedCourse]);
 
   useEffect(() => {
@@ -286,6 +357,14 @@ export default function EditModal({ cell, courses, preselectedCourse, onClose, o
     setDeleteType("temporary");
     setTempScope("once");
     setWeeks(2);
+    setConflictError(null);
+    // 교실 뷰에서 열면 해당 교실 기본 선택
+    if (isTeacherView && classrooms.length > 0) {
+      setSelectedClassroomId(classrooms[0].id);
+    } else {
+      setSelectedClassroomId("");
+    }
+    setFilterTeacher(activeTeacher ?? "");
   }, [cell]);
 
   if (!cell) return null;
@@ -294,19 +373,77 @@ export default function EditModal({ cell, courses, preselectedCourse, onClose, o
     setSelectedDays((p) => p.includes(d) ? p.filter((x) => x !== d) : [...p, d]);
   }
 
+  // 선생님 필터 적용된 수업 목록
+  const filteredCourses = isTeacherView && filterTeacher
+    ? courses.filter((c) => c.instructorName === filterTeacher)
+    : courses;
+
+  // 선생님 목록 (전체 courses에서 추출)
+  const allTeachers = Array.from(new Set(
+    courses.map((c) => c.instructorName).filter(Boolean) as string[]
+  )).sort();
+
+  /** 충돌 검사: 선택된 교실 × 요일 × 시간이 기존 일정과 겹치는지 확인 */
+  function findConflict(classroomId: string, day: DayKey, sTime: string, eTime: string): ExistingSchedule | null {
+    const sMin = toMin(sTime);
+    const eMin = toMin(eTime);
+    for (const s of existingSchedules) {
+      if (s.classroom_id !== classroomId) continue;
+      if (s.day !== day) continue;
+      const existS = toMin(s.start_time);
+      const existE = toMin(s.end_time);
+      // 겹치는 조건: sMin < existE && eMin > existS
+      if (sMin < existE && eMin > existS) return s;
+    }
+    return null;
+  }
+
   function submit(action: "add" | "delete") {
+    setConflictError(null);
+
+    // 추가 시 충돌 검사
+    if (action === "add" && isTeacherView && selectedClassroomId) {
+      for (const day of selectedDays) {
+        const conflict = findConflict(selectedClassroomId, day, startTime, endTime);
+        if (conflict) {
+          const conflictName = conflict.course_subject || conflict.course_name || "다른 수업";
+          const dayLabel = DAY_LABEL[day] ?? day;
+          setConflictError(
+            `${dayLabel}요일 일정이 "${conflictName}"과(와) 겹칩니다. 추가할 수 없습니다.`
+          );
+          return;
+        }
+      }
+    } else if (action === "add" && !isTeacherView) {
+      // 교실 기반 뷰에서도 충돌 검사
+      const classroomId = cell!.classroomId;
+      for (const day of selectedDays) {
+        const conflict = findConflict(classroomId, day, startTime, endTime);
+        if (conflict) {
+          const conflictName = conflict.course_subject || conflict.course_name || "다른 수업";
+          const dayLabel = DAY_LABEL[day] ?? day;
+          setConflictError(
+            `${dayLabel}요일 일정이 "${conflictName}"과(와) 겹칩니다. 추가할 수 없습니다.`
+          );
+          return;
+        }
+      }
+    }
+
     const isTemp = action === "add" ? addType === "temporary" : deleteType === "temporary";
     onSave({
-      cell:          cell!,
+      cell:             cell!,
       action,
-      addType:       action === "add"    ? addType    : undefined,
-      deleteType:    action === "delete" ? deleteType : undefined,
-      selectedDays:  action === "add"    ? selectedDays  : undefined,
-      startTime:     action === "add"    ? startTime     : undefined,
-      endTime:       action === "add"    ? endTime       : undefined,
-      courseId:      action === "add"    ? selectedCourse?.id  : undefined,
-      tempScope:     isTemp ? tempScope : undefined,
-      weeksCount:    isTemp && tempScope === "weeks" ? weeks : undefined,
+      addType:          action === "add"    ? addType    : undefined,
+      deleteType:       action === "delete" ? deleteType : undefined,
+      selectedDays:     action === "add"    ? selectedDays  : undefined,
+      startTime:        action === "add"    ? startTime     : undefined,
+      endTime:          action === "add"    ? endTime       : undefined,
+      courseId:         action === "add"    ? selectedCourse?.id  : undefined,
+      classroomOverride: (action === "add" && isTeacherView && selectedClassroomId)
+                          ? selectedClassroomId : undefined,
+      tempScope:        isTemp ? tempScope : undefined,
+      weeksCount:       isTemp && tempScope === "weeks" ? weeks : undefined,
     });
   }
 
@@ -329,7 +466,9 @@ export default function EditModal({ cell, courses, preselectedCourse, onClose, o
           <div>
             <p className="text-[11px] font-bold uppercase tracking-widest mb-1"
                style={{ color:"var(--sc-dim)" }}>
-              {cell.classroomName} · {dayLabel}요일
+              {isTeacherView
+                ? `선생님 뷰 · ${dayLabel}요일`
+                : `${cell.classroomName} · ${dayLabel}요일`}
             </p>
             <h3 className="font-black text-lg" style={{ color:"var(--sc-white)" }}>
               {isEdit ? "일정 관리" : "일정 추가"}
@@ -349,12 +488,50 @@ export default function EditModal({ cell, courses, preselectedCourse, onClose, o
         {/* ── 추가 폼 ─────────────────────────────────────────── */}
         {!isEdit && (
           <div className="space-y-4 mb-5">
+
+            {/* 선생님 뷰: 교실 선택 */}
+            {isTeacherView && classrooms.length > 0 && (
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-widest mb-2"
+                   style={{ color:"var(--sc-dim)" }}>교실</p>
+                <ClassroomDropdown
+                  classrooms={classrooms}
+                  value={selectedClassroomId}
+                  onSelect={(id) => { setSelectedClassroomId(id); setConflictError(null); }}
+                />
+              </div>
+            )}
+
+            {/* 선생님 뷰: 선생님 필터 선택 */}
+            {isTeacherView && allTeachers.length > 0 && (
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-widest mb-2"
+                   style={{ color:"var(--sc-dim)" }}>선생님</p>
+                <div className="flex gap-1.5 flex-wrap">
+                  {allTeachers.map((t) => {
+                    const on = filterTeacher === t;
+                    return (
+                      <button key={t} onClick={() => { setFilterTeacher(t); setSelectedCourse(null); }}
+                        className="px-3 h-8 rounded-lg text-xs font-bold transition-all duration-150"
+                        style={{
+                          background: on ? "var(--sc-green)"  : "var(--sc-raised)",
+                          color:      on ? "var(--sc-bg)"     : "var(--sc-dim)",
+                          border:     `1px solid ${on ? "var(--sc-green)" : "var(--sc-border)"}`,
+                        }}>
+                        {t}T
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* 수업 */}
             <div>
               <p className="text-[11px] font-bold uppercase tracking-widest mb-2"
                  style={{ color:"var(--sc-dim)" }}>수업</p>
               <CourseSearchInput
-                courses={courses}
+                courses={filteredCourses}
                 value={selectedCourse}
                 onSelect={setSelectedCourse}
               />
@@ -368,7 +545,7 @@ export default function EditModal({ cell, courses, preselectedCourse, onClose, o
                 {DAYS.map(({ key, label }) => {
                   const on = selectedDays.includes(key);
                   return (
-                    <button key={key} onClick={() => toggleDay(key)}
+                    <button key={key} onClick={() => { toggleDay(key); setConflictError(null); }}
                       className="w-9 h-9 rounded-lg text-sm font-bold transition-all duration-150"
                       style={{
                         background: on ? "var(--sc-green)"  : "var(--sc-raised)",
@@ -389,14 +566,14 @@ export default function EditModal({ cell, courses, preselectedCourse, onClose, o
                 <div className="flex-1">
                   <p className="text-[10px] mb-1" style={{ color:"var(--sc-dim)" }}>시작</p>
                   <input type="time" step="300" value={startTime}
-                    onChange={(e) => { setStartTime(e.target.value); setEndTime(addHour(e.target.value)); }}
+                    onChange={(e) => { setStartTime(e.target.value); setEndTime(addHour(e.target.value)); setConflictError(null); }}
                     className="sc-input text-sm w-full" style={{ padding:"9px 10px" }} />
                 </div>
                 <span style={{ color:"var(--sc-dim)", marginTop:18 }}>→</span>
                 <div className="flex-1">
                   <p className="text-[10px] mb-1" style={{ color:"var(--sc-dim)" }}>종료</p>
                   <input type="time" step="300" value={endTime}
-                    onChange={(e) => setEndTime(e.target.value)}
+                    onChange={(e) => { setEndTime(e.target.value); setConflictError(null); }}
                     className="sc-input text-sm w-full" style={{ padding:"9px 10px" }} />
                 </div>
               </div>
@@ -416,7 +593,7 @@ export default function EditModal({ cell, courses, preselectedCourse, onClose, o
                       border:     `1px solid ${addType === t ? "var(--sc-green)" : "var(--sc-border)"}`,
                       transform:  addType === t ? "scale(1.02)" : "scale(1)",
                     }}>
-                    {t === "permanent" ? "🔒 고정 추가" : "⏱ 임시 추가"}
+                    {t === "permanent" ? "고정 추가" : "⏱ 임시 추가"}
                   </button>
                 ))}
               </div>
@@ -425,6 +602,21 @@ export default function EditModal({ cell, courses, preselectedCourse, onClose, o
             {/* 임시 추가 → 기간 */}
             {addType === "temporary" && (
               <TempScopeSelector scope={tempScope} setScope={setTempScope} weeks={weeks} setWeeks={setWeeks} />
+            )}
+
+            {/* 충돌 에러 */}
+            {conflictError && (
+              <div style={{
+                padding: "10px 14px",
+                borderRadius: 10,
+                background: "rgba(239,68,68,0.08)",
+                border: "1px solid rgba(239,68,68,0.3)",
+                fontSize: 12,
+                color: "#f87171",
+                fontWeight: 600,
+              }}>
+                ⚠️ {conflictError}
+              </div>
             )}
           </div>
         )}

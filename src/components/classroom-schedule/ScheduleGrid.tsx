@@ -32,6 +32,7 @@ interface Classroom { id: string; name: string; }
 export interface ScheduleEntry {
   id:               string;
   classroom_id:     string;
+  classroom_name?:  string;   // 교실 이름 (선생님 뷰에서 블록에 표시)
   day:              DayKey;
   start_time:       string;   // "HH:MM" or "HH:MM:SS"
   end_time:         string;
@@ -59,16 +60,32 @@ export interface CellClickInfo {
 }
 
 interface Props {
-  view:         "day" | "room";
-  classrooms:   Classroom[];
-  schedules:    ScheduleEntry[];
-  selectedDay:  DayKey;
-  selectedRoom: string;
-  onDayChange:  (d: DayKey) => void;
-  onRoomChange: (id: string) => void;
-  onCellClick:  (info: CellClickInfo) => void;
-  onViewChange: (v: "day" | "room") => void;
-  isWide?:      boolean;   // 사이드바 레이아웃 여부
+  view:              "day" | "room" | "teacher";
+  classrooms:        Classroom[];
+  schedules:         ScheduleEntry[];
+  selectedDay:       DayKey;
+  selectedRoom:      string;
+  selectedTeacher?:  string;
+  onDayChange:       (d: DayKey) => void;
+  onRoomChange:      (id: string) => void;
+  onTeacherChange?:  (name: string) => void;
+  onCellClick:       (info: CellClickInfo) => void;
+  onViewChange:      (v: "day" | "room" | "teacher") => void;
+  isWide?:           boolean;   // 사이드바 레이아웃 여부
+}
+
+// ── 다크모드 감지 ─────────────────────────────────────────────
+function useDarkMode(): boolean {
+  // 기본값 true: 서버/클라이언트 첫 렌더 일치 (hydration error 방지), useEffect에서 실제 값 적용
+  const [isDark, setIsDark] = useState(true);
+  useEffect(() => {
+    const check = () => setIsDark(document.documentElement.classList.contains("dark"));
+    check();
+    const obs = new MutationObserver(check);
+    obs.observe(document.documentElement, { attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
+  return isDark;
 }
 
 // ── 현재 시간 위치 계산 ────────────────────────────────────────
@@ -133,7 +150,6 @@ function hhmm(h: number, m = 0) {
 }
 
 // ── 색상 결정 ─────────────────────────────────────────────────
-// accent 색을 기준으로: 어두운 bg + 선명한 border accent
 const FALLBACK_ACCENTS = [
   "#00e875","#5badff","#c084fc","#fb923c",
   "#fbbf24","#f472b6","#2dd4bf","#f87171",
@@ -147,29 +163,78 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
 }
 
-function colorFor(entry: ScheduleEntry) {
-  // 우선순위: course_accent → teacher_color → 해시 기반 fallback
-  const accent = entry.course_accent ?? entry.teacher_color
-    ?? (() => {
-      const key  = entry.teacher_name ?? entry.course_name ?? entry.id;
-      const hash = key.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-      return FALLBACK_ACCENTS[hash % FALLBACK_ACCENTS.length];
-    })();
+/** 라이트 모드에서 형광/밝은 accent를 매트하게 어둡게 변환 */
+function matteForLight(hex: string): string {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgb(${Math.round(r * 0.52)}, ${Math.round(g * 0.52)}, ${Math.round(b * 0.52)})`;
+}
+
+function colorFor(entry: ScheduleEntry, isDark: boolean, view?: string) {
+  // 뷰에 따라 강조 색 선택:
+  //  - 선생님 뷰: 수업 고유색 사용 (수업 구분에 유리)
+  //  - 요일/교실 뷰: 선생님 색 사용 (강사 구분에 유리)
+  const accent = view === "teacher"
+    ? (entry.course_accent ?? entry.teacher_color
+        ?? (() => {
+          const key  = entry.course_name ?? entry.id;
+          const hash = key.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+          return FALLBACK_ACCENTS[hash % FALLBACK_ACCENTS.length];
+        })())
+    : (entry.teacher_color ?? entry.course_accent
+        ?? (() => {
+          const key  = entry.teacher_name ?? entry.course_name ?? entry.id;
+          const hash = key.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+          return FALLBACK_ACCENTS[hash % FALLBACK_ACCENTS.length];
+        })());
 
   const [r, g, b] = hexToRgb(accent);
-  // 아주 어두운 배경: 원색 12% + 기본 어두운 베이스
-  const bg = `rgb(${Math.round(r * 0.14 + 13)}, ${Math.round(g * 0.14 + 13)}, ${Math.round(b * 0.14 + 15)})`;
-  return { bg, border: accent, text: "#ffffff" };
+
+  if (isDark) {
+    // 다크 모드: 확실히 색감 보이는 진한 tint (캐쥬얼 톤)
+    // #00FF85 → rgb(15,104,62)  밝은 다크 그린
+    // #5badff → rgb(47,76,104)  밝은 다크 블루
+    // #fb923c → rgb(103,55,28)  따뜻한 다크 오렌지
+    const bgR = Math.round(r * 0.35 + 15);
+    const bgG = Math.round(g * 0.35 + 15);
+    const bgB = Math.round(b * 0.35 + 17);
+    return {
+      bg:        `rgb(${bgR}, ${bgG}, ${bgB})`,
+      border:    accent,
+      text:      "#ffffff",
+      textDim:   "rgba(255,255,255,0.92)",
+      textMuted: "rgba(255,255,255,0.68)",
+    };
+  } else {
+    // 라이트 모드: 확실히 색감 보이는 파스텔 (캐쥬얼 톤)
+    // #00FF85 → rgb(175,252,215)  밝은 민트
+    // #5badff → rgb(202,236,252)  밝은 스카이블루
+    // #fb923c → rgb(250,218,187)  밝은 피치
+    const bgR = Math.min(252, Math.round(r * 0.30 + 175));
+    const bgG = Math.min(252, Math.round(g * 0.30 + 175));
+    const bgB = Math.min(250, Math.round(b * 0.30 + 173));
+    const matteAccent = matteForLight(accent);
+    return {
+      bg:        `rgb(${bgR}, ${bgG}, ${bgB})`,
+      border:    matteAccent,
+      text:      "#0d0d0d",
+      textDim:   "rgba(15,15,15,0.82)",
+      textMuted: "rgba(15,15,15,0.60)",
+    };
+  }
 }
 
 // ── 블록 컴포넌트 ─────────────────────────────────────────────
 function ScheduleBlock({
   schedule,
   pxPerHour,
+  isDark,
+  view,
   onClick,
 }: {
   schedule:  ScheduleEntry;
   pxPerHour: number;
+  isDark:    boolean;
+  view:      string;
   onClick:   () => void;
 }) {
   const pxPerMin = pxPerHour / 60;
@@ -177,7 +242,7 @@ function ScheduleBlock({
   const endMin   = timeToMinutesFromBase(toHHMM(schedule.end_time));
   const top      = startMin * pxPerMin;
   const height   = Math.max((endMin - startMin) * pxPerMin, MIN_BLOCK_H);
-  const color    = colorFor(schedule);
+  const color    = colorFor(schedule, isDark, view);
   const showName     = height > 18;
   const showTeacher  = height > 40;
   const showTime     = height > 30;
@@ -206,7 +271,8 @@ function ScheduleBlock({
         zIndex:       2,
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.filter    = "brightness(1.4)";
+        // 라이트 모드: 어둡게, 다크 모드: 밝게
+        e.currentTarget.style.filter    = isDark ? "brightness(1.4)" : "brightness(0.88)";
         e.currentTarget.style.transform = "scaleX(1.015)";
         e.currentTarget.style.zIndex    = "10";
       }}
@@ -232,12 +298,12 @@ function ScheduleBlock({
         }}>임시</div>
       )}
 
-      {/* 과목 (없으면 수업명 fallback) */}
+      {/* 과목 (없으면 수업명 fallback) — 13px */}
       {showName && (
         <p style={{
-          fontSize:     11,
+          fontSize:     13,
           fontWeight:   800,
-          color:        color.border,        // accent 색으로 과목명 강조
+          color:        color.text,
           marginTop:    0,
           lineHeight:   1.3,
           overflow:     "hidden",
@@ -249,26 +315,41 @@ function ScheduleBlock({
         </p>
       )}
 
-      {/* 강사명 */}
-      {showTeacher && schedule.teacher_name && (
+      {/* 강사명 + 첫 학생 이름 (인라인 콤팩트) — 선생님 뷰에서는 선생님 이름 생략 */}
+      {showTeacher && (
         <p style={{
-          fontSize:     10,
-          color:        "rgba(255,255,255,0.82)",
-          marginTop:    2,
+          fontSize:     11,
+          fontWeight:   800,
+          color:        color.text,
+          opacity:      0.93,
+          marginTop:    5,
           overflow:     "hidden",
           whiteSpace:   "nowrap",
           textOverflow: "ellipsis",
         }}>
-          {schedule.teacher_name} T
+          {/* 선생님 뷰가 아닐 때만 선생님 이름 표시 */}
+          {view !== "teacher" && schedule.teacher_name && (
+            <span>{schedule.teacher_name} T{names.length > 0 && !showStudents ? "  " : ""}</span>
+          )}
+          {/* 학생 목록이 안 보이는 작은 블록에서는 첫 학생 이름만 인라인으로 */}
+          {/* 선생님 뷰: 선생님 서식(0.93), 그 외: 학생 서식(0.85) */}
+          {!showStudents && names.length > 0 && (
+            <span style={{ fontSize: view === "teacher" ? 11 : 9, opacity: view === "teacher" ? 0.93 : 0.85 }}>
+              {names[0]}{names.length > 1 ? "…" : ""}
+            </span>
+          )}
         </p>
       )}
 
-      {/* 수강 학생 이름 */}
+      {/* 수강 학생 이름 (크기 충분할 때만 전체 목록) */}
+      {/* 선생님 뷰: 선생님 서식(11px, 0.93) / 그 외: 학생 서식(9px, 0.85) */}
       {showStudents && names.length > 0 && (
         <p style={{
-          fontSize:     9,
-          color:        "rgba(255,255,255,0.65)",
-          marginTop:    2,
+          fontSize:     view === "teacher" ? 11 : 9,
+          fontWeight:   800,
+          color:        color.text,
+          opacity:      view === "teacher" ? 0.93 : 0.85,
+          marginTop:    5,
           overflow:     "hidden",
           whiteSpace:   "nowrap",
           textOverflow: "ellipsis",
@@ -285,9 +366,9 @@ function ScheduleBlock({
           bottom:       3,
           left:         6,
           right:        5,
-          fontSize:     9,
+          fontSize:     9.5,
           fontWeight:   600,
-          color:        "rgba(255,255,255,0.6)",
+          color:        color.textMuted,
           whiteSpace:   "nowrap",
           overflow:     "hidden",
           textOverflow: "ellipsis",
@@ -319,11 +400,16 @@ function TabBtn({ active, onClick, children }: {
   );
 }
 
+// ── 오늘 요일키 ──────────────────────────────────────────────
+const DAY_TO_KEY: Record<number, DayKey> = {
+  1: "mon", 2: "tue", 3: "wed", 4: "thu", 5: "fri", 6: "sat", 0: "sun",
+};
+
 // ── 메인 그리드 ───────────────────────────────────────────────
 export default function ScheduleGrid({
   view, classrooms, schedules,
-  selectedDay, selectedRoom,
-  onDayChange, onRoomChange, onCellClick, onViewChange,
+  selectedDay, selectedRoom, selectedTeacher,
+  onDayChange, onRoomChange, onTeacherChange, onCellClick, onViewChange,
   isWide = false,
 }: Props) {
   // wide: 탭행(52px) 만 제외, tall: 상단 헤더 전체 제외
@@ -332,13 +418,21 @@ export default function ScheduleGrid({
   const TOTAL_HEIGHT = TOTAL_HOURS * pxPerHour;
   const HOUR_INDICES = Array.from({ length: TOTAL_HOURS + 1 }, (_, i) => i);
   const nowPx       = useCurrentTimePx(pxPerHour);
+  const isDark      = useDarkMode();
   const [hoveredCol, setHoveredCol] = useState<string | null>(null);
+  const todayKey    = DAY_TO_KEY[new Date().getDay()];
 
   const sortedRooms = [...classrooms].sort((a, b) => {
     const ai = CLASSROOM_ORDER.indexOf(a.name);
     const bi = CLASSROOM_ORDER.indexOf(b.name);
     return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
   });
+
+  // 선생님 목록 (schedules 에서 유일한 이름 추출)
+  const teachers = Array.from(new Set(
+    schedules.map((s) => s.teacher_name).filter((n): n is string => Boolean(n))
+  )).sort();
+  const activeTeacher = selectedTeacher ?? teachers[0] ?? "";
 
   const cols: { id: string; label: string }[] =
     view === "day"
@@ -348,6 +442,8 @@ export default function ScheduleGrid({
   function getBlocksForCol(colId: string): ScheduleEntry[] {
     if (view === "day") {
       return schedules.filter((s) => s.classroom_id === colId && s.day === selectedDay);
+    } else if (view === "teacher") {
+      return schedules.filter((s) => s.teacher_name === activeTeacher && s.day === (colId as DayKey));
     } else {
       const activeRoom = sortedRooms.find((r) => r.id === selectedRoom);
       return schedules.filter(
@@ -370,6 +466,9 @@ export default function ScheduleGrid({
     if (view === "day") {
       const room = sortedRooms.find((r) => r.id === colId);
       onCellClick({ classroomId: colId, classroomName: room?.name ?? "", day: selectedDay, time: clickedTime });
+    } else if (view === "teacher") {
+      // 선생님 뷰: 교실 없이 요일/시간만
+      onCellClick({ classroomId: "", classroomName: "", day: colId as DayKey, time: clickedTime });
     } else {
       const activeRoom = sortedRooms.find((r) => r.id === selectedRoom);
       onCellClick({ classroomId: activeRoom?.id ?? "", classroomName: activeRoom?.name ?? "", day: colId as DayKey, time: clickedTime });
@@ -389,6 +488,8 @@ export default function ScheduleGrid({
     if (view === "day") {
       const room = sortedRooms.find((r) => r.id === colId);
       onCellClick({ classroomId: colId, classroomName: room?.name ?? "", day: selectedDay, ...base });
+    } else if (view === "teacher") {
+      onCellClick({ classroomId: s.classroom_id, classroomName: s.classroom_name ?? "", day: colId as DayKey, ...base });
     } else {
       const activeRoom = sortedRooms.find((r) => r.id === selectedRoom);
       onCellClick({ classroomId: activeRoom?.id ?? "", classroomName: activeRoom?.name ?? "", day: colId as DayKey, ...base });
@@ -408,6 +509,12 @@ export default function ScheduleGrid({
                   {label}
                 </TabBtn>
               ))
+            : view === "teacher"
+            ? teachers.map((name) => (
+                <TabBtn key={name} active={activeTeacher === name} onClick={() => onTeacherChange?.(name)}>
+                  {name}
+                </TabBtn>
+              ))
             : sortedRooms.map((room) => (
                 <TabBtn key={room.id} active={selectedRoom === room.id} onClick={() => onRoomChange(room.id)}>
                   {room.name}
@@ -415,10 +522,10 @@ export default function ScheduleGrid({
               ))}
         </div>
 
-        {/* 요일별/교실별 토글 — 오른쪽 */}
+        {/* 뷰 토글 — 오른쪽 */}
         <div className="flex items-center gap-1 p-0.5 rounded-xl flex-shrink-0"
              style={{ background: "var(--sc-surface)", border: "1px solid var(--sc-border)" }}>
-          {(["day", "room"] as const).map((v) => (
+          {(["day", "room", "teacher"] as const).map((v) => (
             <button key={v} onClick={() => onViewChange(v)}
               className="px-3 py-1 rounded-lg text-xs font-bold transition-all duration-200"
               style={{
@@ -426,7 +533,7 @@ export default function ScheduleGrid({
                 color:      view === v ? "var(--sc-bg)"     : "var(--sc-dim)",
                 border:     "none",
               }}>
-              {v === "day" ? "요일별" : "교실별"}
+              {v === "day" ? "요일" : v === "room" ? "교실" : "선생님"}
             </button>
           ))}
         </div>
@@ -456,26 +563,30 @@ export default function ScheduleGrid({
         >
           {/* 시간열 헤더 여백 */}
           <div style={{ height: 36 }} />
-          {cols.map((col) => (
-            <div
-              key={col.id}
-              style={{
-                textAlign:     "center",
-                padding:       "8px 4px",
-                fontSize:      11,
-                fontWeight:    700,
-                letterSpacing: "0.04em",
-                color:         hoveredCol === col.id ? "var(--sc-white)" : "var(--sc-dim)",
-                borderLeft:    "1px solid var(--sc-border)",
-                background:    hoveredCol === col.id
-                  ? "rgba(0,255,133,0.06)"
-                  : "transparent",
-                transition:    "color 0.15s, background 0.15s",
-              }}
-            >
-              {col.label}
-            </div>
-          ))}
+          {cols.map((col) => {
+            const isToday = (view === "room" || view === "teacher") && col.id === todayKey;
+            return (
+              <div
+                key={col.id}
+                style={{
+                  textAlign:     "center",
+                  padding:       "8px 4px",
+                  fontSize:      11,
+                  fontWeight:    isToday ? 800 : 700,
+                  letterSpacing: "0.04em",
+                  // 오늘: 텍스트 색만 강조, 테두리 없음
+                  color:         isToday
+                    ? "var(--sc-green)"
+                    : hoveredCol === col.id ? "var(--sc-white)" : "var(--sc-dim)",
+                  borderLeft:    "1px solid var(--sc-border)",
+                  background:    "transparent",
+                  transition:    "color 0.15s",
+                }}
+              >
+                {col.label}
+              </div>
+            );
+          })}
         </div>
 
         {/* 타임 그리드 */}
@@ -535,8 +646,9 @@ export default function ScheduleGrid({
 
           {/* 데이터 컬럼들 */}
           {cols.map((col) => {
-            const blocks = getBlocksForCol(col.id);
+            const blocks    = getBlocksForCol(col.id);
             const isHovered = hoveredCol === col.id;
+            const isToday   = (view === "room" || view === "teacher") && col.id === todayKey;
             return (
               <div
                 key={col.id}
@@ -544,13 +656,28 @@ export default function ScheduleGrid({
                   position:   "relative",
                   borderLeft: "1px solid var(--sc-border)",
                   cursor:     "crosshair",
-                  background: isHovered ? "rgba(0,255,133,0.025)" : "transparent",
-                  transition: "background 0.15s",
+                  background: "transparent",
                 }}
                 onClick={(e) => handleColumnClick(e, col.id)}
                 onMouseEnter={() => setHoveredCol(col.id)}
                 onMouseLeave={() => setHoveredCol(null)}
               >
+                {/* 오늘/호버 열 강조 — 라운드 테두리 오버레이 */}
+                {(isToday || isHovered) && (
+                  <div
+                    className="pointer-events-none"
+                    style={{
+                      position:     "absolute",
+                      inset:        2,
+                      borderRadius: 8,
+                      border:       isToday
+                        ? "2px solid var(--sc-green)"
+                        : "1px solid var(--sc-dim)",
+                      zIndex:       4,
+                      transition:   "border-color 0.15s",
+                    }}
+                  />
+                )}
                 {/* 시간 구분선 */}
                 {HOUR_INDICES.map((i) => (
                   <div key={i}>
@@ -582,6 +709,8 @@ export default function ScheduleGrid({
                     key={s.id}
                     schedule={s}
                     pxPerHour={pxPerHour}
+                    isDark={isDark}
+                    view={view}
                     onClick={() => handleBlockClick(s, col.id)}
                   />
                 ))}

@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
+import ThemeToggle from "@/components/ui/ThemeToggle";
 
 export default function PendingPage() {
   const supabase = createClient();
@@ -17,6 +18,11 @@ export default function PendingPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center px-6" style={{ background: "var(--sc-bg)" }}>
+      {/* 우측 상단 테마 토글 */}
+      <div className="fixed top-5 right-6 z-50">
+        <ThemeToggle />
+      </div>
+
       <div className="w-full max-w-[380px] text-center">
 
         {/* 아이콘 */}

@@ -4,8 +4,10 @@ import Header            from "@/components/layout/Header";
 import PortalClient      from "@/components/portal/PortalClient";
 import { RoleRow }       from "@/types";
 
+const MIN_LOAD = new Promise((r) => setTimeout(r, 500));
+
 export default async function PortalPage() {
-  const supabase = await createClient();
+  const [, supabase] = await Promise.all([MIN_LOAD, createClient()]);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 

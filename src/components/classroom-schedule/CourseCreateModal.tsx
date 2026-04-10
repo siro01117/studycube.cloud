@@ -160,7 +160,7 @@ function StudentMultiSelect({ students, selected, onToggle }: {
                 style={{
                   padding:    "8px 12px",
                   display:    "flex",
-                  background: on ? "rgba(0,255,133,0.07)" : "transparent",
+                  background: on ? "var(--card-spot)" : "transparent",
                   borderBottom: "1px solid var(--sc-border)",
                 }}
                 onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}

@@ -8,6 +8,7 @@ import EditModal,      { SaveData, Course }              from "./EditModal";
 import ClassroomManagerModal                              from "./ClassroomManagerModal";
 import ScheduleDetailModal, { DetailCellInfo, DeleteData } from "./ScheduleDetailModal";
 import { ViewMode, DayKey, getMonday }                     from "./constants";
+import ThemeToggle                                          from "@/components/ui/ThemeToggle";
 
 // ── 타입 ──────────────────────────────────────────────────────
 interface Classroom { id: string; name: string; floor?: number; }
@@ -36,6 +37,7 @@ function normalize(s: RawSchedule): ScheduleEntry {
   return {
     id:              s.id,
     classroom_id:    s.classrooms?.id ?? "",
+    classroom_name:  s.classrooms?.name,
     day:             s.day,
     start_time:      s.start_time.slice(0, 5),
     end_time:        s.end_time.slice(0, 5),
@@ -50,10 +52,12 @@ function normalize(s: RawSchedule): ScheduleEntry {
   };
 }
 
-function normalizeOverride(o: any): ScheduleEntry {
+function normalizeOverride(o: any, classrooms: Classroom[]): ScheduleEntry {
+  const room = classrooms.find((c) => c.id === o.classroom_id);
   return {
     id:              o.id,
     classroom_id:    o.classroom_id ?? "",
+    classroom_name:  room?.name,
     day:             o.day,
     start_time:      (o.start_time ?? "00:00").slice(0, 5),
     end_time:        (o.end_time   ?? "01:00").slice(0, 5),
@@ -79,12 +83,12 @@ function HomeIcon() {
   );
 }
 
-function BuildingIcon() {
+function SearchIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
          stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="7" width="20" height="14" rx="2"/>
-      <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
+      <circle cx="11" cy="11" r="8"/>
+      <line x1="21" y1="21" x2="16.65" y2="16.65"/>
     </svg>
   );
 }
@@ -94,18 +98,21 @@ function NavLinks() {
   const hoverOn  = (e: React.MouseEvent<HTMLAnchorElement>) => (e.currentTarget.style.opacity = "1");
   const hoverOff = (e: React.MouseEvent<HTMLAnchorElement>) => (e.currentTarget.style.opacity = "0.6");
   return (
-    <div className="flex items-center gap-3 mb-5">
-      <Link href="/portal"
-        className="flex items-center gap-1.5 text-xs font-semibold transition-all hover:opacity-100 w-fit"
-        style={linkStyle} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
-        <HomeIcon /> 홈
-      </Link>
-      <span style={{ color: "var(--sc-border)", fontSize: 12 }}>·</span>
-      <Link href="/manage/courses"
-        className="text-xs font-semibold transition-all hover:opacity-100 w-fit"
-        style={linkStyle} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
-        수업 관리
-      </Link>
+    <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center gap-3">
+        <Link href="/portal"
+          className="flex items-center gap-1.5 text-xs font-semibold transition-all hover:opacity-100 w-fit"
+          style={linkStyle} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
+          <HomeIcon /> 홈
+        </Link>
+        <span style={{ color: "var(--sc-border)", fontSize: 12 }}>·</span>
+        <Link href="/manage/courses"
+          className="text-xs font-semibold transition-all hover:opacity-100 w-fit"
+          style={linkStyle} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
+          수업 관리
+        </Link>
+      </div>
+      <ThemeToggle />
     </div>
   );
 }
@@ -248,18 +255,19 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
   const supabase = createClient();
   const isWide   = useIsWideLayout();
 
-  // sessionStorage에서 이전 필터 복원
-  const saved = typeof window !== "undefined" ? loadFilter() : {};
-
-  const [view,            setViewRaw]         = useState<ViewMode>(saved.view ?? "day");
-  const [weekOffset,      setWeekOffset]      = useState(0);
-  const [selectedDay,     setSelectedDayRaw]  = useState<DayKey>(saved.selectedDay ?? "mon");
-  const [selectedRoom,    setSelectedRoomRaw] = useState(saved.selectedRoom ?? classrooms[0]?.id ?? "");
+  // hydration 에러 방지: 서버/클라이언트 초기값 동일하게 기본값 사용
+  // sessionStorage 복원은 useEffect에서 처리
+  const [view,            setViewRaw]          = useState<ViewMode>("day");
+  const [weekOffset,      setWeekOffset]       = useState(0);
+  const [selectedDay,     setSelectedDayRaw]   = useState<DayKey>("mon");
+  const [selectedRoom,    setSelectedRoomRaw]  = useState(classrooms[0]?.id ?? "");
+  const [selectedTeacher, setSelectedTeacherRaw] = useState<string>("");
 
   // 래퍼: 상태 변경 + sessionStorage 저장
   function setView(v: ViewMode) { setViewRaw(v); saveFilter({ view: v }); }
   function setSelectedDay(d: DayKey) { setSelectedDayRaw(d); saveFilter({ selectedDay: d }); }
   function setSelectedRoom(id: string) { setSelectedRoomRaw(id); saveFilter({ selectedRoom: id }); }
+  function setSelectedTeacher(name: string) { setSelectedTeacherRaw(name); saveFilter({ selectedTeacher: name }); }
   const [modalCell,       setModalCell]       = useState<CellClickInfo | null>(null);
   const [detailCell,      setDetailCell]      = useState<DetailCellInfo | null>(null);
   const [showRoomManager, setShowRoomManager] = useState(false);
@@ -267,6 +275,16 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
   const [weeklyOverrides, setWeeklyOverrides] = useState<any[]>([]);
 
   const [preselectedCourse, setPreselectedCourse] = useState<Course | null>(null);
+
+  // sessionStorage 복원 — hydration 후 실행
+  useEffect(() => {
+    const saved = loadFilter();
+    if (saved.view)            setViewRaw(saved.view as ViewMode);
+    if (saved.selectedDay)     setSelectedDayRaw(saved.selectedDay as DayKey);
+    if (saved.selectedRoom)    setSelectedRoomRaw(saved.selectedRoom);
+    if (saved.selectedTeacher !== undefined) setSelectedTeacherRaw(saved.selectedTeacher);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 수업 목록 (subject + instructor + 학생 포함)
   useEffect(() => {
@@ -333,7 +351,7 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
 
   const tempAdditions = weeklyOverrides
     .filter((o) => !o.is_cancelled)
-    .map(normalizeOverride);
+    .map((o) => normalizeOverride(o, classrooms));
 
   const effectiveSchedules = [
     ...activeFixed.filter((s) => !cancelledBaseIds.has(s.id)),
@@ -470,6 +488,17 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
         preselectedCourse={preselectedCourse}
         onClose={() => { setModalCell(null); setPreselectedCourse(null); }}
         onSave={handleSave}
+        viewMode={view}
+        activeTeacher={selectedTeacher}
+        classrooms={classrooms}
+        existingSchedules={effectiveSchedules.map((s) => ({
+          classroom_id:    s.classroom_id,
+          day:             s.day,
+          start_time:      s.start_time,
+          end_time:        s.end_time,
+          course_name:     s.course_name,
+          course_subject:  s.course_subject,
+        }))}
       />
       <ScheduleDetailModal
         cell={detailCell}
@@ -495,8 +524,10 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
       schedules={effectiveSchedules}
       selectedDay={selectedDay}
       selectedRoom={selectedRoom}
+      selectedTeacher={selectedTeacher}
       onDayChange={setSelectedDay}
       onRoomChange={setSelectedRoom}
+      onTeacherChange={setSelectedTeacher}
       onCellClick={handleCellClick}
       onViewChange={setView}
       isWide={isWide}
@@ -527,26 +558,23 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
         }}>
           <NavLinks />
 
-          {/* 타이틀 */}
+          {/* 타이틀 + 교실 정보 버튼 */}
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest mb-1"
                style={{ color: "var(--sc-dim)" }}>Management</p>
-            <h1 className="text-xl font-black" style={{ color: "var(--sc-white)" }}>교실 시간표</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-black" style={{ color: "var(--sc-white)" }}>교실 시간표</h1>
+              <button onClick={() => setShowRoomManager(true)}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold
+                           transition-all duration-200 hover:opacity-80 active:scale-95"
+                style={{ background: "var(--sc-raised)", color: "var(--sc-dim)", border: "1px solid var(--sc-border)" }}>
+                <SearchIcon /> 교실 정보
+              </button>
+            </div>
           </div>
 
           {/* 주간 네비게이터 (compact 세로 배치) */}
           <WeekNav weekOffset={weekOffset} setWeekOffset={setWeekOffset} compact />
-
-          {/* 구분선 */}
-          <div style={{ height: 1, background: "var(--sc-border)" }} />
-
-          {/* 교실 관리 */}
-          <button onClick={() => setShowRoomManager(true)}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold
-                       transition-all duration-200 hover:opacity-80 active:scale-95 w-full"
-            style={{ background: "var(--sc-raised)", color: "var(--sc-dim)", border: "1px solid var(--sc-border)" }}>
-            <BuildingIcon /> 교실 관리
-          </button>
         </div>
 
         {/* 우측 시간표 영역 — 최대 너비를 화면 높이의 80% 로 제한 */}
@@ -571,14 +599,16 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest mb-0.5"
                style={{ color: "var(--sc-dim)" }}>Management</p>
-            <h1 className="text-2xl font-black" style={{ color: "var(--sc-white)" }}>교실 시간표</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-black" style={{ color: "var(--sc-white)" }}>교실 시간표</h1>
+              <button onClick={() => setShowRoomManager(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold
+                           transition-all duration-200 hover:opacity-80 active:scale-95"
+                style={{ background: "var(--sc-raised)", color: "var(--sc-dim)", border: "1px solid var(--sc-border)" }}>
+                <SearchIcon /> 교실 정보
+              </button>
+            </div>
           </div>
-          <button onClick={() => setShowRoomManager(true)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold
-                       transition-all duration-200 hover:opacity-80 active:scale-95"
-            style={{ background: "var(--sc-raised)", color: "var(--sc-dim)", border: "1px solid var(--sc-border)" }}>
-            <BuildingIcon /> 교실 관리
-          </button>
         </div>
         <WeekNav weekOffset={weekOffset} setWeekOffset={setWeekOffset} />
       </div>

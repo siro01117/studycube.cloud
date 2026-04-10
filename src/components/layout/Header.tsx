@@ -2,53 +2,12 @@
 
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
-import { useTheme } from "@/components/providers/ThemeProvider";
-function CubeIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 28 28" fill="none">
-      <polygon points="14,3 25,9 25,21 14,27 3,21 3,9"
-        stroke="var(--sc-green)" strokeWidth="1.8" fill="none" strokeLinejoin="round"/>
-      <polyline points="3,9 14,15 25,9"
-        stroke="var(--sc-green)" strokeWidth="1.8" fill="none" strokeLinejoin="round"/>
-      <line x1="14" y1="15" x2="14" y2="27"
-        stroke="var(--sc-green)" strokeWidth="1.8" strokeLinecap="round"/>
-    </svg>
-  );
-}
-
-// 달/해 아이콘
-function SunIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="5"/>
-      <line x1="12" y1="1" x2="12" y2="3"/>
-      <line x1="12" y1="21" x2="12" y2="23"/>
-      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
-      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-      <line x1="1" y1="12" x2="3" y2="12"/>
-      <line x1="21" y1="12" x2="23" y2="12"/>
-      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
-      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-    </svg>
-  );
-}
-
-function MoonIcon() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-    </svg>
-  );
-}
+import CubeIcon from "@/components/ui/CubeIcon";
+import ThemeToggle from "@/components/ui/ThemeToggle";
 
 export default function Header({ name, role, roleLabel }: { name: string; role: string; roleLabel?: string }) {
   const router   = useRouter();
   const supabase = createClient();
-  const { theme, toggle } = useTheme();
-
-  const isDark = theme === "dark";
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -96,18 +55,7 @@ export default function Header({ name, role, roleLabel }: { name: string; role: 
         <div className="w-px h-4" style={{ background: "var(--sc-border)" }} />
 
         {/* 테마 토글 */}
-        <div className="flex items-center gap-2">
-          <span style={{ color: "var(--sc-dim)" }}>
-            {isDark ? <MoonIcon /> : <SunIcon />}
-          </span>
-          <button
-            onClick={toggle}
-            className={`theme-toggle ${isDark ? "active" : ""}`}
-            aria-label="테마 전환"
-          >
-            <div className="theme-toggle-knob" />
-          </button>
-        </div>
+        <ThemeToggle />
 
         {/* 구분선 */}
         <div className="w-px h-4" style={{ background: "var(--sc-border)" }} />

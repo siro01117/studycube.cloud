@@ -8,15 +8,8 @@ import { signupUser } from "./actions";
 import { createClient } from "@/lib/supabase/client";
 import DateInput from "@/components/ui/DateInput";
 
-function CubeIcon({ size = 24 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 28 28" fill="none">
-      <polygon points="14,3 25,9 25,21 14,27 3,21 3,9" stroke="#00FF85" strokeWidth="1.6" fill="none" strokeLinejoin="round"/>
-      <polyline points="3,9 14,15 25,9" stroke="#00FF85" strokeWidth="1.6" fill="none" strokeLinejoin="round"/>
-      <line x1="14" y1="15" x2="14" y2="27" stroke="#00FF85" strokeWidth="1.6" strokeLinecap="round"/>
-    </svg>
-  );
-}
+import CubeIcon from "@/components/ui/CubeIcon";
+import ThemeToggle from "@/components/ui/ThemeToggle";
 
 interface RoleOption { name: string; label: string; color: string; }
 
@@ -80,8 +73,8 @@ export default function SignupPage() {
       <div className="min-h-screen flex items-center justify-center px-6" style={{ background: "var(--sc-bg)" }}>
         <div className="w-full max-w-[360px] text-center">
           <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6"
-               style={{ background: "rgba(0,255,133,0.1)", border: "1px solid rgba(0,255,133,0.25)" }}>
-            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#00FF85" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+               style={{ background: "var(--card-spot)", border: "1px solid var(--card-glow)" }}>
+            <svg width="30" height="30" viewBox="0 0 24 24" fill="none" style={{ stroke: "var(--sc-green)" }} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="20 6 9 17 4 12"/>
             </svg>
           </div>
@@ -104,6 +97,11 @@ export default function SignupPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center px-6 py-10" style={{ background: "var(--sc-bg)" }}>
+      {/* 우측 상단 테마 토글 */}
+      <div className="fixed top-5 right-6 z-50">
+        <ThemeToggle />
+      </div>
+
       <div className="w-full max-w-[400px]">
 
         {/* 로고 */}

@@ -215,8 +215,8 @@ export default function ClassroomManagerModal({ classrooms, onClose, onRefresh }
             value={form.description}
             onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
             placeholder="메모 (선택 · 이름 옆에 표시됨)"
-            className="sc-input text-sm mb-3"
-            style={{ padding: "10px 14px" }}
+            className="sc-input text-sm mb-3 w-full"
+            style={{ padding: "10px 14px", width: "100%" }}
           />
 
           {/* 에러 */}

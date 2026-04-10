@@ -1,4 +1,4 @@
-export type ViewMode = "day" | "room";
+export type ViewMode = "day" | "room" | "teacher";
 export type TabMode  = "fixed" | "weekly";
 export type DayKey   = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 
