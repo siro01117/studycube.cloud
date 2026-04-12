@@ -43,6 +43,7 @@ export interface ScheduleEntry {
   teacher_color?:   string;   // 교사 색 (accent용)
   course_accent?:   string;   // 수업 강조 색
   enrolled_names?:  string[]; // 수강 학생 이름
+  notes?:           string;   // 상담 시 학생 이름 등 메모
   is_override?:     boolean;
 }
 
@@ -57,6 +58,8 @@ export interface CellClickInfo {
   teacherName?:  string;
   startTime?:    string;
   endTime?:      string;
+  notes?:        string;
+  isOverride?:   boolean;
 }
 
 interface Props {
@@ -170,10 +173,18 @@ function matteForLight(hex: string): string {
 }
 
 function colorFor(entry: ScheduleEntry, isDark: boolean, view?: string) {
-  // 뷰에 따라 강조 색 선택:
-  //  - 선생님 뷰: 수업 고유색 사용 (수업 구분에 유리)
-  //  - 요일/교실 뷰: 선생님 색 사용 (강사 구분에 유리)
-  const accent = view === "teacher"
+  const isConsulting = !entry.course_id && !!entry.notes;
+
+  // 상담 블록: 항상 선생님 색 고정
+  // 일반 블록: 선생님 뷰 → 수업 고유색, 그 외 → 선생님 색
+  const accent = isConsulting
+    ? (entry.teacher_color
+        ?? (() => {
+          const key  = entry.teacher_name ?? entry.id;
+          const hash = key.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+          return FALLBACK_ACCENTS[hash % FALLBACK_ACCENTS.length];
+        })())
+    : view === "teacher"
     ? (entry.course_accent ?? entry.teacher_color
         ?? (() => {
           const key  = entry.course_name ?? entry.id;
@@ -248,6 +259,10 @@ function ScheduleBlock({
   const showTime     = height > 30;
   const showStudents = height > 68;
 
+  const isConsulting = !schedule.course_id && !!schedule.notes;
+  const notesParts      = (schedule.notes ?? "").split("||");
+  const studentNoteName = notesParts[0] ?? "";
+  const teacherNoteName = notesParts[1] ?? "";
   const names = schedule.enrolled_names ?? [];
 
   return (
@@ -311,7 +326,11 @@ function ScheduleBlock({
           textOverflow: "ellipsis",
           paddingRight: schedule.is_override ? 24 : 0,
         }}>
-          {schedule.course_subject ?? schedule.course_name ?? "수업"}
+          {isConsulting
+            ? (view === "teacher"
+                ? (studentNoteName || "상담")
+                : (teacherNoteName ? `${teacherNoteName}T` : "상담"))
+            : (schedule.course_subject ?? schedule.course_name ?? "수업")}
         </p>
       )}
 
@@ -327,15 +346,20 @@ function ScheduleBlock({
           whiteSpace:   "nowrap",
           textOverflow: "ellipsis",
         }}>
-          {/* 선생님 뷰가 아닐 때만 선생님 이름 표시 */}
-          {view !== "teacher" && schedule.teacher_name && (
+          {/* 선생님 이름 — 일반 수업 + day/room 뷰만 표시 (상담은 제목에 이미 있음) */}
+          {view !== "teacher" && schedule.teacher_name && !isConsulting && (
             <span>{schedule.teacher_name} T{names.length > 0 && !showStudents ? "  " : ""}</span>
           )}
           {/* 학생 목록이 안 보이는 작은 블록에서는 첫 학생 이름만 인라인으로 */}
-          {/* 선생님 뷰: 선생님 서식(0.93), 그 외: 학생 서식(0.85) */}
           {!showStudents && names.length > 0 && (
             <span style={{ fontSize: view === "teacher" ? 11 : 9, opacity: view === "teacher" ? 0.93 : 0.85 }}>
               {names[0]}{names.length > 1 ? "…" : ""}
+            </span>
+          )}
+          {/* 상담 2행 — day/room: 학생이름 / teacher뷰: 생략(제목에 이미 있음) */}
+          {!showStudents && isConsulting && view !== "teacher" && (
+            <span style={{ fontSize: 9, opacity: 0.85 }}>
+              {studentNoteName}
             </span>
           )}
         </p>
@@ -356,6 +380,21 @@ function ScheduleBlock({
           lineHeight:   1.4,
         }}>
           {names.slice(0, 4).join(" · ")}{names.length > 4 ? ` +${names.length - 4}` : ""}
+        </p>
+      )}
+      {/* 상담 2행 (큰 블록) — day/room: 학생이름 / teacher뷰: 생략 */}
+      {showStudents && isConsulting && view !== "teacher" && (
+        <p style={{
+          fontSize:     9,
+          fontWeight:   800,
+          color:        color.text,
+          opacity:      0.85,
+          marginTop:    5,
+          overflow:     "hidden",
+          whiteSpace:   "nowrap",
+          textOverflow: "ellipsis",
+        }}>
+          {studentNoteName}
         </p>
       )}
 
@@ -479,11 +518,13 @@ export default function ScheduleGrid({
     const base = {
       scheduleId:  s.id,
       courseId:    s.course_id,
-      courseName:  s.course_subject ?? s.course_name,
+      courseName:  s.course_subject ?? s.course_name ?? (!s.course_id && s.notes ? "상담" : undefined),
       teacherName: s.teacher_name,
       startTime:   toHHMM(s.start_time),
       endTime:     toHHMM(s.end_time),
       time:        toHHMM(s.start_time),
+      notes:       s.notes,
+      isOverride:  s.is_override,
     };
     if (view === "day") {
       const room = sortedRooms.find((r) => r.id === colId);

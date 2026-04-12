@@ -20,6 +20,7 @@ interface RawSchedule {
   end_time:       string;
   effective_from: string;
   effective_until?: string | null;
+  notes?:         string | null;
   courses?: {
     id: string; name: string; subject?: string; instructor_id?: string; accent_color?: string;
     enrolled_names?: string[];
@@ -44,10 +45,14 @@ function normalize(s: RawSchedule): ScheduleEntry {
     course_id:       s.courses?.id,
     course_name:     s.courses?.name,
     course_subject:  s.courses?.subject,
-    teacher_name:    s.courses?.instructors?.name,
-    teacher_color:   s.courses?.instructors?.color,
+    // 상담 일정은 notes에서 teacher_name/color 복원 (필터링에 활용)
+    teacher_name:    s.courses?.instructors?.name
+                       ?? (s.notes ? (s.notes.split("||")[1] || undefined) : undefined),
+    teacher_color:   s.courses?.instructors?.color
+                       ?? (s.notes ? (s.notes.split("||")[2] || undefined) : undefined),
     course_accent:   s.courses?.accent_color,
     enrolled_names:  s.courses?.enrolled_names ?? [],
+    notes:           s.notes ?? undefined,
     is_override:     false,
   };
 }
@@ -372,6 +377,8 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
         startTime:     info.startTime,
         endTime:       info.endTime,
         scheduleId:    info.scheduleId,
+        notes:         info.notes,
+        isOverride:    info.isOverride,
       });
     } else {
       // 빈 공간 클릭 → 추가 모달
@@ -402,21 +409,61 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
       const st   = (data.startTime ?? data.cell.time) + ":00";
       const et   = (data.endTime   ?? data.cell.time) + ":00";
 
+      const classroomId = data.classroomOverride ?? data.cell.classroomId;
+
+      // ── 수정 모드: 기존 레코드 UPDATE ──────────────────────────
+      if (data.cell.scheduleId) {
+        const notesVal = data.studentName
+          ? [data.studentName, data.consultingTeacher ?? "", data.consultingTeacherColor ?? ""].join("||")
+          : null;
+
+        const table = data.cell.isOverride ? "schedule_overrides" : "classroom_schedules";
+        const { error } = await supabase.from(table).update({
+          classroom_id: classroomId,
+          day:          days[0],
+          start_time:   st,
+          end_time:     et,
+          course_id:    courseId,
+          notes:        notesVal,
+        }).eq("id", data.cell.scheduleId);
+
+        if (error) {
+          console.error("일정 수정 오류:", error);
+          alert(`일정 수정 실패: ${error.message}`);
+          return;
+        }
+        setModalCell(null);
+        window.location.reload();
+        return;
+      }
+
       if (data.addType === "permanent") {
-        await supabase.from("classroom_schedules").insert(
+        const { error } = await supabase.from("classroom_schedules").insert(
           days.map((day) => ({
-            classroom_id:   data.cell.classroomId,
+            classroom_id:   classroomId,
             day,
             start_time:     st,
             end_time:       et,
             effective_from: today,
             ...(courseId ? { course_id: courseId } : {}),
+            ...(data.studentName ? {
+              notes: [
+                data.studentName,
+                data.consultingTeacher ?? "",
+                data.consultingTeacherColor ?? "",
+              ].join("||"),
+            } : {}),
           }))
         );
+        if (error) {
+          console.error("일정 추가 오류:", error);
+          alert(`일정 추가 실패: ${error.message}`);
+          return;
+        }
       } else {
-        await supabase.from("schedule_overrides").insert(
+        const { error } = await supabase.from("schedule_overrides").insert(
           days.map((day) => ({
-            classroom_id:  data.cell.classroomId,
+            classroom_id:  classroomId,
             day,
             start_time:    st,
             end_time:      et,
@@ -426,8 +473,20 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
             apply_until:   calcUntil(),
             weeks_count:   data.tempScope === "once" ? 1 : (data.weeksCount ?? 1),
             ...(courseId ? { course_id: courseId } : {}),
+            ...(data.studentName ? {
+              memo: [
+                data.studentName,
+                data.consultingTeacher ?? "",
+                data.consultingTeacherColor ?? "",
+              ].join("||"),
+            } : {}),
           }))
         );
+        if (error) {
+          console.error("임시 일정 추가 오류:", error);
+          alert(`임시 일정 추가 실패: ${error.message}`);
+          return;
+        }
       }
     }
 
@@ -478,6 +537,32 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
     window.location.reload();
   }, [weekOffset, supabase]);
 
+  // ── 수정 핸들러 (ScheduleDetailModal → EditModal 재오픈) ────
+  const handleEdit = useCallback((detail: DetailCellInfo) => {
+    setDetailCell(null);
+
+    // 기존 수업 찾아서 preselectedCourse 세팅
+    const sched = effectiveSchedules.find((s) => s.id === detail.scheduleId);
+    if (sched?.course_id) {
+      const matched = courses.find((c) => c.id === sched.course_id);
+      if (matched) setPreselectedCourse(matched);
+    }
+
+    // EditModal을 수정 모드로 열기 (scheduleId 포함 → handleSave에서 UPDATE)
+    setModalCell({
+      classroomId:   detail.classroomId,
+      classroomName: detail.classroomName,
+      day:           detail.day,
+      time:          detail.startTime ?? "09:00",
+      startTime:     detail.startTime,
+      endTime:       detail.endTime,
+      scheduleId:    detail.scheduleId,   // ← UPDATE 트리거
+      isOverride:    detail.isOverride,   // ← 어느 테이블인지 구분
+      notes:         detail.notes,        // 상담 학생이름 pre-fill용
+    });
+  // effectiveSchedules를 dep에 넣으면 매번 재생성 → 참조로만 사용
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [courses]);
 
   // ── 공통 모달 ──────────────────────────────────────────────
   const modals = (
@@ -492,6 +577,7 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
         activeTeacher={selectedTeacher}
         classrooms={classrooms}
         existingSchedules={effectiveSchedules.map((s) => ({
+          id:              s.id,
           classroom_id:    s.classroom_id,
           day:             s.day,
           start_time:      s.start_time,
@@ -505,6 +591,7 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
         weekSaturdayStr={saturdayStr}
         onClose={() => setDetailCell(null)}
         onDelete={handleDelete}
+        onEdit={handleEdit}
       />
       {showRoomManager && (
         <ClassroomManagerModal

@@ -30,6 +30,8 @@ export interface DetailCellInfo {
   startTime?:    string;
   endTime?:      string;
   scheduleId:    string;
+  notes?:        string;   // 상담 일정: "학생이름||선생님이름||색상"
+  isOverride?:   boolean;
 }
 
 export interface DeleteData {
@@ -48,6 +50,7 @@ interface Props {
   weekSaturdayStr: string;
   onClose:  () => void;
   onDelete: (data: DeleteData) => void;
+  onEdit:   (cell: DetailCellInfo) => void;
 }
 
 const DAY_LABEL: Record<string, string> = {
@@ -96,7 +99,7 @@ function TempScopeSelector({ scope, setScope, weeks, setWeeks }: {
 }
 
 // ── 메인 모달 ─────────────────────────────────────────────────
-export default function ScheduleDetailModal({ cell, weekSaturdayStr, onClose, onDelete }: Props) {
+export default function ScheduleDetailModal({ cell, weekSaturdayStr, onClose, onDelete, onEdit }: Props) {
   const supabase = createClient();
   const [course,     setCourse]     = useState<CourseDetail | null>(null);
   const [loading,    setLoading]    = useState(false);
@@ -143,7 +146,12 @@ export default function ScheduleDetailModal({ cell, weekSaturdayStr, onClose, on
 
   if (!cell) return null;
 
-  const dayLabel = DAY_LABEL[cell.day] ?? cell.day;
+  const dayLabel    = DAY_LABEL[cell.day] ?? cell.day;
+  const isConsulting = !cell.courseId && !!cell.notes;
+  const notesParts   = (cell.notes ?? "").split("||");
+  const studentNote  = notesParts[0] ?? "";
+  const teacherNote  = notesParts[1] ?? "";
+  const colorNote    = notesParts[2] ?? "";
 
   function submitDelete() {
     if (!cell) return;
@@ -159,8 +167,8 @@ export default function ScheduleDetailModal({ cell, weekSaturdayStr, onClose, on
     });
   }
 
-  const accent     = course?.accent_color ?? "#6366f1";
-  const instColor  = course?.instructor?.color ?? "#1e293b";
+  const accent    = isConsulting ? (colorNote || "#6366f1") : (course?.accent_color ?? "#6366f1");
+  const instColor = isConsulting ? (colorNote || "#1e293b") : (course?.instructor?.color ?? "#1e293b");
 
   return (
     <>
@@ -174,7 +182,7 @@ export default function ScheduleDetailModal({ cell, weekSaturdayStr, onClose, on
 
         {/* 컬러 헤더 */}
         <div style={{
-          background: course?.instructor?.color
+          background: (isConsulting && colorNote) || course?.instructor?.color
             ? `linear-gradient(135deg, ${instColor}cc, ${accent}33)`
             : "var(--sc-raised)",
           borderBottom: `2px solid ${accent}`,
@@ -188,19 +196,34 @@ export default function ScheduleDetailModal({ cell, weekSaturdayStr, onClose, on
               </p>
               {/* 과목 — 메인 타이틀 */}
               <h3 className="text-2xl font-black" style={{ color: "#ffffff" }}>
-                {course?.subject ?? cell.courseName ?? "수업"}
+                {isConsulting
+                  ? (studentNote || "상담")
+                  : (course?.subject ?? cell.courseName ?? "수업")}
               </h3>
-              {/* 선생님 */}
-              {(course?.instructor?.name ?? cell.teacherName) && (
-                <div className="flex items-center gap-1.5 mt-1.5">
-                  <div style={{
-                    width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
-                    background: course?.instructor?.color ?? "#888",
-                  }} />
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.75)" }}>
-                    {course?.instructor?.name ?? cell.teacherName}
-                  </span>
-                </div>
+              {/* 상담: 선생님 표시 / 수업: 강사 표시 */}
+              {isConsulting ? (
+                teacherNote ? (
+                  <div className="flex items-center gap-1.5 mt-1.5">
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: colorNote || "#888" }} />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.75)" }}>
+                      {teacherNote}T · 상담
+                    </span>
+                  </div>
+                ) : (
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.6)" }}>상담</span>
+                )
+              ) : (
+                (course?.instructor?.name ?? cell.teacherName) && (
+                  <div className="flex items-center gap-1.5 mt-1.5">
+                    <div style={{
+                      width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                      background: course?.instructor?.color ?? "#888",
+                    }} />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "rgba(255,255,255,0.75)" }}>
+                      {course?.instructor?.name ?? cell.teacherName}
+                    </span>
+                  </div>
+                )
               )}
               {/* 시간 */}
               {cell.startTime && (
@@ -227,6 +250,26 @@ export default function ScheduleDetailModal({ cell, weekSaturdayStr, onClose, on
             </div>
           ) : (
             <>
+              {/* 상담 학생 이름 */}
+              {isConsulting && studentNote && (
+                <div className="mb-5">
+                  <p className="text-[10px] font-bold uppercase tracking-widest mb-2"
+                     style={{ color: "var(--sc-dim)" }}>상담 학생</p>
+                  <div style={{
+                    display:      "inline-block",
+                    padding:      "5px 14px",
+                    borderRadius: 20,
+                    fontSize:     13,
+                    fontWeight:   700,
+                    background:   "var(--sc-raised)",
+                    color:        "var(--sc-white)",
+                    border:       `1px solid ${accent}55`,
+                  }}>
+                    {studentNote}
+                  </div>
+                </div>
+              )}
+
               {/* 수강 학생 */}
               {course && (
                 <div className="mb-5">
@@ -272,13 +315,24 @@ export default function ScheduleDetailModal({ cell, weekSaturdayStr, onClose, on
               {/* 구분선 */}
               <div style={{ height: 1, background: "var(--sc-border)", marginBottom: 16 }} />
 
-              {/* 일정 삭제 토글 */}
+              {/* 수정 / 삭제 */}
               {!showDelete ? (
-                <button onClick={() => setShowDelete(true)}
-                  className="w-full py-2.5 rounded-xl text-sm font-bold transition-all"
-                  style={{ background: "var(--sc-raised)", color: "var(--sc-dim)", border: "1px solid var(--sc-border)" }}>
-                  일정 삭제
-                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => { onEdit(cell!); }}
+                    className="py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95"
+                    style={{
+                      background: "var(--sc-raised)",
+                      color:      "var(--sc-white)",
+                      border:     `1px solid ${accent}55`,
+                    }}>
+                    ✏️ 수정
+                  </button>
+                  <button onClick={() => setShowDelete(true)}
+                    className="py-2.5 rounded-xl text-sm font-bold transition-all"
+                    style={{ background: "var(--sc-raised)", color: "var(--sc-dim)", border: "1px solid var(--sc-border)" }}>
+                    일정 삭제
+                  </button>
+                </div>
               ) : (
                 <div className="space-y-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest"

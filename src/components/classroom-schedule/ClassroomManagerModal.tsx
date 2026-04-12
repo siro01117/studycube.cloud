@@ -73,6 +73,7 @@ export default function ClassroomManagerModal({ classrooms, onClose, onRefresh }
     setEditingId(null);
     setForm(emptyForm);
     setLoading(false);
+    onRefresh();
   }
 
   // ── 삭제 ──────────────────────────────────────────────────

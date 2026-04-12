@@ -23,7 +23,7 @@ export default async function ClassroomSchedulePage() {
   // 교실 목록
   const { data: classrooms } = await supabase
     .from("classrooms")
-    .select("id, name, floor")
+    .select("id, name, floor, description")
     .order("floor", { ascending: false })
     .order("name");
 
@@ -31,7 +31,7 @@ export default async function ClassroomSchedulePage() {
   const { data: fixedSchedules } = await supabase
     .from("classroom_schedules")
     .select(`
-      id, day, start_time, end_time, effective_from, effective_until,
+      id, day, start_time, end_time, effective_from, effective_until, notes,
       courses ( id, name, subject, instructor_id, accent_color, enrolled_names,
         instructors ( id, name, color )
       ),

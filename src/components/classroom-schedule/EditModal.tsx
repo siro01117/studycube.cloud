@@ -32,11 +32,14 @@ interface CellInfo {
   teacherName?:  string;
   startTime?:    string;
   endTime?:      string;
+  notes?:        string;   // 수정 시 상담 정보 pre-fill용
+  isOverride?:   boolean;
 }
 
 interface Classroom { id: string; name: string; }
 
 interface ExistingSchedule {
+  id?:          string;
   classroom_id: string;
   day:          string;
   start_time:   string;
@@ -69,6 +72,10 @@ export interface SaveData {
   courseId?:         string;
   newCourseName?:    string;
   classroomOverride?: string;  // 선생님 뷰에서 교실 직접 지정
+  scheduleKind?:     "class" | "consulting";  // 수업 or 상담
+  studentName?:      string;                  // 상담 시 학생 이름
+  consultingTeacher?: string;                 // 상담 시 담당 선생님 이름
+  consultingTeacherColor?: string;            // 상담 시 선생님 색
   // 삭제
   deleteType?:       DeleteType;
   // 임시 공통
@@ -217,11 +224,10 @@ function CourseSearchInput({ courses, value, onSelect }: {
       <input
         value={query}
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
+        onClick={() => setOpen(true)}
         placeholder="과목명 또는 선생님 이름 검색..."
         className="sc-input text-sm w-full"
         style={{ padding: "10px 12px" }}
-        autoFocus
       />
       {open && (
         <div style={{
@@ -318,7 +324,7 @@ export default function EditModal({
   cell, courses, preselectedCourse, onClose, onSave,
   viewMode, activeTeacher, classrooms = [], existingSchedules = [],
 }: Props) {
-  const isEdit = !!cell?.scheduleId;
+  const isUpdateMode = !!cell?.scheduleId;  // scheduleId 있으면 수정, 없으면 추가
   const isTeacherView = viewMode === "teacher";
 
   // 추가 상태
@@ -327,15 +333,21 @@ export default function EditModal({
   const [startTime,        setStartTime]         = useState("14:00");
   const [endTime,          setEndTime]           = useState("15:00");
   const [addType,          setAddType]           = useState<AddType>("permanent");
+  const [scheduleKind,     setScheduleKind]      = useState<"class" | "consulting">("class");
+  const [studentName,      setStudentName]       = useState<string>("");
   // 선생님 뷰: 교실 선택
   const [selectedClassroomId, setSelectedClassroomId] = useState<string>("");
   // 선생님 뷰: 선생님 선택 (필터용)
   const [filterTeacher,    setFilterTeacher]     = useState<string>(activeTeacher ?? "");
   // 충돌 에러
   const [conflictError,    setConflictError]     = useState<string | null>(null);
+  // 입력 검증 토스트
+  const [validationMsg,    setValidationMsg]     = useState<string | null>(null);
+  const [validationField,  setValidationField]   = useState<string | null>(null);
+  const validationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // 삭제 상태
-  const [deleteType, setDeleteType] = useState<DeleteType>("temporary");
+  // 삭제 상태 (미사용 — 삭제는 DetailModal에서 처리)
+  const [deleteType, setDeleteType] = useState<DeleteType>("temporary"); // eslint-disable-line @typescript-eslint/no-unused-vars
 
   // 임시 공통
   const [tempScope, setTempScope] = useState<TempScope>("once");
@@ -354,6 +366,15 @@ export default function EditModal({
     setSelectedDays([cell.day as DayKey]);
     setSelectedCourse(null);
     setAddType("permanent");
+    // 수정 시 상담 정보 pre-fill (notes = "student||teacher||color")
+    if (cell.notes) {
+      const parts = cell.notes.split("||");
+      setScheduleKind("consulting");
+      setStudentName(parts[0] ?? "");
+    } else {
+      setScheduleKind("class");
+      setStudentName("");
+    }
     setDeleteType("temporary");
     setTempScope("once");
     setWeeks(2);
@@ -383,23 +404,54 @@ export default function EditModal({
     courses.map((c) => c.instructorName).filter(Boolean) as string[]
   )).sort();
 
-  /** 충돌 검사: 선택된 교실 × 요일 × 시간이 기존 일정과 겹치는지 확인 */
+  /** 충돌 검사: 선택된 교실 × 요일 × 시간이 기존 일정과 겹치는지 확인 (수정 중인 블록 자신 제외) */
   function findConflict(classroomId: string, day: DayKey, sTime: string, eTime: string): ExistingSchedule | null {
     const sMin = toMin(sTime);
     const eMin = toMin(eTime);
     for (const s of existingSchedules) {
+      if (s.id && s.id === cell?.scheduleId) continue;  // 자기 자신 제외
       if (s.classroom_id !== classroomId) continue;
       if (s.day !== day) continue;
       const existS = toMin(s.start_time);
       const existE = toMin(s.end_time);
-      // 겹치는 조건: sMin < existE && eMin > existS
       if (sMin < existE && eMin > existS) return s;
     }
     return null;
   }
 
+  function showToast(msg: string, field: string) {
+    if (validationTimer.current) clearTimeout(validationTimer.current);
+    setValidationMsg(msg);
+    setValidationField(field);
+    validationTimer.current = setTimeout(() => {
+      setValidationMsg(null);
+      setValidationField(null);
+    }, 2800);
+  }
+
   function submit(action: "add" | "delete") {
     setConflictError(null);
+
+    // ── 필수 입력 검증 ──────────────────────────────────────────
+    if (action === "add") {
+      // 수정 모드는 cell.classroomId 사용 → 교실 선택 불필요
+      if (isTeacherView && !selectedClassroomId && !isUpdateMode) {
+        showToast("교실을 선택해 주세요", "classroom");
+        return;
+      }
+      if (selectedDays.length === 0) {
+        showToast("요일을 하나 이상 선택해 주세요", "days");
+        return;
+      }
+      if (scheduleKind === "class" && !selectedCourse) {
+        showToast("수업을 선택해 주세요", "course");
+        return;
+      }
+      if (scheduleKind === "consulting" && !studentName.trim()) {
+        showToast("학생 이름을 입력해 주세요", "student");
+        return;
+      }
+    }
 
     // 추가 시 충돌 검사
     if (action === "add" && isTeacherView && selectedClassroomId) {
@@ -439,9 +491,17 @@ export default function EditModal({
       selectedDays:     action === "add"    ? selectedDays  : undefined,
       startTime:        action === "add"    ? startTime     : undefined,
       endTime:          action === "add"    ? endTime       : undefined,
-      courseId:         action === "add"    ? selectedCourse?.id  : undefined,
+      courseId:         (action === "add" && scheduleKind === "class") ? selectedCourse?.id : undefined,
       classroomOverride: (action === "add" && isTeacherView && selectedClassroomId)
                           ? selectedClassroomId : undefined,
+      scheduleKind:     action === "add" ? scheduleKind : undefined,
+      studentName:      (action === "add" && scheduleKind === "consulting" && studentName.trim())
+                          ? studentName.trim() : undefined,
+      consultingTeacher: (action === "add" && scheduleKind === "consulting")
+                          ? (activeTeacher || filterTeacher || undefined) : undefined,
+      consultingTeacherColor: (action === "add" && scheduleKind === "consulting")
+                          ? (courses.find((c) => c.instructorName === (activeTeacher || filterTeacher))?.instructorColor ?? undefined)
+                          : undefined,
       tempScope:        isTemp ? tempScope : undefined,
       weeksCount:       isTemp && tempScope === "weeks" ? weeks : undefined,
     });
@@ -455,6 +515,54 @@ export default function EditModal({
       <div className="fixed inset-0 z-40"
            style={{ background:"rgba(0,0,0,0.65)", backdropFilter:"blur(4px)" }}
            onClick={onClose} />
+
+      {/* 검증 말풍선 — 모달 위 fixed로 항상 보이게 */}
+      {validationMsg && (
+        <div style={{
+          position:        "fixed",
+          bottom:          "calc(50% - 90vh/2 + 72px)",
+          left:            "50%",
+          transform:       "translateX(-50%)",
+          zIndex:          200,
+          display:         "flex",
+          flexDirection:   "column",
+          alignItems:      "center",
+          pointerEvents:   "none",
+          animation:       "toast-pop 0.22s cubic-bezier(0.34,1.56,0.64,1) forwards",
+        }}>
+          <style dangerouslySetInnerHTML={{ __html: `
+            @keyframes toast-pop {
+              from { opacity: 0; transform: translateX(-50%) translateY(6px) scale(0.9); }
+              to   { opacity: 1; transform: translateX(-50%) translateY(0)   scale(1); }
+            }
+          `}} />
+          <div style={{
+            display:      "flex",
+            alignItems:   "center",
+            gap:          8,
+            padding:      "10px 18px",
+            borderRadius: 999,
+            background:   "rgba(20,20,24,0.96)",
+            border:       "1px solid rgba(239,68,68,0.5)",
+            boxShadow:    "0 8px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(239,68,68,0.15)",
+            fontSize:     13,
+            fontWeight:   700,
+            color:        "#f87171",
+            whiteSpace:   "nowrap",
+          }}>
+            <span style={{ fontSize: 14 }}>⚠</span>
+            {validationMsg}
+          </div>
+          {/* 꼬리 */}
+          <div style={{
+            width:       0,
+            height:      0,
+            borderLeft:  "7px solid transparent",
+            borderRight: "7px solid transparent",
+            borderTop:   "7px solid rgba(239,68,68,0.5)",
+          }} />
+        </div>
+      )}
 
       <div className="fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
                       w-full max-w-md rounded-2xl p-6 shadow-2xl animate-scale-in"
@@ -471,39 +579,35 @@ export default function EditModal({
                 : `${cell.classroomName} · ${dayLabel}요일`}
             </p>
             <h3 className="font-black text-lg" style={{ color:"var(--sc-white)" }}>
-              {isEdit ? "일정 관리" : "일정 추가"}
+              {isUpdateMode ? "일정 수정" : "일정 추가"}
             </h3>
-            {isEdit && (
-              <p className="text-sm mt-0.5" style={{ color:"var(--sc-dim)" }}>
-                {cell.courseName ?? "수업"}
-                {cell.teacherName ? ` · ${cell.teacherName}` : ""}
-                {cell.startTime ? ` · ${cell.startTime}~${cell.endTime}` : ""}
-              </p>
-            )}
           </div>
           <button onClick={onClose} className="text-xl hover:opacity-60"
                   style={{ color:"var(--sc-dim)" }}>×</button>
         </div>
 
-        {/* ── 추가 폼 ─────────────────────────────────────────── */}
-        {!isEdit && (
-          <div className="space-y-4 mb-5">
+        {/* ── 추가/수정 폼 ─────────────────────────────────────── */}
+        <div className="space-y-4 mb-5">
 
             {/* 선생님 뷰: 교실 선택 */}
             {isTeacherView && classrooms.length > 0 && (
-              <div>
+              <div style={{
+                borderRadius: 12,
+                outline: validationField === "classroom" ? "2px solid rgba(239,68,68,0.7)" : "2px solid transparent",
+                transition: "outline 0.2s",
+              }}>
                 <p className="text-[11px] font-bold uppercase tracking-widest mb-2"
-                   style={{ color:"var(--sc-dim)" }}>교실</p>
+                   style={{ color: validationField === "classroom" ? "#f87171" : "var(--sc-dim)" }}>교실</p>
                 <ClassroomDropdown
                   classrooms={classrooms}
                   value={selectedClassroomId}
-                  onSelect={(id) => { setSelectedClassroomId(id); setConflictError(null); }}
+                  onSelect={(id) => { setSelectedClassroomId(id); setConflictError(null); setValidationField(null); }}
                 />
               </div>
             )}
 
-            {/* 선생님 뷰: 선생님 필터 선택 */}
-            {isTeacherView && allTeachers.length > 0 && (
+            {/* 선생님 뷰: 선생님 필터 선택 (수업일 때만) */}
+            {isTeacherView && scheduleKind === "class" && allTeachers.length > 0 && (
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-widest mb-2"
                    style={{ color:"var(--sc-dim)" }}>선생님</p>
@@ -526,26 +630,100 @@ export default function EditModal({
               </div>
             )}
 
-            {/* 수업 */}
+            {/* 일정 종류 */}
             <div>
               <p className="text-[11px] font-bold uppercase tracking-widest mb-2"
-                 style={{ color:"var(--sc-dim)" }}>수업</p>
-              <CourseSearchInput
-                courses={filteredCourses}
-                value={selectedCourse}
-                onSelect={setSelectedCourse}
-              />
+                 style={{ color:"var(--sc-dim)" }}>일정 종류</p>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { key: "class",      label: "수업" },
+                  { key: "consulting", label: "상담" },
+                ] as const).map(({ key, label }) => (
+                  <button key={key} onClick={() => {
+                    setScheduleKind(key);
+                    setSelectedCourse(null);
+                    setStudentName("");
+                    setConflictError(null);
+                  }}
+                    className="py-2.5 rounded-xl text-sm font-bold transition-all duration-200"
+                    style={{
+                      background: scheduleKind === key ? "var(--sc-green)" : "var(--sc-raised)",
+                      color:      scheduleKind === key ? "var(--sc-bg)"    : "var(--sc-dim)",
+                      border:     `1px solid ${scheduleKind === key ? "var(--sc-green)" : "var(--sc-border)"}`,
+                      transform:  scheduleKind === key ? "scale(1.02)" : "scale(1)",
+                    }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
 
+            {/* 수업 선택 (수업 종류일 때) */}
+            {scheduleKind === "class" && (
+              <div style={{
+                borderRadius: 12,
+                outline: validationField === "course" ? "2px solid rgba(239,68,68,0.7)" : "2px solid transparent",
+                transition: "outline 0.2s",
+              }}>
+                <p className="text-[11px] font-bold uppercase tracking-widest mb-2"
+                   style={{ color: validationField === "course" ? "#f87171" : "var(--sc-dim)" }}>수업</p>
+                <CourseSearchInput
+                  courses={filteredCourses}
+                  value={selectedCourse}
+                  onSelect={(c) => { setSelectedCourse(c); if (c) setValidationField(null); }}
+                />
+              </div>
+            )}
+
+            {/* 학생 이름 (상담 종류일 때) */}
+            {scheduleKind === "consulting" && (
+              <div style={{
+                borderRadius: 12,
+                outline: validationField === "student" ? "2px solid rgba(239,68,68,0.7)" : "2px solid transparent",
+                transition: "outline 0.2s",
+              }}>
+                <p className="text-[11px] font-bold uppercase tracking-widest mb-2"
+                   style={{ color: validationField === "student" ? "#f87171" : "var(--sc-dim)" }}>학생 이름</p>
+                <input
+                  type="text"
+                  value={studentName}
+                  onChange={(e) => { setStudentName(e.target.value); if (validationField === "student") setValidationField(null); }}
+                  placeholder="학생 이름 입력..."
+                  className="sc-input text-sm w-full"
+                  style={{
+                    padding: "10px 12px",
+                    outline: validationField === "student" ? "2px solid rgba(239,68,68,0.5)" : undefined,
+                  }}
+                  autoFocus
+                />
+              </div>
+            )}
+
             {/* 요일 */}
-            <div>
+            <div style={{
+              borderRadius: 12,
+              outline: validationField === "days" ? "2px solid rgba(239,68,68,0.7)" : "2px solid transparent",
+              transition: "outline 0.2s",
+            }}>
               <p className="text-[11px] font-bold uppercase tracking-widest mb-2"
-                 style={{ color:"var(--sc-dim)" }}>요일 (중복 가능)</p>
+                 style={{ color: validationField === "days" ? "#f87171" : "var(--sc-dim)" }}>
+                {isUpdateMode ? "요일" : "요일 (중복 가능)"}
+              </p>
               <div className="flex gap-1.5 flex-wrap">
                 {DAYS.map(({ key, label }) => {
                   const on = selectedDays.includes(key);
                   return (
-                    <button key={key} onClick={() => { toggleDay(key); setConflictError(null); }}
+                    <button key={key}
+                      onClick={() => {
+                        // 수정 모드: 단일 선택 / 추가 모드: 토글(다중)
+                        if (isUpdateMode) {
+                          setSelectedDays([key]);
+                        } else {
+                          toggleDay(key);
+                        }
+                        setConflictError(null);
+                        setValidationField(null);
+                      }}
                       className="w-9 h-9 rounded-lg text-sm font-bold transition-all duration-150"
                       style={{
                         background: on ? "var(--sc-green)"  : "var(--sc-raised)",
@@ -579,28 +757,30 @@ export default function EditModal({
               </div>
             </div>
 
-            {/* 추가 유형 */}
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-widest mb-2"
-                 style={{ color:"var(--sc-dim)" }}>추가 유형</p>
-              <div className="grid grid-cols-2 gap-2">
-                {(["permanent","temporary"] as AddType[]).map((t) => (
-                  <button key={t} onClick={() => setAddType(t)}
-                    className="py-2.5 rounded-xl text-sm font-bold transition-all duration-200"
-                    style={{
-                      background: addType === t ? "var(--sc-green)"  : "var(--sc-raised)",
-                      color:      addType === t ? "var(--sc-bg)"     : "var(--sc-dim)",
-                      border:     `1px solid ${addType === t ? "var(--sc-green)" : "var(--sc-border)"}`,
-                      transform:  addType === t ? "scale(1.02)" : "scale(1)",
-                    }}>
-                    {t === "permanent" ? "고정 추가" : "⏱ 임시 추가"}
-                  </button>
-                ))}
+            {/* 추가 유형 (수정 모드에서는 숨김) */}
+            {!isUpdateMode && (
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-widest mb-2"
+                   style={{ color:"var(--sc-dim)" }}>추가 유형</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["permanent","temporary"] as AddType[]).map((t) => (
+                    <button key={t} onClick={() => setAddType(t)}
+                      className="py-2.5 rounded-xl text-sm font-bold transition-all duration-200"
+                      style={{
+                        background: addType === t ? "var(--sc-green)"  : "var(--sc-raised)",
+                        color:      addType === t ? "var(--sc-bg)"     : "var(--sc-dim)",
+                        border:     `1px solid ${addType === t ? "var(--sc-green)" : "var(--sc-border)"}`,
+                        transform:  addType === t ? "scale(1.02)" : "scale(1)",
+                      }}>
+                      {t === "permanent" ? "고정 추가" : "⏱ 임시 추가"}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* 임시 추가 → 기간 */}
-            {addType === "temporary" && (
+            {!isUpdateMode && addType === "temporary" && (
               <TempScopeSelector scope={tempScope} setScope={setTempScope} weeks={weeks} setWeeks={setWeeks} />
             )}
 
@@ -618,47 +798,7 @@ export default function EditModal({
                 ⚠️ {conflictError}
               </div>
             )}
-          </div>
-        )}
-
-        {/* ── 삭제 폼 (기존 일정 클릭) ────────────────────────── */}
-        {isEdit && (
-          <div className="space-y-4 mb-5">
-            <div>
-              <p className="text-[11px] font-bold uppercase tracking-widest mb-2"
-                 style={{ color:"var(--sc-dim)" }}>삭제 유형</p>
-              <div className="grid grid-cols-2 gap-2">
-                {([
-                  { type:"temporary" as DeleteType, label:"⏱ 임시 삭제", sub:"이 기간만 취소" },
-                  { type:"permanent" as DeleteType, label:"🗑 고정 삭제", sub:"오늘 이후 완전 삭제" },
-                ]).map(({ type, label, sub }) => (
-                  <button key={type} onClick={() => setDeleteType(type)}
-                    className="py-3 rounded-xl text-sm font-bold transition-all duration-200 flex flex-col items-center gap-0.5"
-                    style={{
-                      background: deleteType === type
-                        ? (type === "permanent" ? "rgba(239,68,68,0.15)" : "var(--sc-raised)")
-                        : "var(--sc-raised)",
-                      color:  deleteType === type
-                        ? (type === "permanent" ? "#f87171" : "var(--sc-white)")
-                        : "var(--sc-dim)",
-                      border: `1px solid ${deleteType === type
-                        ? (type === "permanent" ? "rgba(239,68,68,0.4)" : "var(--sc-green)")
-                        : "var(--sc-border)"}`,
-                      transform: deleteType === type ? "scale(1.02)" : "scale(1)",
-                    }}>
-                    {label}
-                    <span style={{ fontSize:10, fontWeight:400, opacity:0.7 }}>{sub}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* 임시 삭제 → 기간 */}
-            {deleteType === "temporary" && (
-              <TempScopeSelector scope={tempScope} setScope={setTempScope} weeks={weeks} setWeeks={setWeeks} />
-            )}
-          </div>
-        )}
+        </div>
 
         {/* 액션 버튼 */}
         <div className="grid grid-cols-2 gap-2">
@@ -667,16 +807,14 @@ export default function EditModal({
             style={{ background:"var(--sc-raised)", color:"var(--sc-dim)", border:"1px solid var(--sc-border)" }}>
             취소
           </button>
-          <button onClick={() => submit(isEdit ? "delete" : "add")}
+          <button onClick={() => submit("add")}
             className="py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95"
             style={{
-              background: isEdit && deleteType === "permanent" ? "rgba(239,68,68,0.2)" : "var(--sc-green)",
-              color:      isEdit && deleteType === "permanent" ? "#f87171" : "var(--sc-bg)",
-              border:     isEdit && deleteType === "permanent" ? "1px solid rgba(239,68,68,0.4)" : "none",
+              background: "var(--sc-green)",
+              color:      "var(--sc-bg)",
+              border:     "none",
             }}>
-            {isEdit
-              ? (deleteType === "permanent" ? "고정 삭제" : "임시 삭제")
-              : "추가"}
+            {isUpdateMode ? "수정 완료" : "추가"}
           </button>
         </div>
       </div>
