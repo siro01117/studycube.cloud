@@ -12,9 +12,9 @@ const PENDING_PATHS = ['/pending', '/login'];
 // manager: /manage, /portal
 // 그 외(학생 등): /student, /portal
 const ROLE_PATH_MAP: Record<string, string[]> = {
-  manager: ['/manage', '/portal'],
+  manager: ['/manage', '/portal', '/schedule'],
 };
-const DEFAULT_PATHS = ['/student', '/portal'];
+const DEFAULT_PATHS = ['/student', '/portal', '/schedule'];
 
 function isPublic(pathname: string)  { return PUBLIC_PATHS.some((p)  => pathname.startsWith(p)); }
 function isPending(pathname: string) { return PENDING_PATHS.some((p) => pathname.startsWith(p)); }

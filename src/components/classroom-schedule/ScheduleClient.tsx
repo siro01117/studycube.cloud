@@ -115,8 +115,8 @@ function NavLinks() {
   const hoverOn  = (e: React.MouseEvent<HTMLAnchorElement>) => (e.currentTarget.style.opacity = "1");
   const hoverOff = (e: React.MouseEvent<HTMLAnchorElement>) => (e.currentTarget.style.opacity = "0.6");
   return (
-    <div className="flex items-center justify-between mb-5">
-      <div className="flex items-center gap-3">
+    <div className="flex items-center justify-between mb-5" style={{ flexWrap: "nowrap", gap: 6 }}>
+      <div className="flex items-center gap-3" style={{ flexWrap: "nowrap", flexShrink: 0 }}>
         <Link href="/portal"
           className="flex items-center gap-1.5 text-xs font-semibold transition-all hover:opacity-100 w-fit"
           style={linkStyle} onMouseEnter={hoverOn} onMouseLeave={hoverOff}>
@@ -145,6 +145,29 @@ function useIsWideLayout() {
   }, []);
   return isWide;
 }
+
+// ── 브라우저 zoom 역보정 ──────────────────────────────────────
+// outerWidth/innerWidth는 CSS px 기준이라 zoom해도 비율이 ~1로 고정 → 사용 불가.
+// devicePixelRatio는 CSS zoom에 따라 실제로 변하는 값:
+//   1x 모니터 100%→DPR=1, 150%→DPR=1.5 / 레티나(2x) 100%→DPR=2, 150%→DPR=3
+// 최초 마운트 시 DPR 기준값을 캡처하고, 이후 변화량으로 CSS zoom 레벨을 역산.
+// 원리: element.zoom = base / cssZoom → 시각적 크기 = base 배율로 항상 고정.
+function useCounterZoom(base: number): number {
+  const initialDPR = useRef<number>(1);
+  const [zoom, setZoom] = useState(base);
+  useLayoutEffect(() => {
+    initialDPR.current = window.devicePixelRatio;   // 최초 DPR 기준값 캡처
+    function update() {
+      const cssZoom = window.devicePixelRatio / initialDPR.current;
+      setZoom(base / Math.max(0.25, Math.min(4, cssZoom)));
+    }
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [base]);
+  return zoom;
+}
+
 
 // ── 날짜 포맷 (년도 생략, 월~일 형식) ────────────────────────
 function fmtWeekRange(monday: Date, sunday: Date): string {
@@ -282,6 +305,11 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
   const supabase = useMemo(() => createClient(), []);
   const router   = useRouter();
   const isWide   = useIsWideLayout();
+
+  // 메뉴 크기 고정: 브라우저 zoom에 무관하게 항상 지정 배율로 보임
+  const sidebarZoom = useCounterZoom(1.2); // 가로 사이드바: 항상 120% 크기
+  const headerZoom  = useCounterZoom(0.9); // 세로 헤더: 항상 90% 크기
+
 
   // hydration 에러 방지: 서버/클라이언트 초기값 동일하게 기본값 사용
   // sessionStorage 복원은 useEffect에서 처리
@@ -528,6 +556,24 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
         .toISOString().split("T")[0];
     }
 
+    // ── override(임시 일정)는 schedule_overrides에서 직접 삭제 ──
+    // base_schedule_id FK는 classroom_schedules만 참조하므로 override에 넣으면 오류
+    if (data.isOverride) {
+      const { error } = await supabase
+        .from("schedule_overrides")
+        .delete()
+        .eq("id", data.scheduleId);
+      if (error) {
+        console.error("임시 일정 삭제 오류:", error);
+        alert(`삭제 실패: ${error.message}`);
+        return;
+      }
+      setDetailCell(null);
+      router.refresh();
+      return;
+    }
+
+    // ── 고정 일정 처리 ────────────────────────────────────────
     if (data.deleteType === "permanent") {
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
@@ -542,6 +588,7 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
         return;
       }
     } else {
+      // 고정 일정 임시 취소 — base_schedule_id는 classroom_schedules를 참조
       const { error } = await supabase.from("schedule_overrides").insert({
         base_schedule_id: data.scheduleId,
         classroom_id:     data.classroomId,
@@ -658,23 +705,26 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
   if (isWide) {
     return (
       <div style={{
-        display:  "flex",
-        height:   "100vh",
-        overflow: "hidden",
+        display:    "flex",
+        height:     "100vh",   // 페이지 스크롤 없음 — 우측 뷰포트가 내부 스크롤
         background: "var(--sc-bg)",
       }}>
-        {/* 좌측 사이드바 */}
+        {/* 좌측 사이드바 — 항상 120% 크기로 고정 (브라우저 zoom 역보정)
+            width: 260 고정 + zoom: sidebarZoom → 시각적 크기 260×1.2=312px 불변 */}
         <div style={{
-          width:       220,
-          flexShrink:  0,
-          height:      "100vh",
-          overflowY:   "auto",
-          borderRight: "1px solid var(--sc-border)",
-          background:  "var(--sc-bg)",
-          padding:     "24px 20px",
-          display:     "flex",
+          width:         260,
+          flexShrink:    0,
+          position:      "sticky",
+          top:           0,
+          height:        "100vh",
+          overflowY:     "auto",
+          borderRight:   "1px solid var(--sc-border)",
+          background:    "var(--sc-bg)",
+          padding:       "24px 20px",
+          display:       "flex",
           flexDirection: "column",
-          gap:         20,
+          gap:           20,
+          zoom:          sidebarZoom,
         }}>
           <NavLinks />
 
@@ -682,12 +732,12 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest mb-1"
                style={{ color: "var(--sc-dim)" }}>Management</p>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-black" style={{ color: "var(--sc-white)" }}>교실 시간표</h1>
+            <div className="flex items-center gap-2" style={{ flexWrap: "nowrap" }}>
+              <h1 className="text-xl font-black" style={{ color: "var(--sc-white)", whiteSpace: "nowrap" }}>교실 시간표</h1>
               <button onClick={() => setShowRoomManager(true)}
                 className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold
                            transition-all duration-200 hover:opacity-80 active:scale-95"
-                style={{ background: "var(--sc-raised)", color: "var(--sc-dim)", border: "1px solid var(--sc-border)" }}>
+                style={{ background: "var(--sc-raised)", color: "var(--sc-dim)", border: "1px solid var(--sc-border)", whiteSpace: "nowrap", flexShrink: 0 }}>
                 <SearchIcon size={14} /> 교실 정보
               </button>
             </div>
@@ -697,10 +747,16 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
           <WeekNav weekOffset={weekOffset} setWeekOffset={setWeekOffset} compact />
         </div>
 
-        {/* 우측 시간표 영역 */}
-        <div style={{ flex: 1, overflow: "hidden", padding: "12px 16px 0",
-                      maxWidth: "min(960px, calc(100vh * 0.8))", minWidth: 0 }}>
-          {grid}
+        {/* 우측 시간표 스크롤 뷰포트 — 내부 스크롤 */}
+        <div style={{
+          width:      780,
+          flexShrink: 0,
+          height:     "100vh",
+          overflow:   "auto",
+        }}>
+          <div style={{ padding: "12px 20px 40px" }}>
+            {grid}
+          </div>
         </div>
 
         {modals}
@@ -711,30 +767,36 @@ export default function ScheduleClient({ classrooms, fixedSchedules }: Props) {
   // ── 세로 비율 레이아웃 (기존 상단 헤더) ─────────────────────
   return (
     <div className="min-h-screen" style={{ background: "var(--sc-bg)" }}>
-      {/* 스티키 헤더 */}
-      <div className="sticky top-0 z-30 px-8 pt-5 pb-3"
+      {/* 스티키 헤더 — zoom: headerZoom으로 브라우저 zoom과 무관하게 항상 90% 크기 유지 */}
+      <div className="sticky top-0 z-30"
            style={{ background: "var(--sc-bg)", borderBottom: "1px solid var(--sc-border)", backdropFilter: "blur(12px)" }}>
-        <NavLinks />
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest mb-0.5"
-               style={{ color: "var(--sc-dim)" }}>Management</p>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-black" style={{ color: "var(--sc-white)" }}>교실 시간표</h1>
-              <button onClick={() => setShowRoomManager(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold
-                           transition-all duration-200 hover:opacity-80 active:scale-95"
-                style={{ background: "var(--sc-raised)", color: "var(--sc-dim)", border: "1px solid var(--sc-border)" }}>
-                <SearchIcon size={14} /> 교실 정보
-              </button>
+        <div style={{ zoom: headerZoom, padding: "20px 32px 12px" }}>
+          <NavLinks />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-0.5"
+                 style={{ color: "var(--sc-dim)" }}>Management</p>
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl font-black" style={{ color: "var(--sc-white)" }}>교실 시간표</h1>
+                <button onClick={() => setShowRoomManager(true)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold
+                             transition-all duration-200 hover:opacity-80 active:scale-95"
+                  style={{ background: "var(--sc-raised)", color: "var(--sc-dim)", border: "1px solid var(--sc-border)" }}>
+                  <SearchIcon size={14} /> 교실 정보
+                </button>
+              </div>
             </div>
           </div>
+          <WeekNav weekOffset={weekOffset} setWeekOffset={setWeekOffset} />
         </div>
-        <WeekNav weekOffset={weekOffset} setWeekOffset={setWeekOffset} />
       </div>
 
-      {/* 세로 레이아웃 */}
-      <div className="px-8 py-5 mx-auto" style={{ maxWidth: "min(1200px, calc(100vh * 0.85))" }}>
+      {/* 세로 레이아웃 — 고정 820px, 브라우저 zoom 시 캔버스처럼 비례 스케일 */}
+      <div style={{
+        width:   820,
+        margin:  "0 auto",
+        padding: "20px 32px",
+      }}>
         {grid}
       </div>
 

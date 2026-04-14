@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useLayoutEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { DAYS, DayKey, CLASSROOM_ORDER } from "./constants";
 
 // ── 레이아웃 상수 ─────────────────────────────────────────────
@@ -8,23 +8,12 @@ const BASE_HOUR    = 8;           // 08:00 기준
 const TOTAL_HOURS  = 17;          // 08:00 ~ 01:00
 const TIME_COL_W   = 52;
 const MIN_BLOCK_H  = 16;
-const FALLBACK_PPH = 56;          // SSR fallback
 
-// 화면 높이에 맞춰 PX_PER_HOUR 동적 계산
-// topOffset: 시간표 위쪽 차지 픽셀 (wide=탭행만, tall=헤더+탭행+여백)
-function usePxPerHour(topOffset: number) {
-  const [pph, setPph] = useState(FALLBACK_PPH);
-  const calc = useCallback(() => {
-    const available = window.innerHeight - topOffset;
-    setPph(Math.max(28, Math.floor(available / TOTAL_HOURS)));
-  }, [topOffset]);
-  useLayoutEffect(() => {
-    calc();
-    window.addEventListener("resize", calc);
-    return () => window.removeEventListener("resize", calc);
-  }, [calc]);
-  return pph;
-}
+// 고정 pxPerHour: window.innerHeight 기반 동적 계산을 제거하고 상수로 고정.
+// 브라우저 zoom 시 CSS가 블록 높이와 폰트를 동일 비율로 스케일하므로
+// zoom 레벨에 무관하게 항상 일관된 비율이 유지됨. 시간표는 세로 스크롤로 탐색.
+// A4 비율 기준: 7컬럼 × ~95px = ~717px 너비 → 높이 = 717×√2 ≈ 1014px → 1014/17 ≈ 60px/h
+const FIXED_PPH = 60;
 
 // ── 타입 ──────────────────────────────────────────────────────
 interface Classroom { id: string; name: string; }
@@ -261,15 +250,22 @@ function ScheduleBlock({
   const top      = startMin * pxPerMin;
   const height   = Math.max((endMin - startMin) * pxPerMin, MIN_BLOCK_H);
   const color    = colorFor(schedule, isDark, view);
-  const showName     = height > 18;
-  const showTeacher  = height > 40;
-  const showTime     = height > 30;
-  const showStudents = height > 68;
+
+  // 블록 height 기준 비례 폰트 크기
+  const fzTitle = Math.max(8,  Math.min(14, Math.round(height * 0.217))); // ~13px @ 60h
+  const fzTime  = Math.max(6,  Math.min(10, Math.round(height * 0.158))); // ~9.5px @ 60h
+  const fzBadge = Math.max(5,  Math.min(9,  Math.round(height * 0.133))); // ~8px @ 60h
+
+  // 표시 임계값: 절대 높이 기준 (블록이 충분히 커야 표시)
+  const showName = height > 16;
+  const showTime = height > 28;
 
   const isConsulting = !schedule.course_id && !!(schedule.consulting_student || schedule.notes);
-  const studentNoteName = schedule.consulting_student ?? "";
-  const teacherNoteName = schedule.consulting_teacher ?? "";
-  const names = schedule.enrolled_names ?? [];
+
+  // 교실 시간표(교실 점유 확인용): 선생님 이름 + 시간만 표시
+  const displayName = isConsulting
+    ? (schedule.consulting_teacher ? `${schedule.consulting_teacher}T` : "상담")
+    : (schedule.teacher_name ? `${schedule.teacher_name}T` : (schedule.course_name ?? "수업"));
 
   return (
     <div
@@ -292,7 +288,6 @@ function ScheduleBlock({
         zIndex:       2,
       }}
       onMouseEnter={(e) => {
-        // 라이트 모드: 어둡게, 다크 모드: 밝게
         e.currentTarget.style.filter    = isDark ? "brightness(1.4)" : "brightness(0.88)";
         e.currentTarget.style.transform = "scaleX(1.015)";
         e.currentTarget.style.zIndex    = "10";
@@ -309,7 +304,7 @@ function ScheduleBlock({
           position:     "absolute",
           top:          3,
           right:        4,
-          fontSize:     8,
+          fontSize:     fzBadge,
           fontWeight:   800,
           color:        "#000",
           background:   color.border,
@@ -319,10 +314,10 @@ function ScheduleBlock({
         }}>임시</div>
       )}
 
-      {/* 과목 (없으면 수업명 fallback) — 13px */}
+      {/* 선생님 이름 */}
       {showName && (
         <p style={{
-          fontSize:     13,
+          fontSize:     fzTitle,
           fontWeight:   800,
           color:        color.text,
           marginTop:    0,
@@ -332,75 +327,7 @@ function ScheduleBlock({
           textOverflow: "ellipsis",
           paddingRight: schedule.is_override ? 24 : 0,
         }}>
-          {isConsulting
-            ? (view === "teacher"
-                ? (studentNoteName || "상담")
-                : (teacherNoteName ? `${teacherNoteName}T` : "상담"))
-            : (schedule.course_subject ?? schedule.course_name ?? "수업")}
-        </p>
-      )}
-
-      {/* 강사명 + 첫 학생 이름 (인라인 콤팩트) — 선생님 뷰에서는 선생님 이름 생략 */}
-      {showTeacher && (
-        <p style={{
-          fontSize:     11,
-          fontWeight:   800,
-          color:        color.text,
-          opacity:      0.93,
-          marginTop:    5,
-          overflow:     "hidden",
-          whiteSpace:   "nowrap",
-          textOverflow: "ellipsis",
-        }}>
-          {/* 선생님 이름 — 일반 수업 + day/room 뷰만 표시 (상담은 제목에 이미 있음) */}
-          {view !== "teacher" && schedule.teacher_name && !isConsulting && (
-            <span>{schedule.teacher_name} T{names.length > 0 && !showStudents ? "  " : ""}</span>
-          )}
-          {/* 학생 목록이 안 보이는 작은 블록에서는 첫 학생 이름만 인라인으로 */}
-          {!showStudents && names.length > 0 && (
-            <span style={{ fontSize: view === "teacher" ? 11 : 9, opacity: view === "teacher" ? 0.93 : 0.85 }}>
-              {names[0]}{names.length > 1 ? "…" : ""}
-            </span>
-          )}
-          {/* 상담 2행 — day/room: 학생이름 / teacher뷰: 생략(제목에 이미 있음) */}
-          {!showStudents && isConsulting && view !== "teacher" && (
-            <span style={{ fontSize: 9, opacity: 0.85 }}>
-              {studentNoteName}
-            </span>
-          )}
-        </p>
-      )}
-
-      {/* 수강 학생 이름 (크기 충분할 때만 전체 목록) */}
-      {/* 선생님 뷰: 선생님 서식(11px, 0.93) / 그 외: 학생 서식(9px, 0.85) */}
-      {showStudents && names.length > 0 && (
-        <p style={{
-          fontSize:     view === "teacher" ? 11 : 9,
-          fontWeight:   800,
-          color:        color.text,
-          opacity:      view === "teacher" ? 0.93 : 0.85,
-          marginTop:    5,
-          overflow:     "hidden",
-          whiteSpace:   "nowrap",
-          textOverflow: "ellipsis",
-          lineHeight:   1.4,
-        }}>
-          {names.slice(0, 4).join(" · ")}{names.length > 4 ? ` +${names.length - 4}` : ""}
-        </p>
-      )}
-      {/* 상담 2행 (큰 블록) — day/room: 학생이름 / teacher뷰: 생략 */}
-      {showStudents && isConsulting && view !== "teacher" && (
-        <p style={{
-          fontSize:     9,
-          fontWeight:   800,
-          color:        color.text,
-          opacity:      0.85,
-          marginTop:    5,
-          overflow:     "hidden",
-          whiteSpace:   "nowrap",
-          textOverflow: "ellipsis",
-        }}>
-          {studentNoteName}
+          {displayName}
         </p>
       )}
 
@@ -411,7 +338,7 @@ function ScheduleBlock({
           bottom:       3,
           left:         6,
           right:        5,
-          fontSize:     9.5,
+          fontSize:     fzTime,
           fontWeight:   600,
           color:        color.textMuted,
           whiteSpace:   "nowrap",
@@ -457,8 +384,7 @@ export default function ScheduleGrid({
   onDayChange, onRoomChange, onTeacherChange, onCellClick, onViewChange,
   isWide = false,
 }: Props) {
-  // wide: 탭행(52px) 만 제외, tall: 상단 헤더 전체 제외
-  const pxPerHour   = usePxPerHour(isWide ? 60 : 300);
+  const pxPerHour   = FIXED_PPH;
   const pxPerMin    = pxPerHour / 60;
   const TOTAL_HEIGHT = TOTAL_HOURS * pxPerHour;
   const HOUR_INDICES = Array.from({ length: TOTAL_HOURS + 1 }, (_, i) => i);
@@ -543,7 +469,10 @@ export default function ScheduleGrid({
     }
   }
 
-  const gridCols = `${TIME_COL_W}px repeat(${cols.length}, 1fr)`;
+  // minmax(80px, 1fr): 각 컬럼 최소 80px 확보 → 브라우저 zoom에 무관하게 가로 폭 유지
+  const gridCols    = `${TIME_COL_W}px repeat(${cols.length}, minmax(80px, 1fr))`;
+  // 그리드 박스 최소 너비: 시간열 + 컬럼 수 × 80px → overflow:clip 이 내용을 자르지 않도록 보장
+  const gridMinWidth = TIME_COL_W + cols.length * 80;
 
   return (
     <div>
@@ -588,12 +517,15 @@ export default function ScheduleGrid({
 
       {/* 그리드 박스 */}
       <div
-        className="rounded-2xl sc-timetable-scroll"
+        className="rounded-2xl"
         style={{
-          border:     "1px solid var(--sc-border)",
+          border:    "1px solid var(--sc-border)",
           background: "var(--sc-surface)",
-          overflowY:  "auto",
-          maxHeight:  isWide ? "calc(100vh - 60px)" : "calc(100vh - 260px)",
+          // overflow: clip — border-radius 모서리를 클리핑하되 scroll 컨테이너를 만들지 않음
+          // (overflow: hidden은 position: sticky를 깨뜨리므로 clip 사용)
+          overflow:  "clip",
+          // 컬럼 수 기반 최소 너비: 이보다 좁아지면 overflow:clip이 오른쪽을 자르므로 보장
+          minWidth:  gridMinWidth,
         }}
       >
         {/* 컬럼 헤더 (sticky) */}
@@ -655,11 +587,13 @@ export default function ScheduleGrid({
                   top:        i === 0 ? 4 : i * pxPerHour - 8,
                   right:      6,
                   left:       0,
-                  textAlign:  "right",
-                  fontSize:   10,
-                  fontWeight: 600,
-                  color:      "var(--sc-dim)",
-                  userSelect: "none",
+                  textAlign:   "right",
+                  fontSize:    Math.max(8, Math.min(11, Math.round(pxPerHour * 0.156))),
+                  fontWeight:  600,
+                  color:       "var(--sc-dim)",
+                  userSelect:  "none",
+                  whiteSpace:  "nowrap",
+                  overflow:    "hidden",
                 }}
               >
                 {hhmm(indexToHour(i))}

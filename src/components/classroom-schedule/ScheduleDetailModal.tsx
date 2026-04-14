@@ -47,6 +47,7 @@ export interface DeleteData {
   deleteType:  DeleteType;
   tempScope?:  TempScope;
   weeksCount?: number;
+  isOverride?: boolean;  // 임시 일정 여부 — override는 schedule_overrides에서 직접 삭제
 }
 
 interface Props {
@@ -167,6 +168,7 @@ export default function ScheduleDetailModal({ cell, weekSaturdayStr, onClose, on
       deleteType,
       tempScope:   deleteType === "temporary" ? tempScope : undefined,
       weeksCount:  deleteType === "temporary" && tempScope === "weeks" ? weeks : undefined,
+      isOverride:  cell.isOverride,
     });
   }
 
@@ -336,7 +338,35 @@ export default function ScheduleDetailModal({ cell, weekSaturdayStr, onClose, on
                     일정 삭제
                   </button>
                 </div>
+              ) : cell?.isOverride ? (
+                /* ── 임시 일정(override): 단순 삭제 UI ───────────── */
+                <div className="space-y-3">
+                  <div style={{
+                    padding: "10px 14px", borderRadius: 10,
+                    background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)",
+                    fontSize: 12, color: "#f87171", fontWeight: 600,
+                  }}>
+                    이 일정은 임시 일정입니다. 삭제하면 완전히 제거됩니다.
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button onClick={() => setShowDelete(false)}
+                      className="py-2.5 rounded-xl text-sm font-bold"
+                      style={{ background: "var(--sc-raised)", color: "var(--sc-dim)", border: "1px solid var(--sc-border)" }}>
+                      취소
+                    </button>
+                    <button onClick={submitDelete}
+                      className="py-2.5 rounded-xl text-sm font-bold transition-all active:scale-95"
+                      style={{
+                        background: "rgba(239,68,68,0.2)",
+                        color:      "#f87171",
+                        border:     "1px solid rgba(239,68,68,0.4)",
+                      }}>
+                      삭제
+                    </button>
+                  </div>
+                </div>
               ) : (
+                /* ── 고정 일정: 임시 / 고정 삭제 선택 ───────────── */
                 <div className="space-y-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest"
                      style={{ color: "var(--sc-dim)" }}>삭제 유형</p>

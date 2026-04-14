@@ -35,7 +35,8 @@ export const ALL_CATEGORIES: Category[] = [
   {
     id: "admin", label: "관리자", en: "Admin",
     modules: [
-      { key: "users", name: "유저 관리", sub: "User Settings", Icon: Icons.Settings, href: "/admin/users" },
+      { key: "users",            name: "유저 관리",   sub: "User Settings",    Icon: Icons.Settings,     href: "/admin/users"            },
+      { key: "full-schedule",    name: "전체 시간표", sub: "Full Schedule",    Icon: Icons.UserCalendar, href: "/admin/full-schedule"    },
     ],
   },
   {
@@ -51,17 +52,22 @@ export const ALL_CATEGORIES: Category[] = [
     id: "student-manage", label: "학생 관리", en: "Student Management",
     modules: [
       { key: "students-register",    name: "학생 등록",   sub: "Register Student",    Icon: Icons.UserPlus,      href: "/manage/students/register"    },
-      { key: "students-schedule",    name: "학생 시간표", sub: "Student Schedule",    Icon: Icons.UserCalendar,  href: "/manage/students/schedule"    },
+      { key: "students-schedule",    name: "학생 시간표", sub: "Student Schedule",    Icon: Icons.UserCalendar,  href: "/schedule/students"           },
       { key: "students-assignments", name: "학생 과제",   sub: "Student Assignments", Icon: Icons.UserClipboard, href: "/manage/students/assignments" },
     ],
   },
   {
-    id: "user", label: "학생", en: "Student",
+    id: "schedule", label: "일정 관리", en: "Schedule",
     modules: [
-      { key: "student-schedule",    name: "내 시간표",   sub: "Weekly Schedule", Icon: Icons.Calendar,  href: "/student/schedule"    },
-      { key: "student-assignments", name: "내 과제표",   sub: "Assignments",     Icon: Icons.Clipboard, href: "/student/assignments" },
-      { key: "student-lunch",       name: "도시락 신청", sub: "Lunch Order",     Icon: Icons.LunchBox,  href: "/student/lunch"       },
-      { key: "student-enroll",      name: "수강 신청",   sub: "Enrollment",      Icon: Icons.BookOpen,  href: "/student/enroll"      },
+      { key: "my-schedule",  name: "내 시간표", sub: "My Schedule", Icon: Icons.Calendar,  href: "/schedule/me"        },
+      { key: "assignments",  name: "내 과제표", sub: "Assignments",  Icon: Icons.Clipboard, href: "/student/assignments"},
+    ],
+  },
+  {
+    id: "apply", label: "신청", en: "Apply",
+    modules: [
+      { key: "student-lunch",  name: "도시락 신청", sub: "Lunch Order",  Icon: Icons.LunchBox, href: "/student/lunch"  },
+      { key: "student-enroll", name: "수강 신청",   sub: "Enrollment",   Icon: Icons.BookOpen, href: "/student/enroll" },
     ],
   },
 ];
