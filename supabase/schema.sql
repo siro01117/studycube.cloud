@@ -1,450 +1,252 @@
--- ================================================
--- 학원 관리 시스템 - Supabase Schema
--- ================================================
--- Supabase 대시보드 > SQL Editor 에 전체 붙여넣고 실행하세요.
--- 재실행 시에도 안전하게 초기화 후 생성합니다.
--- ================================================
+-- ================================================================
+-- 스큐(SQ) 코어 스키마 — 사람중심 RBAC + 지점 + 모듈
+-- Supabase 대시보드 > SQL Editor 에 전체 붙여넣고 실행. 재실행 안전(초기화 후 생성).
+-- 모델: person / role / permission / role_permission / person_role(+branch) / branch / module / branch_module
+-- 원칙: 역할·권한은 데이터(행). 모듈 추가 = INSERT. 코드는 역할이름 X, 권한만 본다.
+-- ================================================================
 
+-- ---------------- 0. 초기화 ----------------
+drop table if exists branch_module    cascade;
+drop table if exists person_role      cascade;
+drop table if exists role_permission  cascade;
+drop table if exists permission       cascade;
+drop table if exists role             cascade;
+drop table if exists module           cascade;
+drop table if exists person           cascade;
+drop table if exists branch           cascade;
+drop function if exists has_perm(uuid, text) cascade;
+drop function if exists is_cto()             cascade;
 
--- ------------------------------------------------
--- 0-A. 기존 객체 초기화 (재실행 대비)
--- ------------------------------------------------
-drop table if exists lunch_orders         cascade;
-drop table if exists attendance           cascade;
-drop table if exists student_assignments  cascade;
-drop table if exists assignments          cascade;
-drop table if exists enrollments          cascade;
-drop table if exists classroom_schedules  cascade;
-drop table if exists courses              cascade;
-drop table if exists classrooms           cascade;
-drop table if exists teachers             cascade;
-drop table if exists students             cascade;
-drop table if exists profiles             cascade;
-
-drop type if exists user_role         cascade;
-drop type if exists attendance_status cascade;
-drop type if exists day_of_week       cascade;
-
-drop function if exists handle_new_user()                    cascade;
-drop function if exists get_my_role()                        cascade;
-drop function if exists get_my_student_id()                  cascade;
-drop function if exists check_classroom_schedule_overlap()   cascade;
-
-
--- ------------------------------------------------
--- 0-B. Extensions
--- ------------------------------------------------
 create extension if not exists "uuid-ossp";
 
-
--- ------------------------------------------------
--- 1. ENUM 타입 정의
--- ------------------------------------------------
-create type user_role as enum ('admin', 'manager', 'user');
-create type attendance_status as enum ('present', 'absent', 'late', 'excused');
-create type day_of_week as enum ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun');
-
-
--- ------------------------------------------------
--- 2. profiles (모든 유저 공통 정보)
---    Supabase auth.users 와 1:1 연결
--- ------------------------------------------------
-create table profiles (
-  id          uuid primary key references auth.users(id) on delete cascade,
-  email       text not null,
+-- ---------------- 1. branch (지점, 본점도 한 행 is_hq) ----------------
+create table branch (
+  id          uuid primary key default uuid_generate_v4(),
   name        text not null,
-  role        user_role not null default 'user',
+  code        text unique,
+  is_hq       boolean not null default false,
+  created_at  timestamptz not null default now()
+);
+
+-- ---------------- 2. person (사람=계정, auth.users 1:1) ----------------
+create table person (
+  id          uuid primary key references auth.users(id) on delete cascade,
+  login_id    text unique not null,          -- 로그인 아이디(소문자 정규화 저장)
+  auth_email  text unique not null,          -- 내부 합성 이메일(ascii). 로그인 시 login_id→여기→Auth
+  name        text not null,
   phone       text,
+  status      text not null default 'active', -- active | inactive
+  attributes  jsonb not null default '{}',    -- 나중 귀속 정보(학년·학교 등)
   created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now()
+  created_by  uuid references person(id) on delete set null
 );
 
--- 유저 가입 시 자동으로 profiles 생성하는 트리거
-create or replace function handle_new_user()
-returns trigger as $$
-begin
-  insert into profiles (id, email, name, role)
-  values (
-    new.id,
-    new.email,
-    coalesce(
-      new.raw_user_meta_data->>'name',
-      split_part(new.email, '@', 1)   -- 이름 없으면 이메일 앞부분 사용
-    ),
-    'user'::user_role                 -- 기본값 user (admin이 나중에 변경)
+-- ---------------- 3. role (역할 — 데이터) ----------------
+create table role (
+  id     uuid primary key default uuid_generate_v4(),
+  key    text unique not null,    -- cto, wonjang, siljang, ...
+  label  text not null,
+  rank   int  not null default 0, -- 발급/관리 위계 기준
+  color  text
+);
+
+-- ---------------- 4. permission (권한 — 데이터, 모듈이 추가) ----------------
+create table permission (
+  key    text primary key,        -- account.provision, attendance.edit, ...
+  label  text not null
+);
+
+-- ---------------- 5. role_permission (역할 = 권한 묶음) ----------------
+create table role_permission (
+  role_id        uuid references role(id) on delete cascade,
+  permission_key text references permission(key) on delete cascade,
+  primary key (role_id, permission_key)
+);
+
+-- ---------------- 6. person_role (누가·어느지점·무슨역할 = 다대다, 지점별) ----------------
+create table person_role (
+  id         uuid primary key default uuid_generate_v4(),
+  person_id  uuid not null references person(id) on delete cascade,
+  branch_id  uuid not null references branch(id) on delete cascade,
+  role_id    uuid not null references role(id)   on delete cascade,
+  unique (person_id, branch_id, role_id)
+);
+
+-- ---------------- 7. module (모듈 카탈로그) ----------------
+create table module (
+  key      text primary key,       -- seat, attendance, lunch, ...
+  label    text not null,
+  icon     text,
+  requires text[] not null default '{}',  -- 필요 권한(이거 없으면 카드 숨김)
+  ord      int not null default 99
+);
+
+-- ---------------- 8. branch_module (지점별 모듈 on/off — 본점 할당) ----------------
+create table branch_module (
+  branch_id  uuid references branch(id) on delete cascade,
+  module_key text references module(key) on delete cascade,
+  enabled    boolean not null default true,
+  primary key (branch_id, module_key)
+);
+
+-- ================================================================
+-- 헬퍼 함수
+-- ================================================================
+-- 현재 유저가 CTO 역할? (전 지점·전권) — has_perm 이 참조하므로 먼저 정의
+create function is_cto()
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from person_role pr join role r on r.id = pr.role_id
+    where pr.person_id = auth.uid() and r.key = 'cto'
   )
-  on conflict (id) do nothing;        -- 중복 실행 방지
-  return new;
-exception when others then
-  -- 트리거 실패가 유저 생성을 막지 않도록 에러 무시
-  raise log 'handle_new_user error: %', sqlerrm;
-  return new;
-end;
-$$ language plpgsql security definer set search_path = public;
+$$;
 
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute function handle_new_user();
+-- 이 지점에서 이 권한 보유? (소속+역할+권한 한방). CTO는 항상 통과.
+create function has_perm(p_branch uuid, p_perm text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select is_cto() or exists (
+    select 1
+    from person_role pr
+    join role_permission rp on rp.role_id = pr.role_id
+    where pr.person_id = auth.uid()
+      and pr.branch_id = p_branch
+      and rp.permission_key = p_perm
+  )
+$$;
 
+-- ================================================================
+-- RLS — 코어(최소 안전판). 권한 필요한 쓰기는 서버액션(service_role)이 앱에서 검증 후 수행.
+-- ================================================================
+alter table branch          enable row level security;
+alter table person          enable row level security;
+alter table role            enable row level security;
+alter table permission      enable row level security;
+alter table role_permission enable row level security;
+alter table person_role     enable row level security;
+alter table module          enable row level security;
+alter table branch_module   enable row level security;
 
--- ------------------------------------------------
--- 3. students (학생 상세 정보)
--- ------------------------------------------------
-create table students (
-  id          uuid primary key default uuid_generate_v4(),
-  profile_id  uuid not null references profiles(id) on delete cascade,
-  grade       text,                        -- 학년 (예: "중2", "고1")
-  school      text,                        -- 학교명
-  parent_name text,
-  parent_phone text,
-  memo        text,
-  created_at  timestamptz not null default now()
-);
+-- 카탈로그(역할·권한·매핑·모듈): 로그인 유저 읽기 허용 (UI 렌더용)
+create policy "role read"            on role            for select to authenticated using (true);
+create policy "permission read"      on permission      for select to authenticated using (true);
+create policy "role_permission read" on role_permission for select to authenticated using (true);
+create policy "module read"          on module          for select to authenticated using (true);
 
+-- branch: 내가 소속된 지점 또는 CTO
+create policy "branch read" on branch for select to authenticated
+  using ( is_cto() or exists (select 1 from person_role pr where pr.person_id=auth.uid() and pr.branch_id=branch.id) );
 
--- ------------------------------------------------
--- 4. teachers (강사 상세 정보)
--- ------------------------------------------------
-create table teachers (
-  id          uuid primary key default uuid_generate_v4(),
-  profile_id  uuid not null references profiles(id) on delete cascade,
-  subject     text,                        -- 담당 과목
-  bio         text,
-  created_at  timestamptz not null default now()
-);
+-- branch_module: 내 소속 지점 것 또는 CTO
+create policy "branch_module read" on branch_module for select to authenticated
+  using ( is_cto() or exists (select 1 from person_role pr where pr.person_id=auth.uid() and pr.branch_id=branch_module.branch_id) );
 
+-- person: 본인 또는 CTO (그 외 조회는 서버액션 경유)
+create policy "person read self/cto" on person for select to authenticated
+  using ( id = auth.uid() or is_cto() );
+create policy "person update self"   on person for update to authenticated
+  using ( id = auth.uid() );
 
--- ------------------------------------------------
--- 5. classrooms (교실)
--- ------------------------------------------------
-create table classrooms (
-  id            uuid primary key default uuid_generate_v4(),
-  name          text not null,             -- 예: "101호", "대강의실"
-  capacity      int,                       -- 수용 인원
-  floor         int,                       -- 층
-  seat_layout   jsonb,                     -- 좌석 배치도 (후순위 기능용)
-  description   text,
-  created_at    timestamptz not null default now()
-);
+-- person_role: 본인 또는 CTO
+create policy "person_role read" on person_role for select to authenticated
+  using ( person_id = auth.uid() or is_cto() );
 
+-- ================================================================
+-- 시드 — 지점(본점) · 역할 · 권한 · 역할권한
+-- ================================================================
+-- 본점
+insert into branch (id, name, code, is_hq) values
+  ('00000000-0000-0000-0000-000000000001', '본점', 'HQ', true)
+on conflict do nothing;
 
--- ------------------------------------------------
--- 6. courses (수업/강좌)
--- ------------------------------------------------
-create table courses (
-  id            uuid primary key default uuid_generate_v4(),
-  name          text not null,             -- 예: "고1 수학", "중등 영어 심화"
-  teacher_id    uuid references teachers(id) on delete set null,
-  classroom_id  uuid references classrooms(id) on delete set null,
-  description   text,
-  max_students  int default 20,
-  is_active     boolean default true,
-  created_at    timestamptz not null default now()
-);
+-- 역할 (rank ↑ = 상위)
+insert into role (key, label, rank, color) values
+  ('cto',               'CTO',     100, '#5b8def'),
+  ('wonjang',           '원장',     95, '#5b8def'),
+  ('siljang',           '실장',     70, '#8a93a6'),
+  ('senior_instructor', '선임강사',  70, '#8a93a6'),
+  ('manager',           '관리자',    40, '#8a93a6'),
+  ('mentor',            '멘토',      40, '#8a93a6'),
+  ('instructor',        '강사',      40, '#8a93a6'),
+  ('student',           '학생',      10, '#6b7180')
+on conflict (key) do nothing;
 
+-- 권한 (모듈이 늘려감. 코어 + 1차 모듈 후보)
+insert into permission (key, label) values
+  ('hq.cross_branch',       '전 지점 가로질러 보기'),
+  ('branch.create',         '지점 생성'),
+  ('module.assign',         '지점 모듈 할당'),
+  ('branch.settings',       '지점 설정·통계'),
+  ('account.provision',     '계정 발급'),
+  ('role.assign',           '역할 부여'),
+  ('student.view',          '학생 조회'),
+  ('student.edit',          '학생 정보 수정'),
+  ('student.assign_mentor', '멘토 배정'),
+  ('attendance.view',       '출결 조회'),
+  ('attendance.edit',       '출결 관리'),
+  ('class.manage',          '수업 관리'),
+  ('content.author',        '콘텐츠 작성'),
+  ('mentoring.log',         '멘토링 기록'),
+  ('billing.view',          '결제 조회'),
+  ('billing.manage',        '결제 관리'),
+  ('self.use',              '본인 모듈 이용')
+on conflict (key) do nothing;
 
--- ------------------------------------------------
--- 7. classroom_schedules (강사별 교실 사용 시간표)
---    핵심: 교실은 고정, 시간은 유동적
--- ------------------------------------------------
-create table classroom_schedules (
-  id            uuid primary key default uuid_generate_v4(),
-  course_id     uuid not null references courses(id) on delete cascade,
-  teacher_id    uuid references teachers(id) on delete set null,
-  classroom_id  uuid references classrooms(id) on delete set null,
-  day           day_of_week not null,
-  start_time    time not null,
-  end_time      time not null,
-  effective_from  date not null default current_date,  -- 이 시간표가 적용되는 시작일
-  effective_until date,                                -- null이면 계속 유효
-  created_at    timestamptz not null default now()
-);
-
--- 같은 교실, 같은 요일 시간 중복 방지 트리거
-create or replace function check_classroom_schedule_overlap()
-returns trigger as $$
+-- 역할→권한 매핑
+-- 원장 = hq 전용 3개 제외한 전 권한 / 그 아래는 매트릭스 기본값. (CTO는 함수로 전권 → 매핑 불필요하지만 명시 위해 self.use만)
+do $$
+declare r_wonjang uuid; r_siljang uuid; r_senior uuid; r_manager uuid; r_mentor uuid; r_instr uuid; r_student uuid; r_cto uuid;
 begin
-  if exists (
-    select 1 from classroom_schedules
-    where classroom_id = new.classroom_id
-      and day = new.day
-      and id != new.id
-      and (effective_until is null or effective_until >= current_date)
-      and new.start_time < end_time
-      and new.end_time > start_time
-  ) then
-    raise exception '해당 교실(%)의 % 요일 % ~ % 시간대에 이미 수업이 있습니다.',
-      new.classroom_id, new.day, new.start_time, new.end_time;
-  end if;
-  return new;
-end;
-$$ language plpgsql;
+  select id into r_cto     from role where key='cto';
+  select id into r_wonjang from role where key='wonjang';
+  select id into r_siljang from role where key='siljang';
+  select id into r_senior  from role where key='senior_instructor';
+  select id into r_manager from role where key='manager';
+  select id into r_mentor  from role where key='mentor';
+  select id into r_instr   from role where key='instructor';
+  select id into r_student from role where key='student';
 
-create trigger trg_no_classroom_overlap
-  before insert or update on classroom_schedules
-  for each row execute function check_classroom_schedule_overlap();
+  -- CTO: 명시적으로도 전권(함수가 우선이지만 매핑도 채워둠)
+  insert into role_permission select r_cto, key from permission on conflict do nothing;
 
+  -- 원장: hq.* 제외 전권
+  insert into role_permission
+    select r_wonjang, key from permission
+    where key not in ('hq.cross_branch','branch.create','module.assign')
+    on conflict do nothing;
 
--- ------------------------------------------------
--- 8. enrollments (수강 신청)
--- ------------------------------------------------
-create table enrollments (
-  id          uuid primary key default uuid_generate_v4(),
-  student_id  uuid not null references students(id) on delete cascade,
-  course_id   uuid not null references courses(id) on delete cascade,
-  enrolled_at timestamptz not null default now(),
-  is_active   boolean default true,
-  unique(student_id, course_id)
-);
+  -- 실장(행정 총괄)
+  insert into role_permission values
+    (r_siljang,'branch.settings'),(r_siljang,'account.provision'),(r_siljang,'role.assign'),
+    (r_siljang,'student.view'),(r_siljang,'student.edit'),(r_siljang,'student.assign_mentor'),
+    (r_siljang,'attendance.view'),(r_siljang,'attendance.edit'),
+    (r_siljang,'billing.view'),(r_siljang,'self.use') on conflict do nothing;
 
+  -- 선임강사(교육 총괄)
+  insert into role_permission values
+    (r_senior,'student.view'),(r_senior,'attendance.view'),(r_senior,'attendance.edit'),
+    (r_senior,'class.manage'),(r_senior,'content.author'),(r_senior,'mentoring.log'),(r_senior,'self.use')
+    on conflict do nothing;
 
--- ------------------------------------------------
--- 9. assignments (과제)
--- ------------------------------------------------
-create table assignments (
-  id          uuid primary key default uuid_generate_v4(),
-  course_id   uuid not null references courses(id) on delete cascade,
-  title       text not null,
-  description text,
-  due_date    date,
-  week_start  date,                        -- 해당 주간 시작일 (주간 과제표용)
-  created_at  timestamptz not null default now()
-);
+  -- 관리자(행정)
+  insert into role_permission values
+    (r_manager,'student.view'),(r_manager,'student.edit'),
+    (r_manager,'attendance.view'),(r_manager,'attendance.edit'),
+    (r_manager,'billing.view'),(r_manager,'self.use') on conflict do nothing;
 
+  -- 멘토
+  insert into role_permission values
+    (r_mentor,'student.view'),(r_mentor,'mentoring.log'),(r_mentor,'self.use') on conflict do nothing;
 
--- ------------------------------------------------
--- 10. student_assignments (학생별 과제 완료 여부)
--- ------------------------------------------------
-create table student_assignments (
-  id            uuid primary key default uuid_generate_v4(),
-  assignment_id uuid not null references assignments(id) on delete cascade,
-  student_id    uuid not null references students(id) on delete cascade,
-  is_done       boolean default false,
-  submitted_at  timestamptz,
-  memo          text,
-  unique(assignment_id, student_id)
-);
+  -- 강사
+  insert into role_permission values
+    (r_instr,'student.view'),(r_instr,'attendance.view'),(r_instr,'attendance.edit'),
+    (r_instr,'class.manage'),(r_instr,'content.author'),(r_instr,'self.use') on conflict do nothing;
 
+  -- 학생
+  insert into role_permission values (r_student,'self.use') on conflict do nothing;
+end $$;
 
--- ------------------------------------------------
--- 11. attendance (출결 관리)
--- ------------------------------------------------
-create table attendance (
-  id          uuid primary key default uuid_generate_v4(),
-  student_id  uuid not null references students(id) on delete cascade,
-  course_id   uuid not null references courses(id) on delete cascade,
-  date        date not null,
-  status      attendance_status not null default 'present',
-  seat_no     text,                        -- 좌석 번호 (출결 시 좌석 배치도 연동)
-  memo        text,
-  created_at  timestamptz not null default now(),
-  unique(student_id, course_id, date)
-);
-
-
--- ------------------------------------------------
--- 12. lunch_orders (월간 도시락 신청)
--- ------------------------------------------------
-create table lunch_orders (
-  id          uuid primary key default uuid_generate_v4(),
-  student_id  uuid not null references students(id) on delete cascade,
-  year        int not null,
-  month       int not null check (month between 1 and 12),
-  order_dates jsonb not null default '[]',  -- 신청한 날짜 배열 ["2026-04-07", "2026-04-08"]
-  submitted_at timestamptz not null default now(),
-  updated_at  timestamptz not null default now(),
-  unique(student_id, year, month)
-);
-
-
--- ================================================
--- RLS (Row Level Security) 정책
--- ================================================
--- 모든 테이블에 RLS 활성화
-alter table profiles             enable row level security;
-alter table students             enable row level security;
-alter table teachers             enable row level security;
-alter table classrooms           enable row level security;
-alter table courses              enable row level security;
-alter table classroom_schedules  enable row level security;
-alter table enrollments          enable row level security;
-alter table assignments          enable row level security;
-alter table student_assignments  enable row level security;
-alter table attendance           enable row level security;
-alter table lunch_orders         enable row level security;
-
-
--- ------------------------------------------------
--- 헬퍼 함수: 현재 로그인 유저의 role 반환
--- ------------------------------------------------
-create or replace function get_my_role()
-returns user_role as $$
-  select role from profiles where id = auth.uid();
-$$ language sql security definer stable;
-
-create or replace function get_my_student_id()
-returns uuid as $$
-  select id from students where profile_id = auth.uid();
-$$ language sql security definer stable;
-
-
--- ------------------------------------------------
--- profiles RLS
--- ------------------------------------------------
--- 본인 프로필은 누구나 조회 가능
-create policy "profiles: 본인 조회"
-  on profiles for select
-  using (id = auth.uid());
-
--- admin/manager는 전체 조회
-create policy "profiles: admin/manager 전체 조회"
-  on profiles for select
-  using (get_my_role() in ('admin', 'manager'));
-
--- admin만 role 변경 가능
-create policy "profiles: admin 전체 수정"
-  on profiles for update
-  using (get_my_role() = 'admin');
-
--- 본인 기본 정보 수정 (role 제외)
-create policy "profiles: 본인 수정"
-  on profiles for update
-  using (id = auth.uid());
-
-
--- ------------------------------------------------
--- students RLS
--- ------------------------------------------------
-create policy "students: admin/manager 전체 접근"
-  on students for all
-  using (get_my_role() in ('admin', 'manager'));
-
-create policy "students: 본인 조회"
-  on students for select
-  using (profile_id = auth.uid());
-
-
--- ------------------------------------------------
--- teachers RLS
--- ------------------------------------------------
-create policy "teachers: admin/manager 전체 접근"
-  on teachers for all
-  using (get_my_role() in ('admin', 'manager'));
-
-create policy "teachers: user 조회"
-  on teachers for select
-  using (get_my_role() = 'user');
-
-
--- ------------------------------------------------
--- classrooms RLS
--- ------------------------------------------------
-create policy "classrooms: admin/manager 전체 접근"
-  on classrooms for all
-  using (get_my_role() in ('admin', 'manager'));
-
-create policy "classrooms: user 조회"
-  on classrooms for select
-  using (get_my_role() = 'user');
-
-
--- ------------------------------------------------
--- courses RLS
--- ------------------------------------------------
-create policy "courses: admin/manager 전체 접근"
-  on courses for all
-  using (get_my_role() in ('admin', 'manager'));
-
-create policy "courses: user 조회"
-  on courses for select
-  using (get_my_role() = 'user');
-
-
--- ------------------------------------------------
--- classroom_schedules RLS
--- ------------------------------------------------
-create policy "classroom_schedules: admin/manager 전체 접근"
-  on classroom_schedules for all
-  using (get_my_role() in ('admin', 'manager'));
-
-create policy "classroom_schedules: user 조회"
-  on classroom_schedules for select
-  using (get_my_role() = 'user');
-
-
--- ------------------------------------------------
--- enrollments RLS
--- ------------------------------------------------
-create policy "enrollments: admin/manager 전체 접근"
-  on enrollments for all
-  using (get_my_role() in ('admin', 'manager'));
-
-create policy "enrollments: 본인 수강 조회"
-  on enrollments for select
-  using (student_id = get_my_student_id());
-
-create policy "enrollments: 본인 수강 신청"
-  on enrollments for insert
-  with check (student_id = get_my_student_id());
-
-
--- ------------------------------------------------
--- assignments RLS
--- ------------------------------------------------
-create policy "assignments: admin/manager 전체 접근"
-  on assignments for all
-  using (get_my_role() in ('admin', 'manager'));
-
--- user는 본인이 수강 중인 course의 과제만 조회
-create policy "assignments: 본인 수강 과제 조회"
-  on assignments for select
-  using (
-    exists (
-      select 1 from enrollments e
-      where e.course_id = assignments.course_id
-        and e.student_id = get_my_student_id()
-        and e.is_active = true
-    )
-  );
-
-
--- ------------------------------------------------
--- student_assignments RLS
--- ------------------------------------------------
-create policy "student_assignments: admin/manager 전체 접근"
-  on student_assignments for all
-  using (get_my_role() in ('admin', 'manager'));
-
-create policy "student_assignments: 본인 조회/수정"
-  on student_assignments for all
-  using (student_id = get_my_student_id());
-
-
--- ------------------------------------------------
--- attendance RLS
--- ------------------------------------------------
-create policy "attendance: admin/manager 전체 접근"
-  on attendance for all
-  using (get_my_role() in ('admin', 'manager'));
-
-create policy "attendance: 본인 출결 조회"
-  on attendance for select
-  using (student_id = get_my_student_id());
-
-
--- ------------------------------------------------
--- lunch_orders RLS
--- ------------------------------------------------
-create policy "lunch_orders: admin/manager 전체 접근"
-  on lunch_orders for all
-  using (get_my_role() in ('admin', 'manager'));
-
-create policy "lunch_orders: 본인 도시락 신청/조회"
-  on lunch_orders for all
-  using (student_id = get_my_student_id());
-
-
--- ================================================
--- 완료! 위 SQL을 Supabase SQL Editor에서 실행하세요.
--- ================================================
+-- ================================================================
+-- 완료. 모듈(module/branch_module)은 모듈 추가할 때 INSERT.
+-- 마스터 CTO 계정은 `node scripts/bootstrap.mjs` 로 생성.
+-- ================================================================
