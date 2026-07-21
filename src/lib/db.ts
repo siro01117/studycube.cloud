@@ -13,7 +13,8 @@ const g = globalThis as unknown as { __dbInst?: DB };
 
 async function real(): Promise<DB> {
   if (g.__dbInst) return g.__dbInst;
-  const url = process.env.DATABASE_URL;
+  // Supabase-Vercel 연동이 자동 주입하는 이름들도 인식
+  const url = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
   let inst: DB;
   if (url) {
     // 운영: Supabase Postgres. pgBouncer(transaction) 모드 대비 prepare:false.
@@ -28,6 +29,11 @@ async function real(): Promise<DB> {
         await sql.unsafe(text).simple(); // 다중 statement(스키마) 실행
       },
     };
+  } else if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+    // 배포 환경인데 DB URL 없음 → PGlite로 폴백하면 읽기전용 FS라 EROFS. 명확히 안내.
+    throw new Error(
+      "DB 연결 정보가 없습니다. Vercel 환경변수에 DATABASE_URL(또는 POSTGRES_URL)을 Supabase 접속 문자열(Transaction pooler)로 설정한 뒤 재배포하세요.",
+    );
   } else {
     // 개발: 로컬 PGlite
     const { PGlite } = await import("@electric-sql/pglite");
