@@ -1,6 +1,8 @@
-'use server';
-import { signOut } from '@/lib/auth';
+"use server";
+import { redirect } from "next/navigation";
+import { clearSession } from "@/lib/auth";
 
-export async function logout() {
-  await signOut();
+export async function logoutAction(): Promise<void> {
+  await clearSession();
+  redirect("/login");
 }

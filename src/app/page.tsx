@@ -1,6 +1,8 @@
-import { redirect } from 'next/navigation';
+import { redirect } from "next/navigation";
+import { getMe } from "@/lib/auth";
 
-// 루트 → 홈. 비로그인은 미들웨어가 /login 으로 보냄.
-export default function Index() {
-  redirect('/home');
+// 루트: 로그인돼 있으면 홈, 아니면 로그인으로
+export default async function Index() {
+  const me = await getMe();
+  redirect(me ? "/home" : "/login");
 }

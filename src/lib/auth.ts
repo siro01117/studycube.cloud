@@ -1,150 +1,140 @@
-// 인증·계정 핵심 — 여기서 Supabase를 격리. 호출부는 authenticate()/getMe()/provision()만 본다.
-// 로그인 = ID+PIN. 내부적으로 person.auth_email + PIN→비번 으로 Supabase Auth 로그인.
-import 'server-only';
-import { redirect } from 'next/navigation';
-import { createClient } from '@/lib/supabase/server';
-import { createAdminClient } from '@/lib/supabase/admin';
-import type { Me, BranchMembership } from '@/lib/perms';
+import "server-only";
+import { cookies } from "next/headers";
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { db } from "./db";
+import { ready } from "./bootstrap";
+import { verifyPin } from "./hash";
+import { PERMISSIONS } from "./perms";
 
-// ID 정규화: 영어 대소문자 무시(소문자), 양끝 공백 제거. 한글·숫자는 그대로.
-export function normalizeLoginId(v: unknown): string {
-  return String(v ?? '').trim().toLowerCase();
+// 로컬 개발용 세션 = 서명된 쿠키(person id). 배포 때 Supabase Auth로 교체.
+const SECRET = "dev-secret-studycube-change-on-deploy";
+const COOKIE = "sq_session";
+
+function sign(id: string): string {
+  return createHmac("sha256", SECRET).update(id).digest("hex");
 }
-// 4자리 PIN → Auth 비밀번호(최소길이 회피용 접두)
-export function pinToPassword(pin: string): string {
-  return `sq_${pin}`;
+function makeToken(id: string): string {
+  return `${id}.${sign(id)}`;
+}
+function readToken(tok: string | undefined): string | null {
+  if (!tok) return null;
+  const i = tok.lastIndexOf(".");
+  if (i < 0) return null;
+  const id = tok.slice(0, i);
+  const sig = tok.slice(i + 1);
+  const want = sign(id);
+  if (sig.length !== want.length) return null;
+  try {
+    if (!timingSafeEqual(Buffer.from(sig), Buffer.from(want))) return null;
+  } catch {
+    return null;
+  }
+  return id;
 }
 
-// 로그인. 성공 시 세션쿠키 세팅. 실패 시 에러 메시지 반환.
-export async function authenticate(loginIdRaw: string, pin: string): Promise<string | null> {
-  const loginId = normalizeLoginId(loginIdRaw);
-  if (!loginId || !/^\d{6}$/.test(pin)) return '아이디와 6자리 PIN을 확인하세요';
+export type Me = {
+  id: string;
+  loginId: string;
+  name: string;
+  isCto: boolean;
+  activeBranchId: string | null; // 지금은 단일 지점(본점). 다지점 시 선택값.
+  perms: string[]; // 활성 지점에서 보유한 권한 키 (CTO는 전 카탈로그)
+};
 
-  const admin = createAdminClient();
-  const { data: person } = await admin
-    .from('person')
-    .select('auth_email, status')
-    .eq('login_id', loginId)
-    .maybeSingle();
-  if (!person) return '존재하지 않는 아이디입니다';
-  if (person.status !== 'active') return '비활성 계정입니다';
+const ALL_PERMS = PERMISSIONS.map((p) => p.key);
 
-  const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({
-    email: person.auth_email,
-    password: pinToPassword(pin),
+/** 권한 판정 — CTO는 전권 bypass */
+export function can(me: Me | null, perm: string): boolean {
+  if (!me) return false;
+  return me.isCto || me.perms.includes(perm);
+}
+
+/** 서버액션 가드 — 로그인 + 권한 확인 후 Me 반환 */
+export async function guard(perm: string): Promise<Me> {
+  const me = await getMe();
+  if (!me) throw new Error("로그인이 필요합니다");
+  if (!can(me, perm)) throw new Error("권한이 없습니다");
+  return me;
+}
+
+// 로그인 사용자의 지점·권한 컨텍스트 조립
+async function resolveContext(
+  personId: string,
+  isCto: boolean,
+): Promise<{ activeBranchId: string | null; perms: string[] }> {
+  if (isCto) {
+    // CTO = 전 지점·전권. 활성 지점은 본점(없으면 첫 지점).
+    const hq = await db.query<{ id: string }>(
+      `select id from branch where code='HQ' order by created_at limit 1`,
+    );
+    const any = hq.rows[0]
+      ? hq.rows[0]
+      : (await db.query<{ id: string }>(`select id from branch order by created_at limit 1`)).rows[0];
+    return { activeBranchId: any?.id ?? null, perms: ALL_PERMS };
+  }
+  // 일반 직원 = 소속 지점 중 첫 지점 + 그 지점 역할들의 권한 합집합
+  const br = await db.query<{ branch_id: string }>(
+    `select distinct branch_id from person_role where person_id=$1 order by branch_id limit 1`,
+    [personId],
+  );
+  const activeBranchId = br.rows[0]?.branch_id ?? null;
+  if (!activeBranchId) return { activeBranchId: null, perms: [] };
+  const pr = await db.query<{ permission_key: string }>(
+    `select distinct rp.permission_key
+       from person_role pr
+       join role_permission rp on rp.role_id = pr.role_id
+      where pr.person_id = $1 and pr.branch_id = $2`,
+    [personId, activeBranchId],
+  );
+  return { activeBranchId, perms: pr.rows.map((r) => r.permission_key) };
+}
+
+// 아이디 정규화: 앞뒤 공백 제거 + 영어 소문자 (한글은 그대로)
+function normId(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+/** ID + PIN 검증. 맞으면 Me, 틀리면 null */
+export async function authenticate(loginId: string, pin: string): Promise<Me | null> {
+  await ready();
+  const id = normId(loginId);
+  const r = await db.query<{
+    id: string; login_id: string; name: string; pin_hash: string; is_cto: boolean; active: boolean;
+  }>(`select id, login_id, name, pin_hash, is_cto, active from person where lower(login_id) = $1`, [id]);
+  const p = r.rows[0];
+  if (!p || !p.active) return null;
+  if (!verifyPin(pin, p.pin_hash)) return null;
+  const ctx = await resolveContext(p.id, p.is_cto);
+  return { id: p.id, loginId: p.login_id, name: p.name, isCto: p.is_cto, ...ctx };
+}
+
+export async function setSession(personId: string, remember: boolean): Promise<void> {
+  const c = await cookies();
+  c.set(COOKIE, makeToken(personId), {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    ...(remember ? { maxAge: 60 * 60 * 24 * 30 } : {}),
   });
-  if (error) return 'PIN이 일치하지 않습니다';
-  return null;
 }
 
-export async function signOut(): Promise<void> {
-  const supabase = await createClient();
-  await supabase.auth.signOut();
-  redirect('/login');
+export async function clearSession(): Promise<void> {
+  const c = await cookies();
+  c.delete(COOKIE);
 }
 
-// 현재 로그인 사용자 조립 (없으면 null)
+/** 현재 로그인 사용자 (없으면 null) */
 export async function getMe(): Promise<Me | null> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
-
-  const { data: person } = await supabase
-    .from('person')
-    .select('id, login_id, name')
-    .eq('id', user.id)
-    .maybeSingle();
-  if (!person) return null;
-
-  // 소속·역할
-  const { data: prRows } = await supabase
-    .from('person_role')
-    .select('branch_id, role:role(id,key,label,rank), branch:branch(id,name,is_hq)')
-    .eq('person_id', user.id);
-
-  type Row = {
-    branch_id: string;
-    role: { id: string; key: string; label: string; rank: number } | null;
-    branch: { id: string; name: string; is_hq: boolean } | null;
-  };
-  const rows = (prRows ?? []) as unknown as Row[];
-
-  const branchMap = new Map<string, BranchMembership>();
-  const roleIds = new Set<string>();
-  let isCto = false;
-  for (const r of rows) {
-    if (!r.branch || !r.role) continue;
-    roleIds.add(r.role.id);
-    if (r.role.key === 'cto') isCto = true;
-    const b = branchMap.get(r.branch.id) ?? {
-      id: r.branch.id, name: r.branch.name, isHq: r.branch.is_hq, roles: [],
-    };
-    b.roles.push({ key: r.role.key, label: r.role.label, rank: r.role.rank });
-    branchMap.set(r.branch.id, b);
-  }
-  const branches = Array.from(branchMap.values());
-
-  // 활성 지점: 본점 우선 → 없으면 첫 지점
-  const active = branches.find((b) => b.isHq) ?? branches[0];
-  const activeBranchId = active?.id ?? '';
-
-  // 활성 지점의 권한 집합
-  const activeRoleIds = rows
-    .filter((r) => r.branch?.id === activeBranchId && r.role)
-    .map((r) => r.role!.id);
-  let perms: string[] = [];
-  if (activeRoleIds.length) {
-    const { data: rp } = await supabase
-      .from('role_permission')
-      .select('permission_key, role_id')
-      .in('role_id', activeRoleIds);
-    perms = Array.from(new Set((rp ?? []).map((x) => x.permission_key as string)));
-  }
-
-  return {
-    id: person.id,
-    loginId: person.login_id,
-    name: person.name,
-    isCto,
-    activeBranchId,
-    branches,
-    perms,
-  };
-}
-
-// 계정 발급 (account.provision 보유자만 — 호출 서버액션에서 권한 검증 후 사용)
-export async function provisionAccount(opts: {
-  loginId: string; pin: string; name: string; phone?: string;
-  branchId: string; roleKey: string; createdBy?: string;
-}): Promise<string> {
-  const admin = createAdminClient();
-  const loginId = normalizeLoginId(opts.loginId);
-  if (!loginId) throw new Error('아이디 필요');
-  if (!/^\d{6}$/.test(opts.pin)) throw new Error('PIN은 6자리 숫자');
-
-  const authEmail = `${globalThis.crypto.randomUUID()}@sq.local`;
-  const { data: created, error } = await admin.auth.admin.createUser({
-    email: authEmail,
-    password: pinToPassword(opts.pin),
-    email_confirm: true,
-  });
-  if (error || !created.user) throw new Error(error?.message ?? 'Auth 계정 생성 실패');
-  const uid = created.user.id;
-
-  const { data: role, error: rErr } = await admin
-    .from('role').select('id').eq('key', opts.roleKey).single();
-  if (rErr || !role) throw new Error('역할 없음: ' + opts.roleKey);
-
-  const { error: pErr } = await admin.from('person').insert({
-    id: uid, login_id: loginId, auth_email: authEmail,
-    name: opts.name, phone: opts.phone ?? null, created_by: opts.createdBy ?? null,
-  });
-  if (pErr) { await admin.auth.admin.deleteUser(uid); throw new Error('person 생성 실패: ' + pErr.message); }
-
-  const { error: prErr } = await admin.from('person_role')
-    .insert({ person_id: uid, branch_id: opts.branchId, role_id: role.id });
-  if (prErr) throw new Error('역할 부여 실패: ' + prErr.message);
-
-  return uid;
+  const c = await cookies();
+  const id = readToken(c.get(COOKIE)?.value);
+  if (!id) return null;
+  await ready();
+  const r = await db.query<{ id: string; login_id: string; name: string; is_cto: boolean; active: boolean }>(
+    `select id, login_id, name, is_cto, active from person where id = $1`,
+    [id],
+  );
+  const p = r.rows[0];
+  if (!p || !p.active) return null;
+  const ctx = await resolveContext(p.id, p.is_cto);
+  return { id: p.id, loginId: p.login_id, name: p.name, isCto: p.is_cto, ...ctx };
 }
