@@ -1,17 +1,31 @@
 import "server-only";
 import { cookies } from "next/headers";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 import { db } from "./db";
 import { ready } from "./bootstrap";
 import { verifyPin } from "./hash";
 import { PERMISSIONS } from "./perms";
 
-// 로컬 개발용 세션 = 서명된 쿠키(person id). 배포 때 Supabase Auth로 교체.
-const SECRET = "dev-secret-studycube-change-on-deploy";
+// 세션 = 서명된 쿠키(person id). 배포 때 Supabase Auth로 교체 예정.
 const COOKIE = "sq_session";
 
+// 서명키. 저장소에 상수로 박아두면 공개 저장소에서 세션 위조가 가능하므로
+// ① SESSION_SECRET 환경변수 → ② 접속문자열(배포 환경에만 존재)에서 파생 → ③ 로컬 전용 고정값.
+let cachedSecret: string | null = null;
+function secret(): string {
+  if (cachedSecret) return cachedSecret;
+  const env = process.env.SESSION_SECRET;
+  const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
+  cachedSecret = env
+    ? env
+    : dbUrl
+      ? createHash("sha256").update(`studycube:session:${dbUrl}`).digest("hex")
+      : "dev-only-local-secret";
+  return cachedSecret;
+}
+
 function sign(id: string): string {
-  return createHmac("sha256", SECRET).update(id).digest("hex");
+  return createHmac("sha256", secret()).update(id).digest("hex");
 }
 function makeToken(id: string): string {
   return `${id}.${sign(id)}`;
@@ -113,6 +127,7 @@ export async function setSession(personId: string, remember: boolean): Promise<v
   c.set(COOKIE, makeToken(personId), {
     httpOnly: true,
     sameSite: "lax",
+    secure: process.env.NODE_ENV === "production", // https 에서만 전송
     path: "/",
     ...(remember ? { maxAge: 60 * 60 * 24 * 30 } : {}),
   });

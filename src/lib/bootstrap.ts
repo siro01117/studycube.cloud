@@ -86,14 +86,27 @@ create index if not exists idx_person_role_branch on person_role(branch_id);
 
 let booted: Promise<void> | null = null;
 
-/** 코어 스키마·시드를 한 번만 실행하고, 이후엔 즉시 반환 */
+/** 코어 스키마·시드를 한 번만 실행하고, 이후엔 즉시 반환.
+ *  실패는 절대 캐시하지 않는다 — 캐시하면 서버 인스턴스 하나가 살아있는 내내
+ *  같은 옛 에러만 계속 던져서 "고쳤는데도 안 되는" 상태가 된다. */
 export function ready(): Promise<void> {
-  return (booted ??= boot());
+  if (!booted) {
+    const p: Promise<void> = (booted = boot().catch((e) => {
+      if (booted === p) booted = null; // 다음 요청에서 재시도 (boot()은 멱등)
+      throw e;
+    }));
+  }
+  return booted;
 }
 
+// 여러 서버 인스턴스가 동시에 부팅하면 create table/index 가 서로 충돌한다.
+// 같은 multi-statement 안에서 트랜잭션 락을 먼저 잡아 한 번에 하나만 실행되게 한다.
+// (별도 문장으로 분리하면 pooler가 다른 커넥션에 배정해서 의미가 없다)
+const BOOT_LOCK = `select pg_advisory_xact_lock(918273645);\n`;
+
 async function boot() {
-  await db.exec(CORE_SQL);
-  await db.exec(MODULE_SQL); // 이식된 모듈 테이블
+  await db.exec(BOOT_LOCK + CORE_SQL);
+  await db.exec(BOOT_LOCK + MODULE_SQL); // 이식된 모듈 테이블
   // 상태 모델 변경(2026-07-20): 퇴원(withdrawn) 폐지 → 휴원(leave)로 통합
   await db.query(`update student set status='leave' where status='withdrawn'`);
 
@@ -116,13 +129,14 @@ async function boot() {
     );
   }
 
-  // 본점 1개
+  // 본점 1개 (동시 부팅 시 중복키 나지 않게 on conflict)
   await db.query(
-    `insert into branch(name,code,is_hq)
-     select '본점','HQ',true where not exists (select 1 from branch where code='HQ')`,
+    `insert into branch(name,code,is_hq) values ('본점','HQ',true)
+     on conflict (code) do nothing`,
   );
   const hq = await db.query<{ id: string }>(`select id from branch where code='HQ' limit 1`);
-  const hqId = hq.rows[0].id;
+  const hqId = hq.rows[0]?.id;
+  if (!hqId) throw new Error("본점(HQ) 생성에 실패했습니다.");
 
   // 본점 모듈 on/off — MVP만 켬
   for (const m of MODULES) {
