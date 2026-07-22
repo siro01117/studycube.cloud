@@ -216,6 +216,26 @@ export default function StudentList({
                 <a href="/m/seat" className="btn" style={{ height: 40, fontSize: 13, display: "grid", placeItems: "center", textDecoration: "none", gridColumn: canManageSeat && open.seat_id ? "auto" : "1 / -1" }}>
                   {open.seat_number != null ? "좌석 배치도" : "좌석 배치도에서 배정"}
                 </a>
+                {/* 재원 ↔ 휴원 전환 (우클릭 메뉴 없이도 여기서 바로) */}
+                {canEdit && (
+                  open.status === "leave" ? (
+                    <button
+                      className="btn btn-accent"
+                      onClick={() => changeStatus(open.id, "enrolled")}
+                      style={{ height: 40, fontSize: 13, gridColumn: "1 / -1" }}
+                    >
+                      재원으로 복귀
+                    </button>
+                  ) : (
+                    <button
+                      className="btn"
+                      onClick={() => changeStatus(open.id, "leave")}
+                      style={{ height: 40, fontSize: 13, gridColumn: "1 / -1" }}
+                    >
+                      휴원 처리 {open.seat_number != null && <span style={{ color: "var(--faint)", fontWeight: 500 }}>· 좌석 비움</span>}
+                    </button>
+                  )
+                )}
                 <button className="btn" disabled title="스케쥴러 모듈 준비중" style={{ height: 40, fontSize: 13, gridColumn: "1 / -1" }}>학생 스케줄러 (준비중)</button>
                 {canEdit && (
                   confirmDel ? (
