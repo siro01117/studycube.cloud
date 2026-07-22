@@ -82,6 +82,13 @@ create table if not exists branch_module(
 
 create index if not exists idx_person_role_person on person_role(person_id);
 create index if not exists idx_person_role_branch on person_role(branch_id);
+
+-- 앱 메타(스키마 버전 등). 이게 있어야 부팅을 건너뛸 수 있는지 판정한다.
+create table if not exists app_meta(
+  key text primary key,
+  value text not null,
+  updated_at timestamptz not null default now()
+);
 `;
 
 let booted: Promise<void> | null = null;
@@ -108,7 +115,28 @@ const BOOT_LOCK =
     ? `select pg_advisory_xact_lock(918273645);\n`
     : "";
 
+// 스키마·시드 내용이 바뀌면 이 값을 올린다. 그때만 DDL 이 다시 돈다.
+// (schema.modules.ts / CORE_SQL / PERMISSIONS / MODULES 를 수정하면 반드시 갱신)
+const SCHEMA_VERSION = "2026-07-23.1";
+
+/** 이미 이 버전으로 부팅된 DB인지 한 번의 쿼리로 판정 */
+async function alreadyBooted(): Promise<boolean> {
+  try {
+    const r = await db.query<{ value: string }>(
+      `select value from app_meta where key='schema_version'`,
+    );
+    return r.rows[0]?.value === SCHEMA_VERSION;
+  } catch {
+    return false; // app_meta 자체가 없음 = 최초 부팅
+  }
+}
+
 async function boot() {
+  // 콜드 스타트마다 DDL 전체(70여 회 왕복)를 돌리면 요청이 수십 초씩 걸리고,
+  // 동시에 뜬 인스턴스들이 advisory lock 뒤에 줄을 선다. 이미 최신이면 즉시 종료.
+  if (await alreadyBooted()) return;
+  console.log(`[bootstrap] 스키마·시드 실행 (${SCHEMA_VERSION})`); // 실제로 돌 때만 찍힌다
+
   await db.exec(BOOT_LOCK + CORE_SQL);
   await db.exec(BOOT_LOCK + MODULE_SQL); // 이식된 모듈 테이블
   // 상태 모델 변경(2026-07-20): 퇴원(withdrawn) 폐지 → 휴원(leave)로 통합
@@ -159,4 +187,11 @@ async function boot() {
       ["나한결", "나한결", hashPin("365785")],
     );
   }
+
+  // 여기까지 왔으면 이 버전으로 완료. 다음 부팅부터는 판정 쿼리 한 번으로 끝난다.
+  await db.query(
+    `insert into app_meta(key,value) values ('schema_version',$1)
+     on conflict (key) do update set value=excluded.value, updated_at=now()`,
+    [SCHEMA_VERSION],
+  );
 }
