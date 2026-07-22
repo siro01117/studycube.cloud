@@ -814,11 +814,34 @@ export default function FloorEditor({
             <div style={{ textAlign: 'center', color: 'var(--faint)', fontSize: 13, padding: 12 }}>등록된 방이 없습니다.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {[...new Set(perRoom.map((x) => x.r.floor))].sort((a, b) => b - a).map((fl) => (
+              {[...new Set(perRoom.map((x) => x.r.floor))].sort((a, b) => b - a).map((fl) => {
+                const onFloor = perRoom.filter((x) => x.r.floor === fl);
+                const flIn = onFloor.reduce((n, x) => n + x.st.in, 0);
+                const flTotal = onFloor.reduce((n, x) => n + x.st.total, 0);
+                const flRatio = flTotal ? flIn / flTotal : 0;
+                return (
                 <div key={fl} style={{ display: 'flex', alignItems: 'stretch', gap: 12 }}>
-                  <div style={{ flex: 'none', width: 40, display: 'flex', alignItems: 'center', fontSize: 14, fontWeight: 800, color: 'var(--accent)' }}>{fl}층</div>
                   <div className="flex" style={{ gap: 10, flexWrap: 'wrap' }}>
-                    {perRoom.filter((x) => x.r.floor === fl).map(({ r, st }) => {
+                    {/* 층 카드 — 그 층 전체 입실. 방 카드보다 앞에 두어 구분 */}
+                    <button
+                      onClick={() => pickFloor(fl)}
+                      style={{
+                        width: 150, textAlign: 'left', cursor: 'pointer', color: 'inherit',
+                        border: '1px solid var(--accent)', borderRadius: 12, padding: 12,
+                        background: 'var(--accent-soft)',
+                      }}
+                    >
+                      <div style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--accent)' }}>{fl}층</div>
+                      <div style={{ marginTop: 5, fontSize: 19, fontWeight: 800, color: 'var(--accent)' }}>
+                        {flIn}
+                        <span style={{ fontSize: 12.5, color: 'var(--dim)', fontWeight: 700 }}> / {flTotal}</span>
+                      </div>
+                      <div style={{ height: 7, borderRadius: 999, background: 'var(--panel2)', overflow: 'hidden', marginTop: 6 }}>
+                        <div style={{ height: '100%', width: `${Math.round(flRatio * 100)}%`, background: 'var(--accent)' }} />
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 5 }}>방 {onFloor.length}개</div>
+                    </button>
+                    {onFloor.map(({ r, st }) => {
                       const came = st.in;
                       const ratio = st.total ? came / st.total : 0;
                       return (
@@ -833,7 +856,8 @@ export default function FloorEditor({
                     })}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
