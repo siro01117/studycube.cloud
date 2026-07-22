@@ -71,11 +71,26 @@ export default async function HealthPage() {
       detail: [d.safe, ...d.bad.map((n) => "✗ " + n), ...d.info.map((n) => "· " + n)].join("\n"),
     });
 
-    // 3. 실제 연결
+    // 3. 실제 연결 — 첫 쿼리(접속 포함)와 두 번째 쿼리(접속 이후)를 따로 재서
+    //    지연이 '접속'에서 오는지 '쿼리'에서 오는지 눈으로 가른다.
     try {
+      const t0 = performance.now();
       const { db } = await import("@/lib/db");
+      const t1 = performance.now();
       const r = await db.query<{ v: number }>("select 1 as v");
-      checks.push({ label: "3. DB 연결", ok: r.rows[0]?.v === 1, detail: "Supabase 에 접속되었습니다." });
+      const t2 = performance.now();
+      await db.query("select 1 as v");
+      const t3 = performance.now();
+      const ms = (a: number, b: number) => `${Math.round(b - a)}ms`;
+      checks.push({
+        label: "3. DB 연결",
+        ok: r.rows[0]?.v === 1,
+        detail:
+          `Supabase 에 접속되었습니다.\n` +
+          `· 드라이버 로드      ${ms(t0, t1)}\n` +
+          `· 첫 쿼리(접속 포함)  ${ms(t1, t2)}   ← 이게 크면 매 요청 재접속이 원인\n` +
+          `· 두 번째 쿼리        ${ms(t2, t3)}   ← 접속 이후 순수 왕복`,
+      });
 
       // 4. 스키마 생성(부트스트랩)
       try {

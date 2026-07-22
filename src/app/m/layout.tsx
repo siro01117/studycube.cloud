@@ -15,7 +15,9 @@ export default async function ModuleLayout({ children }: { children: React.React
   await ready();
 
   const { rows } = await db.query<{ key: string; label: string; requires: string[]; ord: number }>(
-    `select m.key, m.label, m.requires, m.ord from module m
+    // requires 는 text[] 지만 jsonb 로 받는다 — 드라이버의 배열 파서는 접속마다
+    // 타입 조회 왕복을 요구하는데(fetch_types), json 파서는 기본 내장이라 왕복이 없다.
+    `select m.key, m.label, coalesce(to_jsonb(m.requires), '[]'::jsonb) as requires, m.ord from module m
        join branch_module bm on bm.module_key = m.key
       where bm.branch_id = $1 and bm.enabled = true
       order by m.ord`,

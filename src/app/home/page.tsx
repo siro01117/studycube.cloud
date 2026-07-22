@@ -16,7 +16,8 @@ export default async function HomePage() {
   if (can(me, "seat.view")) redirect("/m/seat");
 
   const { rows } = await db.query<{ key: string; requires: string[] }>(
-    `select m.key, m.requires from module m
+    // requires: text[] → jsonb (드라이버 배열 파서는 접속마다 타입 조회 왕복이 필요, json 은 내장)
+    `select m.key, coalesce(to_jsonb(m.requires), '[]'::jsonb) as requires from module m
        join branch_module bm on bm.module_key = m.key
       where bm.branch_id = $1 and bm.enabled = true
       order by m.ord`,
