@@ -102,7 +102,11 @@ export function ready(): Promise<void> {
 // 여러 서버 인스턴스가 동시에 부팅하면 create table/index 가 서로 충돌한다.
 // 같은 multi-statement 안에서 트랜잭션 락을 먼저 잡아 한 번에 하나만 실행되게 한다.
 // (별도 문장으로 분리하면 pooler가 다른 커넥션에 배정해서 의미가 없다)
-const BOOT_LOCK = `select pg_advisory_xact_lock(918273645);\n`;
+// 로컬 PGlite 는 단일 프로세스라 경합이 없고, advisory lock 을 만나면 WASM 이 죽는다 → 배포에서만 건다.
+const BOOT_LOCK =
+  process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL
+    ? `select pg_advisory_xact_lock(918273645);\n`
+    : "";
 
 async function boot() {
   await db.exec(BOOT_LOCK + CORE_SQL);
