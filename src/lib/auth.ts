@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 import { db } from "./db";
@@ -138,8 +139,12 @@ export async function clearSession(): Promise<void> {
   c.delete(COOKIE);
 }
 
-/** 현재 로그인 사용자 (없으면 null) */
-export async function getMe(): Promise<Me | null> {
+/** 현재 로그인 사용자 (없으면 null).
+ *  한 요청 안에서 레이아웃·페이지·서버액션이 각자 호출하므로 cache 로 묶어
+ *  같은 요청에서는 DB 조회를 한 번만 한다. (요청이 끝나면 캐시도 사라진다) */
+export const getMe = cache(loadMe);
+
+async function loadMe(): Promise<Me | null> {
   const c = await cookies();
   const id = readToken(c.get(COOKIE)?.value);
   if (!id) return null;
