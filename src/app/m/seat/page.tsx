@@ -4,13 +4,9 @@ import { getMe, can } from "@/lib/auth";
 import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
 import FloorEditor, { type Room, type Seat, type Student, type AttInfo, type PatrolInfo } from "./FloorEditor";
+import { todayKey as todayStr } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
 
 export const runtime = "nodejs";
-
-function todayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 export default async function SeatPage({ searchParams }: { searchParams: Promise<{ room?: string }> }) {
   const me = await getMe();

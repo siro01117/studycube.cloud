@@ -32,16 +32,5 @@ export function penaltyHeat(points: number): { bg: string; bd: string; fg: strin
   return { bg: "rgba(229,72,77,.18)", bd: "rgba(229,72,77,.6)", fg: "#c92a2f" };
 }
 
-// 이번 주 시작(가장 최근 월요일) — 벌점은 매주 월요일 리셋 = 이 날짜부터 집계.
-export function weekStartKey(now: Date): string {
-  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const day = d.getDay();               // 0=일 … 6=토
-  const diff = day === 0 ? 6 : day - 1; // 월요일까지 되돌릴 일수
-  d.setDate(d.getDate() - diff);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-export function weekStartLabel(key: string): string {
-  const [y, m, d] = key.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" });
-}
+// 주 경계·날짜 계산은 KST 기준 공용 헬퍼로 통일(서버 UTC 어긋남 방지). 재노출.
+export { weekStartKey, weekStartLabel } from "./date";

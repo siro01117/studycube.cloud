@@ -4,6 +4,7 @@ import { getMe, can } from "@/lib/auth";
 import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
 import { getPatrolSessions } from "../seat/patrolActions";
+import { todayKey } from "@/lib/date";
 import PatrolBoard, { type PSeat, type PRoom, type PStudent } from "./PatrolBoard";
 
 export const runtime = "nodejs";
@@ -43,6 +44,7 @@ export default async function PatrolPage() {
         seats={seats.rows}
         students={students.rows}
         sessions={sessions}
+        today={todayKey()}
         canManage={canManage}
       />
     </main>

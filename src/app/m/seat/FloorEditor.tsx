@@ -60,11 +60,6 @@ function lbl(s: Pick<Student, 'level' | 'grade' | 'is_repeat'>): string {
   return lv && s.grade ? `${lv}${s.grade}` : lv || s.grade || '';
 }
 
-function todayLocal(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
 function ageFrom(bd: string | null): number | null {
   if (!bd) return null;
   const b = new Date(bd);

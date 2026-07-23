@@ -4,11 +4,8 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { guard } from "@/lib/auth";
 import { PATROL_BY_KEY } from "@/lib/patrol";
+import { todayKey as todayStr } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
 
-function todayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 const s = (v: FormDataEntryValue | null): string | null => {
   const t = String(v ?? "").trim();
   return t.length ? t : null;

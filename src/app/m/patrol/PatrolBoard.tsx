@@ -28,7 +28,7 @@ const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString("ko-KR", { hou
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" });
 const keyOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const dateKey = (iso: string) => keyOf(new Date(iso));
-const labelDate = (key: string) => { const [y, m, d] = key.split("-").map(Number); return keyOf(new Date()) === key ? "오늘" : new Date(y, m - 1, d).toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" }); };
+const labelDate = (key: string, today: string) => { const [y, m, d] = key.split("-").map(Number); return today === key ? "오늘" : new Date(y, m - 1, d).toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" }); };
 const fmtDur = (a: string, b: string | null) => {
   if (!b) return "진행 중";
   const sec = Math.max(0, Math.round((new Date(b).getTime() - new Date(a).getTime()) / 1000));
@@ -37,12 +37,12 @@ const fmtDur = (a: string, b: string | null) => {
 };
 
 export default function PatrolBoard({
-  rooms, seats, students, sessions: initialSessions, canManage,
+  rooms, seats, students, sessions: initialSessions, today, canManage,
 }: {
-  rooms: PRoom[]; seats: PSeat[]; students: PStudent[]; sessions: Session[]; canManage: boolean;
+  rooms: PRoom[]; seats: PSeat[]; students: PStudent[]; sessions: Session[]; today: string; canManage: boolean;
 }) {
   const [sessions, setSessions] = useState<Session[]>(initialSessions);
-  const [selDate, setSelDate] = useState<string>(initialSessions[0] ? dateKey(initialSessions[0].started_at) : keyOf(new Date()));
+  const [selDate, setSelDate] = useState<string>(initialSessions[0] ? dateKey(initialSessions[0].started_at) : today);
   const [selId, setSelId] = useState<string | null>(initialSessions[0]?.id ?? null);
   const [marks, setMarks] = useState<Record<string, SeatMark>>({}); // seat_id → 마크
   const selRef = useRef<string | null>(selId);
@@ -134,8 +134,8 @@ export default function PatrolBoard({
       {/* 왼쪽: 날짜 선택 + 그 날 순찰 목록 */}
       <div style={{ flex: "none", width: 300, borderRight: "1px solid var(--line)", background: "var(--card)", overflowY: "auto", padding: 12 }}>
         <div style={{ marginBottom: 10 }}>
-          <input type="date" className="input" value={selDate} max={keyOf(new Date())} onChange={(e) => setSelDate(e.target.value || keyOf(new Date()))} aria-label="순찰 날짜" style={{ height: 40, fontSize: 14 }} />
-          <div style={{ fontSize: 11.5, color: "var(--faint)", margin: "6px 2px 0" }}>{labelDate(selDate)} · 순찰 {visible.length}회</div>
+          <input type="date" className="input" value={selDate} max={today} onChange={(e) => setSelDate(e.target.value || today)} aria-label="순찰 날짜" style={{ height: 40, fontSize: 14 }} />
+          <div style={{ fontSize: 11.5, color: "var(--faint)", margin: "6px 2px 0" }}>{labelDate(selDate, today)} · 순찰 {visible.length}회</div>
         </div>
         {visible.length === 0 ? (
           <div style={{ padding: 20, textAlign: "center", color: "var(--faint)", fontSize: 13 }}>{sessions.length === 0 ? "순찰 기록이 없습니다." : "이 날짜엔 순찰 기록이 없습니다."}</div>

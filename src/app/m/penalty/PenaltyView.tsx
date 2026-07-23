@@ -6,6 +6,7 @@ import type { CSSProperties } from "react";
 import ContextMenu, { type MenuItem } from "../_shared/ContextMenu";
 import { levelLabel } from "../student/util";
 import { PENALTY_REASONS, penaltyHeat, PENALTY_WARN } from "@/lib/penalty";
+import { weekDays } from "@/lib/date";
 import { givePenalty, removePenalty, getStudentPenaltyWeek } from "./actions";
 import { removePatrolEvent } from "../seat/patrolActions";
 
@@ -14,17 +15,6 @@ export type PSeat = { id: string; room_id: string | null; grid_x: number | null;
 export type PStudent = { id: string; name: string; level: string | null; grade: string | null; is_repeat: boolean | null; seat_number: number | null };
 export type Breakdown = { label: string; points: number; count: number };
 type DetailRow = { source: "patrol" | "manual"; id: string; label: string; points: number; note: string | null; at: string; date: string };
-
-const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
-const keyOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-// weekStart(월) 기준 이번 주 7일
-function weekDays(weekStart: string): { key: string; wd: string; dayNum: number }[] {
-  const [y, m, d] = weekStart.split("-").map(Number);
-  return Array.from({ length: 7 }, (_, i) => {
-    const dt = new Date(y, m - 1, d + i);
-    return { key: keyOf(dt), wd: WEEKDAYS[dt.getDay()], dayNum: dt.getDate() };
-  });
-}
 
 const SW = 82, SH = 60, CELL_X = 100, CELL_Y = 80, ORIGIN = 40, PER_ROW = 6;
 const xyOf = (s: PSeat, i: number) => ({
@@ -36,20 +26,21 @@ const boundsOf = (pts: { x: number; y: number }[]) =>
 const fmtTime = (iso: string) => new Date(iso).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 export default function PenaltyView({
-  rooms, seats, students, weekly, breakdown, weekLabel, weekStart, canManage,
+  rooms, seats, students, weekly, breakdown, weekLabel, weekStart, today, canManage,
 }: {
   rooms: PRoom[]; seats: PSeat[]; students: PStudent[];
-  weekly: Record<string, number>; breakdown: Breakdown[]; weekLabel: string; weekStart: string; canManage: boolean;
+  weekly: Record<string, number>; breakdown: Breakdown[]; weekLabel: string; weekStart: string; today: string; canManage: boolean;
 }) {
   const [view, setView] = useState<"dash" | "seats" | "list">("dash");
   const [q, setQ] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number; studentId: string; name: string } | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailRow[] | null>(null);
-  const [selDay, setSelDay] = useState<string>(keyOf(new Date())); // 상세 팝업 선택 요일(기본 오늘)
+  // 오늘 날짜는 서버(KST)에서 내려받아 요일 탭·집계와 정확히 맞춘다(브라우저 시계 의존 X).
+  const [selDay, setSelDay] = useState<string>(today); // 상세 팝업 선택 요일(기본 오늘)
   const [, start] = useTransition();
   const days = useMemo(() => weekDays(weekStart), [weekStart]);
-  const todayKey = keyOf(new Date());
+  const todayKey = today;
 
   const nameOf = useMemo(() => { const m = new Map<string, string>(); for (const s of students) m.set(s.id, s.name); return m; }, [students]);
   const seatsByRoom = useMemo(() => {
@@ -69,9 +60,9 @@ export default function PenaltyView({
 
   useEffect(() => {
     if (!detailId) { setDetail(null); return; }
-    setSelDay(keyOf(new Date())); // 열 때 오늘 요일로
+    setSelDay(today); // 열 때 오늘 요일로(서버 KST 기준)
     getStudentPenaltyWeek(detailId).then((rows) => { if (detailRef.current === detailId) setDetail(rows); }).catch(() => {});
-  }, [detailId]);
+  }, [detailId, today]);
 
   // 응답이 늦게 와도 지금 열린 학생이 아니면 무시(레이스 방지)
   const reloadDetail = () => {

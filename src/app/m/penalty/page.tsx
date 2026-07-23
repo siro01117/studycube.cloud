@@ -3,7 +3,8 @@ import Link from "next/link";
 import { getMe, can } from "@/lib/auth";
 import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
-import { weekStartKey, weekStartLabel, PENALTY_BY_KEY } from "@/lib/penalty";
+import { weekStartLabel, PENALTY_BY_KEY } from "@/lib/penalty";
+import { weekStartKey, todayKey } from "@/lib/date";
 import { PATROL_BY_KEY } from "@/lib/patrol";
 import PenaltyView, { type PRoom, type PSeat, type PStudent, type Breakdown } from "./PenaltyView";
 
@@ -85,6 +86,7 @@ export default async function PenaltyPage() {
         breakdown={breakdown}
         weekLabel={weekStartLabel(ws)}
         weekStart={ws}
+        today={todayKey()}
         canManage={canManage}
       />
     </main>
