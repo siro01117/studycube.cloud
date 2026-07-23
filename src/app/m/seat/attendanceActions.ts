@@ -64,3 +64,48 @@ export async function getAttendanceEvents(studentId: string, date: string) {
   );
   return r.rows;
 }
+
+// ---------------- 일일 결석 상태 (attendance 테이블: 학생×하루 1행) ----------------
+// 입·퇴실 이벤트(attendance_event)와 별개. 결석은 "그날 상태 + 사유"로 남긴다.
+
+// 특정 학생·날짜의 일일 상태 조회 (없으면 정상 등원으로 간주 → null)
+export async function getDailyStatus(studentId: string, date: string) {
+  const me = await guard("attendance.view");
+  const r = await db.query<{ status: string; reason: string | null }>(
+    `select status, reason from attendance where student_id=$1 and branch_id=$2 and date=$3`,
+    [studentId, me.activeBranchId, date],
+  );
+  return r.rows[0] ?? null;
+}
+
+// 결석 처리(사유 포함). 같은 날 다시 부르면 사유만 갱신(upsert).
+export async function setAbsent(formData: FormData) {
+  const me = await guard("attendance.edit");
+  const id = s(formData.get("studentId"));
+  const reason = s(formData.get("reason"));
+  const date = s(formData.get("date")) ?? todayStr();
+  if (!id) return;
+  await db.query(
+    `insert into attendance(branch_id, student_id, date, status, reason, created_by)
+     values ($1,$2,$3,'absent',$4,$5)
+     on conflict (student_id, date)
+     do update set status='absent', reason=excluded.reason, updated_at=now()`,
+    [me.activeBranchId, id, date, reason, me.id],
+  );
+  revalidatePath("/m/seat");
+  revalidatePath("/m/student");
+}
+
+// 결석 취소 = 그 날 일일 상태 행 제거(정상 등원으로 되돌림)
+export async function clearDailyStatus(formData: FormData) {
+  const me = await guard("attendance.edit");
+  const id = s(formData.get("studentId"));
+  const date = s(formData.get("date")) ?? todayStr();
+  if (!id) return;
+  await db.query(
+    `delete from attendance where student_id=$1 and branch_id=$2 and date=$3`,
+    [id, me.activeBranchId, date],
+  );
+  revalidatePath("/m/seat");
+  revalidatePath("/m/student");
+}

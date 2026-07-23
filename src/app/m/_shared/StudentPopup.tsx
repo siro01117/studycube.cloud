@@ -3,7 +3,8 @@
 // 학생 상세 팝업(좌석 배치도·학생 관리 공용). 내부 UI + 입·퇴실 기록 조회를 모두 자급.
 // 좌석 컨텍스트(자리 비우기·이동 등)는 부모가 actions 슬롯으로 주입.
 import { useEffect, useState, useTransition, type ReactNode } from "react";
-import { checkIn, checkOut, undoLastEvent, getAttendanceEvents } from "@/app/m/seat/attendanceActions";
+import { checkIn, checkOut, undoLastEvent, getAttendanceEvents, setAbsent, clearDailyStatus, getDailyStatus } from "@/app/m/seat/attendanceActions";
+import { ABSENCE_REASONS, absenceReasonLabel } from "@/lib/attendance";
 
 export type PopupStudent = {
   id: string; name: string; level: string | null; grade: string | null; is_repeat: boolean | null;
@@ -60,22 +61,26 @@ export default function StudentPopup({
 }) {
   const [attDate, setAttDate] = useState(todayLocal());
   const [attEvents, setAttEvents] = useState<{ kind: string; auto: boolean; at: string }[]>([]);
+  const [daily, setDaily] = useState<{ status: string; reason: string | null } | null>(null);
+  const [absentPick, setAbsentPick] = useState(false); // 결석 사유 고르기 펼침
   const [tick, setTick] = useState(0);
   const [pending, start] = useTransition();
 
   const call = (action: (fd: FormData) => Promise<unknown>, fields: Record<string, string>) => {
     const fd = new FormData();
     Object.entries(fields).forEach(([k, v]) => fd.set(k, v));
-    start(async () => { await action(fd); setTick((t) => t + 1); });
+    start(async () => { await action(fd); setAbsentPick(false); setTick((t) => t + 1); });
   };
 
   useEffect(() => {
     let live = true;
     getAttendanceEvents(student.id, attDate).then((rows) => { if (live) setAttEvents(rows); }).catch(() => {});
+    getDailyStatus(student.id, attDate).then((d) => { if (live) setDaily(d); }).catch(() => {});
     return () => { live = false; };
   }, [student.id, attDate, tick]);
 
   const isToday = attDate === todayLocal();
+  const isAbsent = daily?.status === "absent";
 
   return (
     <>
@@ -131,6 +136,13 @@ export default function StudentPopup({
             )}
           </div>
           <input type="date" className="input" value={attDate} onChange={(e) => setAttDate(e.target.value)} style={{ height: 36, fontSize: 13, marginBottom: 10 }} />
+          {/* 결석 배너 — 이 날 결석 처리돼 있으면 사유와 함께 표시 */}
+          {isAbsent && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", marginBottom: 10, borderRadius: 10, background: "rgba(229,72,77,.1)", border: "1px solid rgba(229,72,77,.4)" }}>
+              <span style={{ fontSize: 12.5, fontWeight: 800, color: "#c92a2f" }}>결석</span>
+              {daily?.reason && <span style={{ fontSize: 12, color: "var(--dim)" }}>· {absenceReasonLabel(daily.reason)}</span>}
+            </div>
+          )}
           <div style={{ flex: 1, overflowY: "auto", maxHeight: 260 }}>
             {attEvents.length === 0 ? (
               <div style={{ color: "var(--faint)", fontSize: 12.5, padding: "10px 2px" }}>기록 없음</div>
@@ -144,10 +156,28 @@ export default function StudentPopup({
               ))
             )}
           </div>
-          {canAttend && isToday && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 10 }}>
-              <button className="btn btn-accent" disabled={pending} onClick={() => call(checkIn, { studentId: student.id })} style={{ height: 36, fontSize: 12.5 }}>입실</button>
-              <button className="btn" disabled={pending} onClick={() => call(checkOut, { studentId: student.id })} style={{ height: 36, fontSize: 12.5 }}>퇴실</button>
+          {canAttend && (
+            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+              {isToday && !isAbsent && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                  <button className="btn btn-accent" disabled={pending} onClick={() => call(checkIn, { studentId: student.id })} style={{ height: 36, fontSize: 12.5 }}>입실</button>
+                  <button className="btn" disabled={pending} onClick={() => call(checkOut, { studentId: student.id })} style={{ height: 36, fontSize: 12.5 }}>퇴실</button>
+                </div>
+              )}
+              {/* 결석 처리 / 취소 (선택한 날짜 기준) */}
+              {isAbsent ? (
+                <button className="btn" disabled={pending} onClick={() => call(clearDailyStatus, { studentId: student.id, date: attDate })} style={{ height: 34, fontSize: 12.5 }}>결석 취소</button>
+              ) : absentPick ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5, padding: "8px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--panel2)" }}>
+                  <div style={{ width: "100%", fontSize: 11, color: "var(--faint)", marginBottom: 2 }}>결석 사유 선택</div>
+                  {ABSENCE_REASONS.map((r) => (
+                    <button key={r.key} disabled={pending} onClick={() => call(setAbsent, { studentId: student.id, reason: r.key, date: attDate })} className="chip" style={{ height: 28, fontSize: 12, cursor: "pointer" }}>{r.label}</button>
+                  ))}
+                  <button onClick={() => setAbsentPick(false)} className="chip" style={{ height: 28, fontSize: 12, cursor: "pointer", color: "var(--faint)" }}>닫기</button>
+                </div>
+              ) : (
+                <button className="btn" disabled={pending} onClick={() => setAbsentPick(true)} style={{ height: 34, fontSize: 12.5, color: "var(--danger)" }}>결석 처리</button>
+              )}
             </div>
           )}
         </div>

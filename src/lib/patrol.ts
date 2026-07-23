@@ -20,6 +20,7 @@ export const PATROL_STATES: PatrolState[] = [
   { key: "sleep",    label: "수면", points: 1, kind: "penalty", present: true,  dot: "#e5484d", bg: "rgba(229,72,77,.15)",  bd: "rgba(229,72,77,.5)" },
   { key: "distract", label: "딴짓", points: 2, kind: "penalty", present: true,  dot: "#f76808", bg: "rgba(247,104,8,.15)",  bd: "rgba(247,104,8,.5)" },
   // ── 이석: 자리 비움 ──
+  { key: "late",     label: "지각",     points: 1, kind: "penalty", present: false, dot: "#e8590c", bg: "rgba(232,89,12,.14)",  bd: "rgba(232,89,12,.5)" },   // 늦게 옴(아직 자리 비어있음)
   { key: "away",     label: "자리비움", points: 2, kind: "penalty", present: false, dot: "#c98a2b", bg: "rgba(201,138,43,.16)", bd: "rgba(201,138,43,.5)" },  // 무단이탈
   { key: "academy",  label: "학원",     points: 0, kind: "excused", present: false, dot: "#5b8def", bg: "rgba(91,141,239,.14)", bd: "rgba(91,141,239,.5)" },
   { key: "counsel",  label: "상담",     points: 0, kind: "excused", present: false, dot: "#9b7dff", bg: "rgba(155,125,255,.15)", bd: "rgba(155,125,255,.5)" },
