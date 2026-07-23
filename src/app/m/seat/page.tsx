@@ -20,7 +20,7 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
   const branch = me.activeBranchId;
   const sp = await searchParams;
 
-  const [rooms, students, seats, br, att, patState, patPts, lastPat] = await Promise.all([
+  const [rooms, students, seats, br, att, pat, lastPat] = await Promise.all([
     db.query<Room>(
       `select id, name, floor, cols, rows, pos_x, pos_y, door_side from room where branch_id=$1 order by floor, name`,
       [branch],
@@ -43,14 +43,11 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
          order by student_id, at desc`,
       [branch, todayStr()],
     ),
-    db.query<{ student_id: string; state: string }>(
-      `select distinct on (student_id) student_id, state
-         from patrol_event where branch_id=$1 and date=$2
-         order by student_id, at desc`,
-      [branch, todayStr()],
-    ),
-    db.query<{ student_id: string; points: number }>(
-      `select student_id, sum(points)::int as points
+    // 오늘 순찰: 최신 상태 + 점수합을 한 번의 스캔으로(같은 테이블 두 번 읽지 않음)
+    db.query<{ student_id: string; state: string | null; points: number }>(
+      `select student_id,
+              (array_agg(state order by at desc))[1] as state,
+              sum(points)::int as points
          from patrol_event where branch_id=$1 and date=$2
          group by student_id`,
       [branch, todayStr()],
@@ -65,8 +62,7 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
   const attendance: Record<string, AttInfo> = {};
   for (const r of att.rows) attendance[r.student_id] = r.kind === "in" ? "in" : "out";
   const patrol: Record<string, PatrolInfo> = {};
-  for (const r of patState.rows) patrol[r.student_id] = { state: r.state, points: 0 };
-  for (const r of patPts.rows) patrol[r.student_id] = { state: patrol[r.student_id]?.state ?? "", points: r.points };
+  for (const r of pat.rows) patrol[r.student_id] = { state: r.state ?? "", points: r.points };
   const initialRoomId =
     (sp.room && rooms.rows.some((r) => r.id === sp.room) ? sp.room : rooms.rows[0]?.id) ?? null;
 

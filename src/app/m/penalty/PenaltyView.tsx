@@ -26,16 +26,17 @@ const boundsOf = (pts: { x: number; y: number }[]) =>
 const fmtTime = (iso: string) => new Date(iso).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 
 export default function PenaltyView({
-  rooms, seats, students, weekly, breakdown, weekLabel, weekStart, today, canManage,
+  rooms, seats, students, weekly, breakdown, weekLabel, weekStart, today, canManage, canPatrolManage,
 }: {
   rooms: PRoom[]; seats: PSeat[]; students: PStudent[];
-  weekly: Record<string, number>; breakdown: Breakdown[]; weekLabel: string; weekStart: string; today: string; canManage: boolean;
+  weekly: Record<string, number>; breakdown: Breakdown[]; weekLabel: string; weekStart: string; today: string; canManage: boolean; canPatrolManage: boolean;
 }) {
   const [view, setView] = useState<"dash" | "seats" | "list">("dash");
   const [q, setQ] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number; studentId: string; name: string } | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailRow[] | null>(null);
+  const [loadErr, setLoadErr] = useState(false); // 상세 로드 실패 → 무한 로딩 대신 재시도 안내
   // 오늘 날짜는 서버(KST)에서 내려받아 요일 탭·집계와 정확히 맞춘다(브라우저 시계 의존 X).
   const [selDay, setSelDay] = useState<string>(today); // 상세 팝업 선택 요일(기본 오늘)
   const [, start] = useTransition();
@@ -59,15 +60,22 @@ export default function PenaltyView({
   detailRef.current = detailId;
 
   useEffect(() => {
-    if (!detailId) { setDetail(null); return; }
+    if (!detailId) { setDetail(null); setLoadErr(false); return; }
     setSelDay(today); // 열 때 오늘 요일로(서버 KST 기준)
-    getStudentPenaltyWeek(detailId).then((rows) => { if (detailRef.current === detailId) setDetail(rows); }).catch(() => {});
+    setLoadErr(false);
+    getStudentPenaltyWeek(detailId)
+      .then((rows) => { if (detailRef.current === detailId) setDetail(rows); })
+      .catch(() => { if (detailRef.current === detailId) setLoadErr(true); });
   }, [detailId, today]);
 
   // 응답이 늦게 와도 지금 열린 학생이 아니면 무시(레이스 방지)
   const reloadDetail = () => {
     const id = detailId;
-    if (id) getStudentPenaltyWeek(id).then((rows) => { if (detailRef.current === id) setDetail(rows); }).catch(() => {});
+    if (!id) return;
+    setLoadErr(false);
+    getStudentPenaltyWeek(id)
+      .then((rows) => { if (detailRef.current === id) setDetail(rows); })
+      .catch(() => { if (detailRef.current === id) setLoadErr(true); });
   };
   const give = (studentId: string, reason: string) => {
     const fd = new FormData(); fd.set("studentId", studentId); fd.set("reason", reason); fd.set("date", selDay);
@@ -92,20 +100,13 @@ export default function PenaltyView({
     return ranked.filter(({ s }) => s.name.toLowerCase().includes(needle) || String(s.seat_number ?? "").includes(needle) || levelLabel(s).toLowerCase().includes(needle));
   }, [ranked, q]);
 
-  const Tab = ({ id, label }: { id: typeof view; label: string }) => {
-    const on = view === id;
-    return (
-      <button onClick={() => setView(id)} style={{ height: 34, padding: "0 15px", borderRadius: 9, border: `1px solid ${on ? "var(--accent)" : "var(--line)"}`, background: on ? "var(--accent-soft)" : "transparent", color: on ? "var(--accent)" : "var(--sub)", fontWeight: on ? 800 : 500, fontSize: 13, cursor: "pointer" }}>{label}</button>
-    );
-  };
-
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
       {/* 뷰 전환 */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 20px", borderBottom: "1px solid var(--line)", flex: "none" }}>
-        <Tab id="dash" label="대시보드" />
-        <Tab id="seats" label="좌석 배치도" />
-        <Tab id="list" label="학생 목록" />
+        <ViewTab id="dash" label="대시보드" active={view} onPick={setView} />
+        <ViewTab id="seats" label="좌석 배치도" active={view} onPick={setView} />
+        <ViewTab id="list" label="학생 목록" active={view} onPick={setView} />
         <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--faint)" }}>이번 주 {weekLabel} ~</span>
       </div>
 
@@ -273,7 +274,11 @@ export default function PenaltyView({
             </div>
 
             <div style={{ overflowY: "auto", padding: 16, flex: 1 }}>
-              {detail === null ? (
+              {loadErr ? (
+                <div style={{ color: "var(--faint)", fontSize: 13, padding: 16, textAlign: "center" }}>
+                  불러오지 못했습니다 · <button onClick={reloadDetail} style={{ color: "var(--accent)", background: "none", border: "none", cursor: "pointer", fontSize: 13 }}>다시 시도</button>
+                </div>
+              ) : detail === null ? (
                 <div style={{ color: "var(--faint)", fontSize: 13, padding: 12, textAlign: "center" }}>불러오는 중…</div>
               ) : (() => {
                 const dayRows = detail.filter((r) => r.date === selDay);
@@ -284,8 +289,9 @@ export default function PenaltyView({
                       <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{r.label}{r.note ? <span style={{ color: "var(--faint)", fontWeight: 400 }}> · {r.note}</span> : null}</span>
                       <span style={{ fontSize: 11.5, color: "var(--faint)" }}>{fmtTime(r.at)}</span>
                       <span style={{ fontSize: 13, fontWeight: 800, color: "#c92a2f", width: 30, textAlign: "right" }}>+{r.points}</span>
-                      {canManage ? (
-                        <button onClick={() => removeRow(r)} title={r.source === "patrol" ? "이 순찰 기록 삭제" : "이 벌점 삭제"} style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--faint)", padding: 2, display: "grid", placeItems: "center" }}>
+                      {/* 순찰 행 삭제는 서버가 patrol.manage 를 요구 → 권한 없으면 버튼을 숨겨 조용한 실패 방지 */}
+                      {(r.source === "patrol" ? canPatrolManage : canManage) ? (
+                        <button onClick={() => removeRow(r)} aria-label={r.source === "patrol" ? "이 순찰 기록 삭제" : "이 벌점 삭제"} title={r.source === "patrol" ? "이 순찰 기록 삭제" : "이 벌점 삭제"} style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--faint)", padding: 2, display: "grid", placeItems: "center" }}>
                           <svg viewBox="0 0 24 24" style={{ width: 14, height: 14, fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" }}><path d="M6 6l12 12M18 6L6 18" /></svg>
                         </button>
                       ) : <span style={{ width: 18 }} />}
@@ -313,6 +319,15 @@ export default function PenaltyView({
         </>
       )}
     </div>
+  );
+}
+
+// 뷰 전환 탭 — 렌더 바디 밖(모듈 스코프)에 두어 리렌더마다 재마운트되지 않게.
+type PView = "dash" | "seats" | "list";
+function ViewTab({ id, label, active, onPick }: { id: PView; label: string; active: PView; onPick: (v: PView) => void }) {
+  const on = active === id;
+  return (
+    <button onClick={() => onPick(id)} style={{ height: 34, padding: "0 15px", borderRadius: 9, border: `1px solid ${on ? "var(--accent)" : "var(--line)"}`, background: on ? "var(--accent-soft)" : "transparent", color: on ? "var(--accent)" : "var(--sub)", fontWeight: on ? 800 : 500, fontSize: 13, cursor: "pointer" }}>{label}</button>
   );
 }
 

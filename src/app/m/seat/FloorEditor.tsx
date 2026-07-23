@@ -46,6 +46,22 @@ const SEAT_STATUS: Record<string, string> = { empty: '공석', occupied: '사용
 // ---------------- 순찰(오늘 마지막 상태 + 벌점 합계) ----------------
 export type PatrolInfo = { state: string; points: number };
 
+// 순찰 경과 시간 — 자체 타이머를 갖는 독립 컴포넌트. 매초 이 작은 조각만 리렌더되고
+// 부모(FloorEditor)와 좌석 90개는 건드리지 않는다.
+function PatrolElapsed({ startedAt }: { startedAt: number | null }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (startedAt == null) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [startedAt]);
+  const el = startedAt ? Math.max(0, Math.floor((now - startedAt) / 1000)) : 0;
+  const hh = Math.floor(el / 3600), mm = Math.floor((el % 3600) / 60), ss = el % 60;
+  const s = (hh > 0 ? hh + ':' : '') + String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
+  return <b style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{s}</b>;
+}
+
 // ---------------- 출결(입·퇴실 상태 = 오늘 마지막 이벤트) ----------------
 export type AttInfo = 'in' | 'out';
 const ATT_LABEL: Record<AttInfo, string> = { in: '재실', out: '하원' };
@@ -53,6 +69,17 @@ const ATT_COLOR: Record<AttInfo, { bg: string; bd: string }> = {
   in: { bg: 'rgba(18,184,134,.15)', bd: 'rgba(18,184,134,.55)' },
   out: { bg: 'rgba(120,130,150,.12)', bd: 'rgba(120,130,150,.4)' },
 };
+
+// 대시보드 통계 타일 — 순수 프레젠테이션. 모듈 스코프에 두어 리렌더마다 재마운트 방지.
+function Tile({ label, value, color, span = 1, sub }: { label: string; value: string | number; color?: string; span?: number; sub?: string }) {
+  return (
+    <div className="card" style={{ gridColumn: `span ${span}`, padding: '16px 18px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <div style={{ fontSize: 12.5, color: 'var(--faint)' }}>{label}</div>
+      <div style={{ fontSize: 28, fontWeight: 800, color: color ?? 'var(--txt)', marginTop: 3 }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 3 }}>{sub}</div>}
+    </div>
+  );
+}
 
 function lbl(s: Pick<Student, 'level' | 'grade' | 'is_repeat'>): string {
   if (s.level === 'adult') return s.is_repeat ? '성인·N수생' : '성인';
@@ -149,7 +176,6 @@ export default function FloorEditor({
   const [patrolMode, setPatrolMode] = useState(false); // 순찰 모드 오버레이
   const [patrolSession, setPatrolSession] = useState<string | null>(null); // 이번 순찰 세션 id
   const [patrolStartedAt, setPatrolStartedAt] = useState<number | null>(null); // 시작 시각(ms)
-  const [patrolNow, setPatrolNow] = useState<number>(0); // 경과 표시용 틱
   const [patrolMenu, setPatrolMenu] = useState<{ x: number; y: number; seat: Seat } | null>(null); // 순찰 상태 선택
   const [patrolConfirm, setPatrolConfirm] = useState<null | 'start' | 'end'>(null); // 시작/종료 확인창
   const [patrolMarks, setPatrolMarks] = useState<Record<string, { state: string; points: number }>>({}); // 이번 세션에 찍은 것(시작 시 리셋)
@@ -169,13 +195,8 @@ export default function FloorEditor({
     setPatrolConfirm(null);
     setPatrolToast('순찰 종료 · 순찰 기록에 저장되었습니다');
   };
-  // 순찰 중 · 확인창 열려있는 동안 1초마다 현재/경과 시각 갱신
-  useEffect(() => {
-    if (!patrolMode && !patrolConfirm) return;
-    setPatrolNow(Date.now());
-    const t = setInterval(() => setPatrolNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [patrolMode, patrolConfirm]);
+  // (경과 시각은 아래 PatrolElapsed 가 자체 타이머로 갱신 — 매초 FloorEditor 전체가
+  //  리렌더되어 좌석 90개가 재마운트되던 문제를 없앤다. 확인창은 스냅샷이면 충분.)
   // 종료 알림 자동 사라짐
   useEffect(() => {
     if (!patrolToast) return;
@@ -782,13 +803,6 @@ export default function FloorEditor({
       else if (a === 'out') out++;
     }
     const vacant = Math.max(0, totalSeats - inNow);
-    const Tile = ({ label, value, color, span = 1, sub }: { label: string; value: string | number; color?: string; span?: number; sub?: string }) => (
-      <div className="card" style={{ gridColumn: `span ${span}`, padding: '16px 18px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-        <div style={{ fontSize: 12.5, color: 'var(--faint)' }}>{label}</div>
-        <div style={{ fontSize: 28, fontWeight: 800, color: color ?? 'var(--txt)', marginTop: 3 }}>{value}</div>
-        {sub && <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 3 }}>{sub}</div>}
-      </div>
-    );
     return (
       <div style={{ maxWidth: 940, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gridAutoRows: 'minmax(84px, auto)', gap: 12 }}>
         {/* 입실 히어로 (2×2) */}
@@ -1075,20 +1089,16 @@ export default function FloorEditor({
         </div>
       )}
 
-      {patrolMode && (() => {
-        const el = patrolStartedAt ? Math.max(0, Math.floor((patrolNow - patrolStartedAt) / 1000)) : 0;
-        const hh = Math.floor(el / 3600), mm = Math.floor((el % 3600) / 60), ss = el % 60;
-        const elapsed = (hh > 0 ? hh + ':' : '') + String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
-        const startClock = patrolStartedAt ? new Date(patrolStartedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '';
-        return (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '9px 20px', background: 'rgba(229,72,77,.08)', borderBottom: '1px solid var(--line)', flex: 'none' }}>
-            <span style={{ fontSize: 13, fontWeight: 800, color: '#e5484d' }}>순찰 중</span>
-            <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>시작 {startClock} · 경과 <b style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{elapsed}</b></span>
-            <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>누적 벌점 <b style={{ color: '#e5484d' }}>{patrolTally}점</b></span>
-            <button className="chip" onClick={() => setPatrolConfirm('end')} style={{ cursor: 'pointer' }}>종료</button>
-          </div>
-        );
-      })()}
+      {patrolMode && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '9px 20px', background: 'rgba(229,72,77,.08)', borderBottom: '1px solid var(--line)', flex: 'none' }}>
+          <span style={{ fontSize: 13, fontWeight: 800, color: '#e5484d' }}>순찰 중</span>
+          <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>
+            시작 {patrolStartedAt ? new Date(patrolStartedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : ''} · 경과 <PatrolElapsed startedAt={patrolStartedAt} />
+          </span>
+          <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>누적 벌점 <b style={{ color: '#e5484d' }}>{patrolTally}점</b></span>
+          <button className="chip" onClick={() => setPatrolConfirm('end')} style={{ cursor: 'pointer' }}>종료</button>
+        </div>
+      )}
 
       {/* 본문 — 왼쪽 층 레일(5층 위 → 4층 아래) + 무대 */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
@@ -1224,7 +1234,7 @@ export default function FloorEditor({
 
       {/* 순찰 시작/종료 확인창 */}
       {patrolConfirm && (() => {
-        const now = patrolNow || Date.now();
+        const now = Date.now(); // 확인창은 잠깐 뜨는 모달 — 스냅샷으로 충분(매초 갱신 불필요)
         const fmtClock = (ms: number) => {
           const d = new Date(ms); const h = d.getHours(), m = d.getMinutes();
           return `${h < 12 ? '오전' : '오후'} ${h % 12 === 0 ? 12 : h % 12}시 ${String(m).padStart(2, '0')}분`;

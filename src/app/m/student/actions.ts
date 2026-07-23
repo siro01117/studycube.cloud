@@ -38,11 +38,17 @@ export async function addStudent(formData: FormData) {
 }
 
 // ---------------- 학생 영구 삭제 ----------------
-// 좌석 배정(on delete set null)·입퇴실 기록(on delete cascade)은 DB 제약이 정리.
+// 입퇴실 기록(on delete cascade)은 DB 제약이 정리. 좌석은 FK가 current_student_id만
+// NULL로 만들고 status='occupied'를 남겨 유령 '사용중' 좌석이 되므로 먼저 명시적으로 비운다.
 export async function deleteStudent(formData: FormData) {
   const me = await guard("student.edit");
   const id = s(formData.get("id"));
   if (!id) return;
+  await db.query(
+    `update seat set current_student_id=null, status='empty', assigned_at=null
+      where branch_id=$1 and current_student_id=$2`,
+    [me.activeBranchId, id],
+  );
   await db.query(`delete from student where id=$1 and branch_id=$2`, [id, me.activeBranchId]);
   revalidatePath("/m/student");
   revalidatePath("/m/seat");

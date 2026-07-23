@@ -88,7 +88,7 @@ export default function StudentPopup({
             <div style={{ fontSize: 12.5, color: "var(--dim)" }}>{seatLabel ? `${seatLabel} 좌석` : "미배정"}{lbl(student) ? ` · ${lbl(student)}` : ""}</div>
           </div>
         </div>
-        <button onClick={onClose} className="chip" style={{ height: 30, width: 30, padding: 0, justifyContent: "center", cursor: "pointer" }}><XIcon /></button>
+        <button onClick={onClose} aria-label="닫기" className="chip" style={{ height: 30, width: 30, padding: 0, justifyContent: "center", cursor: "pointer" }}><XIcon /></button>
       </div>
 
       {/* 본문 2단 */}

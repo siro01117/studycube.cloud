@@ -47,15 +47,7 @@ export async function addStudent(formData: FormData) {
   revalidatePath("/m/student");
 }
 
-export async function setStudentStatus(formData: FormData) {
-  const me = await guard("student.edit");
-  const id = s(formData.get("id"));
-  const status = s(formData.get("status"));
-  if (!id || !status) return;
-  await db.query(`update student set status=$1 where id=$2 and branch_id=$3`, [status, id, me.activeBranchId]);
-  revalidatePath("/m/seat");
-  revalidatePath("/m/student");
-}
+// (setStudentStatus 는 student/actions.ts 의 것을 쓴다 — 이쪽 중복본은 좌석 정리 로직이 없어 제거)
 
 // ---------------- 방(교실) ----------------
 // 좌석 격자(FloorEditor 와 동일) — ORIGIN·GAP 전부 STEP(20)의 배수라 화면 격자에 딱 맞음
