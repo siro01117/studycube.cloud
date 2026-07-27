@@ -10,6 +10,8 @@ export type PenaltyReason = {
 export const PENALTY_REASONS: PenaltyReason[] = [
   { key: "late",     label: "지각",             points: 1 },
   { key: "phone",    label: "휴대폰 사용",       points: 2 },
+  { key: "phone_unsubmit", label: "휴대폰 미제출",   points: 10 },
+  { key: "phone_on",       label: "휴대폰 전원 안끔", points: 3 },
   { key: "noise",    label: "면학분위기 저해",   points: 2 },
   { key: "homework", label: "과제 미제출",       points: 2 },
   { key: "leave",    label: "무단외출·이탈",     points: 3 },
