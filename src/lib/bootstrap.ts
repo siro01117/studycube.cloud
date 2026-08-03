@@ -117,7 +117,7 @@ const BOOT_LOCK =
 
 // 스키마·시드 내용이 바뀌면 이 값을 올린다. 그때만 DDL 이 다시 돈다.
 // (schema.modules.ts / CORE_SQL / PERMISSIONS / MODULES 를 수정하면 반드시 갱신)
-const SCHEMA_VERSION = "2026-07-23.1";
+const SCHEMA_VERSION = "2026-08-04.1"; // 관리자 계정(irium) 시드 추가
 
 /** 이미 이 버전으로 부팅된 DB인지 한 번의 쿼리로 판정 */
 async function alreadyBooted(): Promise<boolean> {
@@ -179,13 +179,20 @@ async function boot() {
     );
   }
 
-  // CTO 마스터 (나한결). 없을 때만 생성.
-  const exists = await db.query(`select 1 from person where login_id=$1`, ["나한결"]);
-  if (exists.rows.length === 0) {
-    await db.query(
-      `insert into person(login_id,name,pin_hash,is_cto) values ($1,$2,$3,true)`,
-      ["나한결", "나한결", hashPin("365785")],
-    );
+  // 마스터 계정. 없을 때만 생성(있으면 PIN 을 덮어쓰지 않는다).
+  // irium = 관리자용 별도 계정 — 지금은 권한 동일, 추후 역할 구분용.
+  const MASTERS: [login: string, name: string, pin: string][] = [
+    ["나한결", "나한결", "365785"],
+    ["irium", "관리자", "140988"],
+  ];
+  for (const [login, name, pin] of MASTERS) {
+    const exists = await db.query(`select 1 from person where login_id=$1`, [login]);
+    if (exists.rows.length === 0) {
+      await db.query(
+        `insert into person(login_id,name,pin_hash,is_cto) values ($1,$2,$3,true)`,
+        [login, name, hashPin(pin)],
+      );
+    }
   }
 
   // 여기까지 왔으면 이 버전으로 완료. 다음 부팅부터는 판정 쿼리 한 번으로 끝난다.
