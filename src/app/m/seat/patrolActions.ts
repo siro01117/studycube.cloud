@@ -42,6 +42,58 @@ export async function recordPatrol(formData: FormData) {
   revalidatePath("/m/seat");
 }
 
+// 여러 학생 상태를 한 번에 기록 (모바일 순찰의 '이 방 완료' — 미점검 좌석을 일괄 입석 처리).
+// 학생 27명이면 개별 호출 시 왕복 100회 이상 → 단일 왕복으로 줄인다. 세션당 학생 1상태(교체) 규칙은 동일.
+export async function recordPatrolBulk(formData: FormData) {
+  const me = await guard("patrol.manage");
+  const sessionId = s(formData.get("sessionId"));
+  let items: { studentId: string; state: string }[];
+  try {
+    items = JSON.parse(s(formData.get("items")) ?? "[]");
+  } catch { return; }
+  if (!Array.isArray(items) || items.length === 0) return;
+
+  // 유효 상태만 통과 + 학생 중복 제거(뒤엣것 우선)
+  const byStudent = new Map<string, string>();
+  for (const it of items) {
+    if (!it?.studentId || !PATROL_BY_KEY[it?.state]) continue;
+    byStudent.set(it.studentId, it.state);
+  }
+  if (byStudent.size === 0) return;
+
+  // 좌석 스냅샷 — 지점 좌석은 100석 내외라 통째로 읽고 메모리에서 매칭(배열 파라미터 회피)
+  const seatRows = await db.query<{ id: string; current_student_id: string }>(
+    `select id, current_student_id from seat where branch_id=$1 and current_student_id is not null`,
+    [me.activeBranchId],
+  );
+  const seatOf = new Map(seatRows.rows.map((r) => [r.current_student_id, r.id]));
+  const ids = [...byStudent.keys()];
+  const date = todayStr();
+
+  // 같은 세션의 기존 기록 제거(교체)
+  if (sessionId) {
+    const ph = ids.map((_, i) => `$${i + 3}`).join(",");
+    await db.query(
+      `delete from patrol_event where branch_id=$1 and session_id=$2 and student_id in (${ph})`,
+      [me.activeBranchId, sessionId, ...ids],
+    );
+  }
+
+  const params: (string | number | null)[] = [me.activeBranchId, sessionId, date, me.id];
+  const values = ids.map((id) => {
+    const state = byStudent.get(id)!;
+    const i = params.length;
+    params.push(id, state, PATROL_BY_KEY[state].points, seatOf.get(id) ?? null);
+    return `($1,$${i + 1},$${i + 2},$${i + 3},$2,$${i + 4},$3,$4)`;
+  });
+  await db.query(
+    `insert into patrol_event(branch_id, student_id, state, points, session_id, seat_id, date, created_by)
+     values ${values.join(",")}`,
+    params,
+  );
+  revalidatePath("/m/seat");
+}
+
 // 순찰 이벤트 1건 삭제 (벌점 내역에서 정정 — id로)
 export async function removePatrolEvent(formData: FormData) {
   const me = await guard("patrol.manage");

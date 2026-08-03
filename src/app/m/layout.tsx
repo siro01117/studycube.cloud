@@ -28,9 +28,9 @@ export default async function ModuleLayout({ children }: { children: React.React
     .map((m) => ({ key: m.key, label: m.label, href: MODULE_ROUTES[m.key] ?? null }));
 
   return (
-    <div style={{ display: "flex", minHeight: "100dvh" }}>
+    <div className="app-shell" style={{ display: "flex", minHeight: "100dvh" }}>
       <NavRail modules={modules} me={{ name: me.name, isCto: me.isCto }} />
-      <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
+      <div className="app-main" style={{ flex: 1, minWidth: 0 }}>{children}</div>
     </div>
   );
 }

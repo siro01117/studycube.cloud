@@ -35,7 +35,10 @@ export default async function PatrolPage() {
             <Link href="/m/seat" className="chip" style={{ textDecoration: "none" }}>‹ 좌석</Link>
             <span style={{ fontWeight: 700 }}>순찰 기록</span>
           </div>
-          <div style={{ fontSize: 12.5, color: "var(--dim)" }}>순찰 {sessions.length}회</div>
+          <div className="flex items-center gap-3">
+            <Link href="/patrol" className="chip" style={{ textDecoration: "none", color: "var(--accent)", fontWeight: 700 }}>순찰 시작 →</Link>
+            <span className="hide-mobile" style={{ fontSize: 12.5, color: "var(--dim)" }}>순찰 {sessions.length}회</span>
+          </div>
         </div>
       </header>
 

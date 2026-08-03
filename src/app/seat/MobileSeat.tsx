@@ -1,0 +1,148 @@
+"use client";
+
+// 폰용 좌석 배치도 — 한 방씩 보며 누가 어디 앉았는지 확인하고 입·퇴실을 찍는다.
+// 데스크톱 FloorEditor(편집·툴바·층레일)와 별개 화면. 편집 기능은 PC/패드에서.
+import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
+import SeatCanvas from "../_shared/SeatCanvas";
+import { SW, xyOf } from "@/lib/seatmap";
+import { checkIn, checkOut } from "../m/seat/attendanceActions";
+
+export type SRoom = { id: string; name: string; floor: number };
+export type SSeat = { id: string; room_id: string | null; grid_x: number | null; grid_y: number | null; number: number | null; label: string; current_student_id: string | null };
+export type SStudent = { id: string; name: string; grade: string | null; school: string | null; student_phone: string | null; guardian_phone: string | null };
+export type Att = "in" | "out";
+
+const ATT = {
+  in: { bg: "rgba(18,184,134,.15)", bd: "rgba(18,184,134,.55)", fg: "#0f9d76", label: "재실" },
+  out: { bg: "rgba(120,130,150,.12)", bd: "rgba(120,130,150,.4)", fg: "var(--faint)", label: "하원" },
+} as const;
+
+export default function MobileSeat({ rooms, seats, students, attendance, canAttend }: {
+  rooms: SRoom[]; seats: SSeat[]; students: SStudent[];
+  attendance: Record<string, Att>; canAttend: boolean;
+}) {
+  const [roomIdx, setRoomIdx] = useState(0);
+  const [att, setAtt] = useState(attendance);
+  const [sel, setSel] = useState<SSeat | null>(null);
+  const [, start] = useTransition();
+
+  const stOf = useMemo(() => new Map(students.map((s) => [s.id, s])), [students]);
+  const byRoom = useMemo(() => {
+    const m = new Map<string, SSeat[]>();
+    for (const s of seats) { if (!s.room_id) continue; (m.get(s.room_id) ?? m.set(s.room_id, []).get(s.room_id)!).push(s); }
+    return m;
+  }, [seats]);
+
+  const room = rooms[roomIdx] ?? null;
+  // 참조가 매 렌더 바뀌면 SeatCanvas 의 초기배율 계산이 매번 다시 돌아 팬·줌이 튄다 → 메모 고정.
+  const roomSeats = useMemo(() => (room ? byRoom.get(room.id) ?? [] : []), [room, byRoom]);
+  const seatById = useMemo(() => new Map(roomSeats.map((s) => [s.id, s])), [roomSeats]);
+  const canvasSeats = useMemo(() => roomSeats.map((s, i) => ({ id: s.id, ...xyOf(s, i) })), [roomSeats]);
+
+  const inCount = roomSeats.filter((s) => s.current_student_id && att[s.current_student_id] === "in").length;
+  const assigned = roomSeats.filter((s) => s.current_student_id).length;
+
+  const mark = (studentId: string, kind: Att) => {
+    setAtt((a) => ({ ...a, [studentId]: kind }));
+    const fd = new FormData(); fd.set("studentId", studentId);
+    start(async () => { await (kind === "in" ? checkIn(fd) : checkOut(fd)); });
+    setSel(null);
+  };
+
+  const selStudent = sel?.current_student_id ? stOf.get(sel.current_student_id) : null;
+  const selAtt = sel?.current_student_id ? att[sel.current_student_id] : undefined;
+
+  return (
+    <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column", background: "var(--bg)" }}>
+      {/* 상단: 현재 방 (전환은 하단 ‹ ›) */}
+      <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
+        <Link href="/home" className="chip" style={{ textDecoration: "none", height: 34, flex: "none" }}>‹</Link>
+        <div style={{ flex: 1, minWidth: 0, textAlign: "center", lineHeight: 1.25 }}>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>{room ? `${room.floor}층 ${room.name}` : "방 없음"}</div>
+          <div style={{ fontSize: 11, color: "var(--faint)", fontVariantNumeric: "tabular-nums" }}>방 {roomIdx + 1}/{rooms.length} · 재실 {inCount}/{assigned}</div>
+        </div>
+        {/* 이 화면은 풀스크린이라 하단 탭이 없다 → 자주 오가는 곳으로 바로 가는 버튼 */}
+        <div style={{ display: "flex", gap: 6, flex: "none" }}>
+          <Link href="/patrol" className="chip" style={{ textDecoration: "none", height: 34, color: "var(--accent)", fontWeight: 700 }}>순찰</Link>
+          <Link href="/m/penalty" className="chip" style={{ textDecoration: "none", height: 34, fontWeight: 700 }}>벌점</Link>
+        </div>
+      </div>
+
+      <SeatCanvas
+        seats={canvasSeats}
+        onTap={(id) => { const s = seatById.get(id); if (s?.current_student_id) setSel(s); }}
+        renderSeat={(id) => {
+          const s = seatById.get(id)!;
+          const sid = s.current_student_id;
+          const a = sid ? att[sid] : undefined;
+          const c = a ? ATT[a] : null;
+          return (
+            <div style={{
+              width: "100%", height: "100%", borderRadius: 10,
+              background: c ? c.bg : sid ? "var(--card)" : "var(--panel2)",
+              border: `1.5px solid ${c ? c.bd : "var(--line)"}`,
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+              position: "relative", opacity: sid ? 1 : 0.55,
+            }}>
+              <span style={{ position: "absolute", top: 2, left: 0, right: 0, textAlign: "center", fontSize: 10, fontWeight: 700, color: "var(--faint)" }}>{s.number ?? s.label}</span>
+              {sid ? (
+                <div style={{ marginTop: 11, display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, maxWidth: SW - 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{stOf.get(sid)?.name ?? "?"}</span>
+                  {c && <span style={{ fontSize: 11, fontWeight: 800, color: c.fg, lineHeight: 1.1 }}>{c.label}</span>}
+                </div>
+              ) : <span style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 10 }}>공석</span>}
+            </div>
+          );
+        }}
+      />
+
+      {/* 하단: 방 이동 */}
+      <div style={{ flex: "none", display: "flex", gap: 8, padding: "10px 12px calc(10px + env(safe-area-inset-bottom))", background: "var(--card)", borderTop: "1px solid var(--line)" }}>
+        <button className="btn" disabled={roomIdx === 0} onClick={() => setRoomIdx((i) => Math.max(0, i - 1))} style={{ height: 54, flex: "0 0 64px", fontSize: 20 }} aria-label="이전 방">‹</button>
+        <div className="btn" style={{ height: 54, flex: 1, cursor: "default", fontSize: 14, fontWeight: 700, color: "var(--sub)" }}>
+          {room ? `${room.floor}층 ${room.name}` : "-"}
+        </div>
+        <button className="btn" disabled={roomIdx >= rooms.length - 1} onClick={() => setRoomIdx((i) => Math.min(rooms.length - 1, i + 1))} style={{ height: 54, flex: "0 0 64px", fontSize: 20 }} aria-label="다음 방">›</button>
+      </div>
+
+      {/* 좌석 시트 — 학생 정보 + 입·퇴실 */}
+      {sel && selStudent && (
+        <>
+          <div onClick={() => setSel(null)} style={{ position: "fixed", inset: 0, background: "rgba(10,12,18,.45)", zIndex: 40 }} />
+          <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 41, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "18px 16px calc(16px + env(safe-area-inset-bottom))" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+              <span style={{ fontSize: 19, fontWeight: 800 }}>{selStudent.name}</span>
+              <span style={{ fontSize: 13, color: "var(--faint)" }}>{sel.number ?? sel.label}번</span>
+              {selAtt && <span style={{ marginLeft: "auto", fontSize: 12.5, fontWeight: 800, color: ATT[selAtt].fg }}>{ATT[selAtt].label}</span>}
+            </div>
+            <div style={{ fontSize: 13, color: "var(--dim)", marginBottom: 14 }}>
+              {[selStudent.grade, selStudent.school].filter(Boolean).join(" · ") || "학년·학교 미등록"}
+            </div>
+            {(selStudent.student_phone || selStudent.guardian_phone) && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+                {selStudent.student_phone && (
+                  <a href={`tel:${selStudent.student_phone}`} className="btn" style={{ height: 48, justifyContent: "space-between", textDecoration: "none" }}>
+                    <span style={{ color: "var(--faint)", fontSize: 12.5 }}>학생</span><span style={{ fontWeight: 700 }}>{selStudent.student_phone}</span>
+                  </a>
+                )}
+                {selStudent.guardian_phone && (
+                  <a href={`tel:${selStudent.guardian_phone}`} className="btn" style={{ height: 48, justifyContent: "space-between", textDecoration: "none" }}>
+                    <span style={{ color: "var(--faint)", fontSize: 12.5 }}>보호자</span><span style={{ fontWeight: 700 }}>{selStudent.guardian_phone}</span>
+                  </a>
+                )}
+              </div>
+            )}
+            {canAttend && (
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn" onClick={() => mark(sel.current_student_id!, "in")} style={{ height: 54, flex: 1, fontSize: 15, fontWeight: 800, color: "#0f9d76", borderColor: "rgba(18,184,134,.5)", background: "rgba(18,184,134,.1)" }}>입실</button>
+                <button className="btn" onClick={() => mark(sel.current_student_id!, "out")} style={{ height: 54, flex: 1, fontSize: 15, fontWeight: 800 }}>하원</button>
+              </div>
+            )}
+            <button className="btn" onClick={() => setSel(null)} style={{ height: 46, width: "100%", marginTop: 8 }}>닫기</button>
+          </div>
+        </>
+      )}
+    </main>
+  );
+}

@@ -19,7 +19,9 @@
   --txt: #171a22;
   --dim: #565d6e;
   --ok: #12b886;
+  --ok-soft: #e3f7f0;
   --warn: #f59e0b;
+  --warn-soft: #fef3e2;
   --shadow-lg: 0 10px 40px rgba(20, 22, 30, 0.1);
 }
 
@@ -91,3 +93,74 @@ button, .chip, [role="button"] { touch-action: manipulation; }
 }
 .chip:active { transform: scale(.94); }
 .label { font-size: 12px; color: var(--faint); letter-spacing: .02em; margin-bottom: 6px; display: block; }
+
+/* '더보기'는 폰 하단 탭 전용 — 데스크톱 레일에서는 숨김.
+   버튼 인라인 style(display:flex)을 이겨야 해서 !important. */
+.rail-more { display: none !important; }
+
+/* ── 폰 대응 ────────────────────────────────────────────────
+   데스크톱 축소가 아니라 재배치: 좌측 레일 → 하단 탭 5개(+더보기 시트), 본문 16px 기준.
+   경계 640px — 태블릿(768↑)은 데스크톱 레이아웃 유지(패드로 쓰던 순찰 화면 보존).
+   근거: 하단 탭 3~5개(Material/Apple HIG), 가로 스크롤 탭바는 안티패턴(NN/g),
+        본문·입력 16px 미만이면 iOS가 자동 확대. */
+@media (max-width: 640px) {
+  /* 셸: 가로 배치 → 세로(본문 위 / 탭바 아래) */
+  .app-shell { flex-direction: column; }
+
+  /* 레일 → 하단 고정 탭바. 5칸 균등분할, 스크롤 없음 */
+  .nav-rail {
+    width: 100% !important; height: auto !important;
+    position: fixed !important; bottom: 0; left: 0; right: 0; top: auto !important;
+    z-index: 30;
+    flex-direction: row !important;
+    border-right: none !important; border-top: 1px solid var(--line);
+    padding: 0 !important; overflow: visible !important;
+  }
+  /* 인라인 style(display:grid/flex)을 이기려면 !important 필요 */
+  .nav-rail .rail-brand, .nav-rail .rail-foot { display: none !important; }
+  .nav-rail .rail-list {
+    flex-direction: row !important; overflow: visible !important;
+    gap: 0 !important; width: 100%;
+    padding: 4px 0 calc(4px + env(safe-area-inset-bottom));
+  }
+  /* 폰에선 상위 4개만 노출 — 나머지는 '더보기' 시트로 */
+  .nav-rail .rail-item[data-primary="0"] { display: none !important; }
+  .nav-rail .rail-item[data-primary="1"], .nav-rail .rail-more {
+    flex: 1 1 0; width: auto !important; min-width: 0; padding: 4px 2px !important;
+  }
+  .nav-rail .rail-item span:last-child, .nav-rail .rail-more span:last-child {
+    font-size: 11px !important; white-space: nowrap; max-width: 100% !important;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .nav-rail .rail-more { display: flex !important; }
+
+  /* 본문: 탭바(≈60) 만큼 아래 여백 */
+  .app-main { padding-bottom: calc(60px + env(safe-area-inset-bottom)); }
+  .app-main > main { height: auto !important; min-height: calc(100dvh - 60px - env(safe-area-inset-bottom)); }
+
+  /* 페이지 헤더·본문 좌우 여백 16px (Material 모바일 마진) */
+  .px-5 { padding-left: 16px !important; padding-right: 16px !important; }
+
+  /* 입력은 16px 이상 — 미만이면 iOS Safari가 포커스 시 화면을 확대해버림 */
+  .input, input, select, textarea { font-size: 16px !important; }
+  .btn { min-height: 48px; font-size: 15px; }   /* 터치 타깃 48dp */
+
+  /* 폰에서 숨길 보조 메타(주차 안내·건수 등) */
+  .hide-mobile { display: none !important; }
+
+  /* 다열 그리드 → 1열 (통계·카드) */
+  .grid-collapse { grid-template-columns: 1fr !important; }
+
+  /* 본문 패딩 축소 */
+  .pad-mobile { padding: 12px !important; }
+
+  /* 가로 스크롤 탭줄 (뷰 전환 탭 등) */
+  .tabbar-scroll { overflow-x: auto; padding-left: 12px !important; padding-right: 12px !important; }
+
+  /* 마스터-디테일 2단 → 세로 스택 (순찰 기록) */
+  .split { flex-direction: column !important; }
+  .split-side {
+    width: 100% !important; height: auto !important; max-height: 38vh;
+    border-right: none !important; border-bottom: 1px solid var(--line);
+  }
+}

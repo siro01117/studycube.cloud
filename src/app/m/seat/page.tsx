@@ -4,6 +4,7 @@ import { getMe, can } from "@/lib/auth";
 import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
 import FloorEditor, { type Room, type Seat, type Student, type AttInfo, type PatrolInfo } from "./FloorEditor";
+import PhoneRedirect from "../_shared/PhoneRedirect";
 import { todayKey as todayStr } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
 
 export const runtime = "nodejs";
@@ -68,6 +69,7 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
 
   return (
     <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <PhoneRedirect to="/seat" />
       <header style={{ borderBottom: "1px solid var(--line)", background: "var(--card)" }}>
         <div className="px-5 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -75,7 +77,10 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
             <span style={{ fontWeight: 700 }}>좌석 배치도</span>
             {branchName && <span className="chip">{branchName}</span>}
           </div>
-          <div style={{ fontSize: 12.5, color: "var(--dim)" }}>{rooms.rows.length}개 방 · 좌석 {seats.rows.length}</div>
+          <div className="flex items-center gap-3">
+            {canPatrol && <Link href="/patrol" className="chip" style={{ textDecoration: "none", color: "var(--accent)", fontWeight: 700 }}>순찰 시작 →</Link>}
+            <span className="hide-mobile" style={{ fontSize: 12.5, color: "var(--dim)" }}>{rooms.rows.length}개 방 · 좌석 {seats.rows.length}</span>
+          </div>
         </div>
       </header>
 

@@ -1,23 +1,31 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logoutAction } from "../home/actions";
 
 export type NavModule = { key: string; label: string; href: string | null };
 
+// 폰 하단 탭에 직접 노출할 개수(나머지는 '더보기' 시트).
+// Material·Apple HIG 모두 하단 탭 3~5개 권장 — 여기서는 4 + 더보기 = 5.
+const PRIMARY_TABS = 4;
+
 export default function NavRail({ modules, me }: { modules: NavModule[]; me: { name: string; isCto: boolean } }) {
   const path = usePathname();
+  const [more, setMore] = useState(false);
+  // 준비중(href 없음) 모듈은 탭 자리를 낭비하므로 폰에서는 뒤로 밀린다.
+  const ready = modules.filter((m) => m.href);
+  const primaryKeys = new Set(ready.slice(0, PRIMARY_TABS).map((m) => m.key));
 
   return (
-    <nav style={S.rail}>
-      <div style={S.brand} title="StudyCube">SC</div>
+    <nav className="nav-rail" style={S.rail}>
+      <div className="rail-brand" style={S.brand} title="StudyCube">SC</div>
 
-      <div style={S.list}>
+      <div className="rail-list" style={S.list}>
         {modules.map((m) => {
-          const ready = !!m.href;
-          const active = ready && (path === m.href || path.startsWith(m.href + "/"));
+          const isReady = !!m.href;
+          const active = isReady && (path === m.href || path.startsWith(m.href + "/"));
           const body: ReactNode = (
             <>
               <span style={{ ...S.icoBox, ...(active ? S.icoOn : null) }}>
@@ -28,19 +36,62 @@ export default function NavRail({ modules, me }: { modules: NavModule[]; me: { n
               <span style={{ ...S.lbl, ...(active ? { color: "var(--accent)", fontWeight: 700 } : null) }}>{m.label}</span>
             </>
           );
-          return ready ? (
-            <Link key={m.key} href={m.href!} style={S.item} title={m.label}>
+          return isReady ? (
+            <Link key={m.key} className="rail-item" data-primary={primaryKeys.has(m.key) ? "1" : "0"} href={m.href!} style={S.item} title={m.label}>
               {body}
             </Link>
           ) : (
-            <div key={m.key} style={{ ...S.item, opacity: 0.4, cursor: "default" }} title={`${m.label} · 준비중`}>
+            <div key={m.key} className="rail-item" data-primary="0" style={{ ...S.item, opacity: 0.4, cursor: "default" }} title={`${m.label} · 준비중`}>
               {body}
             </div>
           );
         })}
+
+        {/* 폰 전용 5번째 탭 — 나머지 모듈·로그아웃 */}
+        <button className="rail-more" onClick={() => setMore(true)} style={{ ...S.item, border: "none", background: "transparent", cursor: "pointer" }}>
+          <span style={S.icoBox}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" />
+            </svg>
+          </span>
+          <span style={S.lbl}>더보기</span>
+        </button>
       </div>
 
-      <div style={S.foot}>
+      {/* 더보기 시트 (폰) */}
+      {more && (
+        <>
+          <div onClick={() => setMore(false)} style={{ position: "fixed", inset: 0, background: "rgba(10,12,18,.45)", zIndex: 40 }} />
+          <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 41, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "18px 16px calc(16px + env(safe-area-inset-bottom))", maxHeight: "76dvh", overflowY: "auto" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+              <span style={S.avatar}>{me.name.slice(0, 1)}</span>
+              <span style={{ fontSize: 16, fontWeight: 800, flex: 1 }}>{me.name}</span>
+              <button onClick={() => setMore(false)} style={{ width: 44, height: 44, borderRadius: 12, border: "1px solid var(--line)", background: "var(--bg)", color: "var(--sub)", fontSize: 17, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+              {modules.filter((m) => !primaryKeys.has(m.key)).map((m) => {
+                const inner = (
+                  <>
+                    <span style={{ ...S.icoBox, width: 44, height: 40 }}>
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{ICON[m.key] ?? ICON._default}</svg>
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--sub)" }}>{m.label}</span>
+                  </>
+                );
+                const box: CSSProperties = { minHeight: 88, borderRadius: 14, border: "1px solid var(--line)", background: "var(--bg)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 5, textDecoration: "none" };
+                return m.href
+                  ? <Link key={m.key} href={m.href} onClick={() => setMore(false)} style={box}>{inner}</Link>
+                  : <div key={m.key} style={{ ...box, opacity: 0.4 }}>{inner}</div>;
+              })}
+            </div>
+            <form action={logoutAction} style={{ marginTop: 14 }}>
+              <button type="submit" className="btn" style={{ height: 50, width: "100%", fontSize: 15 }}>로그아웃</button>
+            </form>
+          </div>
+        </>
+      )}
+
+      <div className="rail-foot" style={S.foot}>
         <div style={S.avatar} title={me.name}>{me.name.slice(0, 1)}</div>
         <form action={logoutAction}>
           <button type="submit" style={S.logout} title="로그아웃">
