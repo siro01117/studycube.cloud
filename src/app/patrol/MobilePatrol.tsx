@@ -38,7 +38,6 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
   const [roomIdx, setRoomIdx] = useState(0);
   const [view, setView] = useState({ tx: 12, ty: 12, s: 1 });
   const [marks, setMarks] = useState<Record<string, string>>({});         // studentId → state
-  const [doneRooms, setDoneRooms] = useState<Set<string>>(new Set());     // '이 방 완료' 처리된 방
   const [session, setSession] = useState<{ sessionId: string; startedAt: number } | null>(null);
   const [sheet, setSheet] = useState<MSeat | null>(null);                  // 상태 선택 시트
   const [confirm, setConfirm] = useState<"start" | "end" | null>(null);
@@ -213,33 +212,13 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
     queueRef.current?.startSession(id);
     setSession({ sessionId: id, startedAt: Date.now() });
     setMarks({});
-    setDoneRooms(new Set());
     setConfirm(null);
   };
   const doEnd = () => {
     queueRef.current?.endSession();
     setSession(null);
-    setDoneRooms(new Set());
     setConfirm(null);
     say("순찰 종료됨");
-  };
-
-  // '이 방 완료' — 안 찍은 좌석을 전부 입석(정상)으로 일괄 기록하고 다음 방으로.
-  // 출석앱 패턴: 정상이 기본, 이상한 학생만 탭 → 탭 수 최소화.
-  const finishRoom = () => {
-    if (!room || !session) return;
-    const rest = roomSeats
-      .map((s) => s.current_student_id)
-      .filter((id): id is string => !!id && !marks[id])
-      .map((studentId) => ({ studentId, state: "seated" }));
-    if (rest.length) {
-      setMarks((m) => { const n = { ...m }; for (const r of rest) n[r.studentId] = "seated"; return n; });
-      queueRef.current?.markMany(rest);
-    }
-    setDoneRooms((d) => new Set(d).add(room.id));
-    const next = rooms.findIndex((r, i) => i > roomIdx && !doneRooms.has(r.id));
-    if (next >= 0) { setRoomIdx(next); say(`${room.name} 완료 · 정상 ${rest.length}명`); }
-    else say(`${room.name} 완료 · 모든 방 점검됨`);
   };
 
   // ── 동기화 칩 상태 ──
@@ -256,12 +235,9 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
       <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
         <MobileNav current="/patrol" />
         <div style={{ flex: 1, minWidth: 0, textAlign: "center", lineHeight: 1.25 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-            {session && doneRooms.has(room?.id ?? "") && <span style={{ color: "var(--ok)", fontWeight: 900 }}>✓</span>}
-            <span style={{ fontSize: 16, fontWeight: 800 }}>{room ? `${room.floor}층 ${room.name}` : "방 없음"}</span>
-          </div>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>{room ? `${room.floor}층 ${room.name}` : "방 없음"}</div>
           <div style={{ fontSize: 11, color: "var(--faint)", fontVariantNumeric: "tabular-nums" }}>
-            방 {roomIdx + 1}/{rooms.length}{session ? ` · 완료 ${doneRooms.size}` : ""}
+            방 {roomIdx + 1}/{rooms.length}
           </div>
         </div>
         <button onClick={() => queueRef.current?.flush()} className="chip" style={{ height: 32, flex: "none", color: sync.color, fontWeight: 700 }}>
@@ -322,7 +298,8 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
         )}
       </div>
 
-      {/* ── 하단바: 엄지 존. 순찰 중엔 '이 방 완료'가 주 동작(정상 학생 일괄 처리 + 다음 방) ── */}
+      {/* ── 하단바: 엄지 존. 방 이동 + 순찰 시작/종료 ──
+           찍은 학생만 기록한다(미표시 학생을 자동 입석 처리하지 않는다 — 실제로 확인 안 한 걸 기록에 남기지 않기 위해). */}
       <div style={{ flex: "none", display: "flex", flexDirection: "column", gap: 8, padding: "10px 12px calc(10px + env(safe-area-inset-bottom))", background: "var(--card)", borderTop: "1px solid var(--line)" }}>
         {session && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: "var(--dim)", padding: "0 2px" }}>
@@ -334,14 +311,10 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
           <button className="btn" disabled={roomIdx === 0} onClick={() => setRoomIdx((i) => Math.max(0, i - 1))} style={{ height: 56, flex: "0 0 60px", fontSize: 20 }} aria-label="이전 방">‹</button>
           {!session ? (
             <button className="btn btn-accent" disabled={!canManage} onClick={() => setConfirm("start")} style={{ height: 56, flex: 1, fontSize: 16, fontWeight: 800 }}>순찰 시작</button>
-          ) : doneRooms.has(room?.id ?? "") ? (
-            <button className="btn" onClick={() => setConfirm("end")} style={{ height: 56, flex: 1, fontSize: 15, fontWeight: 800, color: "var(--ok)" }}>
-              ✓ 이 방 완료됨 {doneRooms.size === rooms.length ? "· 순찰 종료하기" : ""}
-            </button>
           ) : (
-            <button className="btn btn-accent" onClick={finishRoom} style={{ height: 56, flex: 1, display: "flex", flexDirection: "column", gap: 1, lineHeight: 1.2 }}>
-              <span style={{ fontSize: 15.5, fontWeight: 800 }}>이 방 완료 ›</span>
-              <span style={{ fontSize: 11, opacity: 0.85 }}>나머지 {roomAssigned - roomMarked}명 정상 처리</span>
+            <button className="btn" onClick={() => setConfirm("end")} style={{ height: 56, flex: 1, background: "var(--ink)", borderColor: "var(--ink)", color: "#fff", display: "flex", flexDirection: "column", gap: 1, lineHeight: 1.2 }}>
+              <span style={{ fontSize: 15.5, fontWeight: 800 }}>순찰 종료</span>
+              <span style={{ fontSize: 11, opacity: 0.8 }}>{roomMarked}/{roomAssigned} 이 방 · 총 {Object.keys(marks).length}명 기록</span>
             </button>
           )}
           <button className="btn" disabled={roomIdx >= rooms.length - 1} onClick={() => setRoomIdx((i) => Math.min(rooms.length - 1, i + 1))} style={{ height: 56, flex: "0 0 60px", fontSize: 20 }} aria-label="다음 방">›</button>

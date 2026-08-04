@@ -105,14 +105,6 @@ export class PatrolQueue {
     void this.flush();
   }
 
-  /** 여러 학생을 한 번에 큐에 넣는다('이 방 완료' 일괄 입석). 전송은 단일 왕복으로 나간다. */
-  markMany(entries: { studentId: string; state: string }[]) {
-    const at = Date.now();
-    for (const e of entries) this.store.marks[e.studentId] = { state: e.state, at };
-    this.save(); this.emit();
-    void this.flush();
-  }
-
   // ── 전송 ──
   async flush() {
     if (this.sending) return;
