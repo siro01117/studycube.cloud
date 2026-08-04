@@ -3,7 +3,7 @@
 // 모바일 순찰 — 한 번에 한 방씩, 터치 팬/핀치줌, 바텀시트 상태 선택, 오프라인 큐.
 // 페이지 스크롤 없는 100dvh 고정 셸 → 크롬 주소창 접힘/펼침 레이아웃 점프 없음.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import Link from "next/link";
+import MobileNav from "../_shared/MobileNav";
 import { PATROL_STATES, PATROL_BY_KEY } from "@/lib/patrol";
 import { SW, SH, xyOf, boundsOf } from "@/lib/seatmap";
 import { PatrolQueue, type QueueStatus } from "@/lib/patrol-queue";
@@ -133,7 +133,8 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
     g.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (g.pts.size === 1) { g.downAt = Date.now(); g.downPos = { x: e.clientX, y: e.clientY }; g.moved = false; g.multi = false; }
     else { g.multi = true; g.prevDist = null; g.prevMid = null; }
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    // 합성 이벤트·마우스에선 활성 포인터가 없어 예외가 난다 → 캡처는 실패해도 무시
+    try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch { /* noop */ }
   };
   const onPointerMove = (e: React.PointerEvent) => {
     const g = gesture.current;
@@ -253,7 +254,7 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
     <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column", background: "var(--bg)", touchAction: "none" }}>
       {/* ── 상단바: 현재 방 타이틀 중앙 (방 전환은 하단 ‹›) ── */}
       <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
-        <Link href="/home" className="chip" style={{ textDecoration: "none", height: 32, flex: "none" }}>‹</Link>
+        <MobileNav current="/patrol" />
         <div style={{ flex: 1, minWidth: 0, textAlign: "center", lineHeight: 1.25 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
             {session && doneRooms.has(room?.id ?? "") && <span style={{ color: "var(--ok)", fontWeight: 900 }}>✓</span>}
@@ -316,11 +317,6 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
           <>
             <div style={{ position: "absolute", top: 8, left: 10, fontSize: 12, fontWeight: 800, color: "var(--sub)", background: "color-mix(in srgb, var(--bg) 80%, transparent)", borderRadius: 8, padding: "4px 9px", pointerEvents: "none" }}>
               {roomMarked}/{roomAssigned} 점검
-            </div>
-            {/* 풀스크린이라 하단 탭이 없다 → 자주 오가는 곳 바로가기 */}
-            <div style={{ position: "absolute", top: 8, right: 10, display: "flex", gap: 6 }}>
-              <Link href="/seat" className="chip" style={{ textDecoration: "none", height: 34, background: "var(--card)", fontWeight: 700 }}>좌석</Link>
-              <Link href="/m/penalty" className="chip" style={{ textDecoration: "none", height: 34, background: "var(--card)", fontWeight: 700 }}>벌점</Link>
             </div>
           </>
         )}

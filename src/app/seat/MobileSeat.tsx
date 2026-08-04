@@ -5,6 +5,7 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import SeatCanvas from "../_shared/SeatCanvas";
+import MobileNav from "../_shared/MobileNav";
 import { SW, xyOf } from "@/lib/seatmap";
 import { checkIn, checkOut } from "../m/seat/attendanceActions";
 
@@ -57,16 +58,12 @@ export default function MobileSeat({ rooms, seats, students, attendance, canAtte
     <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column", background: "var(--bg)" }}>
       {/* 상단: 현재 방 (전환은 하단 ‹ ›) */}
       <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
-        <Link href="/home" className="chip" style={{ textDecoration: "none", height: 34, flex: "none" }}>‹</Link>
+        <MobileNav current="/seat" />
         <div style={{ flex: 1, minWidth: 0, textAlign: "center", lineHeight: 1.25 }}>
           <div style={{ fontSize: 16, fontWeight: 800 }}>{room ? `${room.floor}층 ${room.name}` : "방 없음"}</div>
           <div style={{ fontSize: 11, color: "var(--faint)", fontVariantNumeric: "tabular-nums" }}>방 {roomIdx + 1}/{rooms.length} · 재실 {inCount}/{assigned}</div>
         </div>
-        {/* 이 화면은 풀스크린이라 하단 탭이 없다 → 자주 오가는 곳으로 바로 가는 버튼 */}
-        <div style={{ display: "flex", gap: 6, flex: "none" }}>
-          <Link href="/patrol" className="chip" style={{ textDecoration: "none", height: 34, color: "var(--accent)", fontWeight: 700 }}>순찰</Link>
-          <Link href="/m/penalty" className="chip" style={{ textDecoration: "none", height: 34, fontWeight: 700 }}>벌점</Link>
-        </div>
+        <Link href="/patrol" className="chip" style={{ textDecoration: "none", height: 36, flex: "none", color: "var(--accent)", fontWeight: 700 }}>순찰</Link>
       </div>
 
       <SeatCanvas

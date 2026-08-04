@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getMe, can } from "@/lib/auth";
+import PhoneRedirect from "../_shared/PhoneRedirect";
 import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
 import { weekStartLabel, PENALTY_BY_KEY } from "@/lib/penalty";
@@ -68,6 +69,7 @@ export default async function PenaltyPage() {
 
   return (
     <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <PhoneRedirect to="/penalty" />
       <header style={{ borderBottom: "1px solid var(--line)", background: "var(--card)", flex: "none" }}>
         <div className="px-5 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">

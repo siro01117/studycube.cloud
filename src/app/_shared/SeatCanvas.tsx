@@ -50,7 +50,8 @@ export default function SeatCanvas({ seats, onTap, renderSeat, overlay }: {
     q.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (q.pts.size === 1) { q.downAt = Date.now(); q.downPos = { x: e.clientX, y: e.clientY }; q.moved = false; q.multi = false; }
     else { q.multi = true; q.prevDist = null; q.prevMid = null; }
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    // 합성 이벤트·마우스에선 활성 포인터가 없어 예외가 난다 → 캡처는 실패해도 무시
+    try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch { /* noop */ }
   };
   const move = (e: React.PointerEvent) => {
     const q = g.current;
