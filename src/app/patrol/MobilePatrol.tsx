@@ -40,7 +40,7 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
   const [marks, setMarks] = useState<Record<string, string>>({});         // studentId → state
   const [session, setSession] = useState<{ sessionId: string; startedAt: number } | null>(null);
   const [sheet, setSheet] = useState<MSeat | null>(null);                  // 상태 선택 시트
-  const [confirm, setConfirm] = useState<"start" | "end" | null>(null);
+  const [confirm, setConfirm] = useState<"start" | "end" | "next" | null>(null);
   const [qs, setQs] = useState<QueueStatus>({ pending: 0, sending: false, error: false, ids: [] });
   // 브라우저 온라인 여부는 외부 상태 — useSyncExternalStore 로 구독(SSR 은 온라인 가정)
   const online = useSyncExternalStore(
@@ -207,6 +207,15 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
   const roomMarked = roomSeats.filter((s) => s.current_student_id && marks[s.current_student_id]).length;
   const roomAssigned = roomSeats.filter((s) => s.current_student_id).length;
 
+  // 배정된 학생이 있는데 이번 세션에서 마크가 없는 좌석 — 좌석번호 오름차순.
+  // 오프라인 큐 대기분은 이미 marks 에 즉시 반영되므로(applyMark) 별도 처리 불필요.
+  const uncheckedOf = useCallback((list: MSeat[]) => list
+    .filter((s) => s.current_student_id && !marks[s.current_student_id])
+    .sort((a, b) => (a.number ?? 0) - (b.number ?? 0)),
+  [marks]);
+  const uncheckedRoom = useMemo(() => (session ? uncheckedOf(roomSeats) : []), [session, roomSeats, uncheckedOf]);
+  const uncheckedAll = useMemo(() => (session ? uncheckedOf(seats.filter((s) => s.room_id)) : []), [session, seats, uncheckedOf]);
+
   const doStart = () => {
     const id = crypto.randomUUID();
     queueRef.current?.startSession(id);
@@ -219,6 +228,11 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
     setSession(null);
     setConfirm(null);
     say("순찰 종료됨");
+  };
+  const goNext = () => setRoomIdx((i) => Math.min(rooms.length - 1, i + 1));
+  const handleNext = () => {
+    if (uncheckedRoom.length > 0) { setConfirm("next"); return; }
+    goNext();
   };
 
   // ── 동기화 칩 상태 ──
@@ -317,7 +331,7 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
               <span style={{ fontSize: 11, opacity: 0.8 }}>{roomMarked}/{roomAssigned} 이 방 · 총 {Object.keys(marks).length}명 기록</span>
             </button>
           )}
-          <button className="btn" disabled={roomIdx >= rooms.length - 1} onClick={() => setRoomIdx((i) => Math.min(rooms.length - 1, i + 1))} style={{ height: 56, flex: "0 0 60px", fontSize: 20 }} aria-label="다음 방">›</button>
+          <button className="btn" disabled={roomIdx >= rooms.length - 1} onClick={handleNext} style={{ height: 56, flex: "0 0 60px", fontSize: 20 }} aria-label="다음 방">›</button>
         </div>
       </div>
 
@@ -365,26 +379,44 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
         </>
       )}
 
-      {/* ── 시작/종료 확인 시트 ── */}
-      {confirm && (
-        <>
-          <div onClick={() => setConfirm(null)} style={{ position: "fixed", inset: 0, background: "rgba(10,12,18,.4)", zIndex: 40 }} />
-          <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 41, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "18px 16px calc(16px + env(safe-area-inset-bottom))" }}>
-            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>{confirm === "start" ? "순찰을 시작할까요?" : "순찰을 종료할까요?"}</div>
-            <div style={{ fontSize: 12.5, color: "var(--dim)", marginBottom: 14 }}>
-              {confirm === "start"
-                ? "시작 후 좌석을 탭해 상태를 기록합니다. 통신이 끊겨도 기록은 저장되고 자동 전송됩니다."
-                : `점검 ${Object.keys(marks).length}명 · 누적 벌점 ${tally}점${qs.pending > 0 ? ` · 미전송 ${qs.pending}건은 연결되면 자동 전송` : ""}`}
+      {/* ── 시작/종료/다음방 확인 시트 ── */}
+      {confirm && (() => {
+        const unchecked = confirm === "next" ? uncheckedRoom : confirm === "end" ? uncheckedAll : [];
+        const hasWarn = unchecked.length > 0;
+        const shown = unchecked.slice(0, 12).map((s) => `${s.number ?? s.label}번 ${nameOf.get(s.current_student_id!) ?? ""}`);
+        const rest = unchecked.length - shown.length;
+        const proceed = confirm === "start" ? doStart : confirm === "next" ? goNext : doEnd;
+        const title = confirm === "start" ? "순찰을 시작할까요?"
+          : hasWarn ? `미점검 ${unchecked.length}명`
+          : confirm === "next" ? "다음 방으로 이동할까요?" : "순찰을 종료할까요?";
+        return (
+          <>
+            <div onClick={() => setConfirm(null)} style={{ position: "fixed", inset: 0, background: "rgba(10,12,18,.4)", zIndex: 40 }} />
+            <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 41, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "18px 16px calc(16px + env(safe-area-inset-bottom))" }}>
+              <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>{title}</div>
+              {hasWarn ? (
+                <div style={{ background: "var(--warn-soft)", border: "1px solid var(--warn)", borderRadius: 12, padding: "10px 12px", marginBottom: 14, fontSize: 12.5, color: "var(--ink)", lineHeight: 1.6 }}>
+                  {shown.join(", ")}{rest > 0 ? ` 외 ${rest}명` : ""}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12.5, color: "var(--dim)", marginBottom: 14 }}>
+                  {confirm === "start"
+                    ? "시작 후 좌석을 탭해 상태를 기록합니다. 통신이 끊겨도 기록은 저장되고 자동 전송됩니다."
+                    : confirm === "next"
+                    ? "이 방은 전원 점검되었습니다."
+                    : `점검 ${Object.keys(marks).length}명 · 누적 벌점 ${tally}점${qs.pending > 0 ? ` · 미전송 ${qs.pending}건은 연결되면 자동 전송` : ""}`}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className={hasWarn ? "btn btn-accent" : "btn"} onClick={() => setConfirm(null)} style={{ height: 48, flex: 1, fontWeight: hasWarn ? 800 : 400 }}>{hasWarn ? "돌아가서 확인" : "취소"}</button>
+                <button className={hasWarn ? "btn" : "btn btn-accent"} onClick={proceed} style={{ height: 48, flex: 1, fontWeight: 800 }}>
+                  {hasWarn ? "그대로 진행" : confirm === "start" ? "시작" : confirm === "next" ? "이동" : "종료"}
+                </button>
+              </div>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn" onClick={() => setConfirm(null)} style={{ height: 48, flex: 1 }}>취소</button>
-              <button className="btn btn-accent" onClick={confirm === "start" ? doStart : doEnd} style={{ height: 48, flex: 1, fontWeight: 800 }}>
-                {confirm === "start" ? "시작" : "종료"}
-              </button>
-            </div>
-          </div>
-        </>
-      )}
+          </>
+        );
+      })()}
 
       {toast && (
         <div style={{ position: "fixed", left: "50%", bottom: "calc(90px + env(safe-area-inset-bottom))", transform: "translateX(-50%)", zIndex: 50, background: "var(--ink)", color: "#fff", fontSize: 13, fontWeight: 600, borderRadius: 999, padding: "9px 16px", whiteSpace: "nowrap" }}>

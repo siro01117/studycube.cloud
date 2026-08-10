@@ -11,6 +11,23 @@ const s = (v: FormDataEntryValue | null): string | null => {
   return t.length ? t : null;
 };
 
+// 순찰에서 '입석(seated)'으로 찍힌 학생 → 출결 입실 연동.
+// 그날 마지막 출결 이벤트가 이미 in 이면 no-op(중복 방지). out 이거나 기록이 없을 때만 in 추가.
+// attendance_event 에는 source/note 컬럼이 없어(스키마 변경 금지) auto=true 로 "순찰발 자동 입실"임을 남긴다
+// (수동 checkIn 은 auto=false로 기록되므로 구분 가능).
+async function ensureCheckedInFromPatrol(branchId: string | null, studentId: string, date: string, by: string) {
+  const last = await db.query<{ kind: string }>(
+    `select kind from attendance_event where student_id=$1 and branch_id=$2 and date=$3 order by at desc limit 1`,
+    [studentId, branchId, date],
+  );
+  if (last.rows[0]?.kind === "in") return;
+  await db.query(
+    `insert into attendance_event(branch_id, student_id, kind, auto, date, created_by)
+     values ($1,$2,'in',true,$3,$4)`,
+    [branchId, studentId, date, by],
+  );
+}
+
 // 순찰 상태 원탭 기록. points 는 프리셋에서 스냅샷 → 나중에 프리셋 바꿔도 과거 기록 불변.
 // 한 순찰 세션(sessionId) 안에서는 학생당 상태 1개 → 재탭하면 기존 걸 지우고 교체.
 export async function recordPatrol(formData: FormData) {
@@ -27,6 +44,7 @@ export async function recordPatrol(formData: FormData) {
     [id, me.activeBranchId],
   );
   const seatId = seatRow.rows[0]?.id ?? null;
+  const date = todayStr();
   if (sessionId) {
     // 같은 세션 내 이 학생 기존 기록 제거(교체)
     await db.query(
@@ -37,8 +55,11 @@ export async function recordPatrol(formData: FormData) {
   await db.query(
     `insert into patrol_event(branch_id, student_id, state, points, session_id, seat_id, date, created_by)
      values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-    [me.activeBranchId, id, state, preset.points, sessionId, seatId, todayStr(), me.id],
+    [me.activeBranchId, id, state, preset.points, sessionId, seatId, date, me.id],
   );
+  if (state === "seated") {
+    await ensureCheckedInFromPatrol(me.activeBranchId, id, date, me.id);
+  }
   revalidatePath("/m/seat");
 }
 
@@ -91,6 +112,34 @@ export async function recordPatrolBulk(formData: FormData) {
      values ${values.join(",")}`,
     params,
   );
+
+  // 입석으로 찍힌 학생만 출결 입실 연동 — 학생별 루프 쿼리 없이 조회 1회 + insert 1회로 처리.
+  const seatedIds = ids.filter((id) => byStudent.get(id) === "seated");
+  if (seatedIds.length > 0) {
+    const seatedArr = "{" + seatedIds.join(",") + "}"; // fetch_types:false → 배열은 리터럴 문자열로 전달
+    const lastAtt = await db.query<{ student_id: string; kind: string }>(
+      `select distinct on (student_id) student_id, kind
+         from attendance_event
+        where branch_id=$1 and date=$2 and student_id = any($3::uuid[])
+        order by student_id, at desc`,
+      [me.activeBranchId, date, seatedArr],
+    );
+    const lastKind = new Map(lastAtt.rows.map((r) => [r.student_id, r.kind]));
+    const needCheckIn = seatedIds.filter((id) => lastKind.get(id) !== "in");
+    if (needCheckIn.length > 0) {
+      const attParams: (string | boolean | null)[] = [me.activeBranchId, date, me.id];
+      const attValues = needCheckIn.map((id) => {
+        attParams.push(id);
+        return `($1,$${attParams.length},'in',true,$2,$3)`;
+      });
+      await db.query(
+        `insert into attendance_event(branch_id, student_id, kind, auto, date, created_by)
+         values ${attValues.join(",")}`,
+        attParams,
+      );
+    }
+  }
+
   revalidatePath("/m/seat");
 }
 
@@ -210,6 +259,9 @@ export async function setPatrolMark(formData: FormData) {
      values ($1,$2,$3,$4,$5,$6,$7,$8)`,
     [me.activeBranchId, id, state, preset.points, sessionId, seatId, date, me.id],
   );
+  if (state === "seated") {
+    await ensureCheckedInFromPatrol(me.activeBranchId, id, date, me.id);
+  }
   revalidatePath("/m/patrol");
   revalidatePath("/m/seat");
 }
