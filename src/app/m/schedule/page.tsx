@@ -1,0 +1,55 @@
+import { redirect } from "next/navigation";
+import Link from "next/link";
+import { getMe, can } from "@/lib/auth";
+import { ready } from "@/lib/bootstrap";
+import { db } from "@/lib/db";
+import { todayKey } from "@/lib/date";
+import ScheduleDemo, { type SStudent } from "./ScheduleDemo";
+import type { Period } from "./actions";
+
+export const runtime = "nodejs";
+
+// 학생 스케쥴러 — 학생 명단 + 지점 운영 시간표(교시)를 DB 에서 읽어 넘긴다.
+// 정기·예외 일정 자체는 학생 선택 시 클라이언트가 listSchedule 서버액션으로 불러온다.
+export default async function SchedulePage() {
+  const me = await getMe();
+  if (!me) redirect("/login");
+  if (!can(me, "schedule.view")) redirect("/home");
+  await ready();
+
+  const [students, periodRows] = await Promise.all([
+    db.query<SStudent>(
+      `select s.id, s.name, seat.number as seat_number
+         from student s
+         left join seat on seat.current_student_id = s.id and seat.branch_id = s.branch_id
+        where s.branch_id=$1 and s.status='enrolled'
+        order by seat.number nulls last, s.name`,
+      [me.activeBranchId],
+    ),
+    db.query<{ id: string; label: string; start_min: number; end_min: number; ord: number }>(
+      `select id, label, start_min, end_min, ord from schedule_period where branch_id=$1 order by ord`,
+      [me.activeBranchId],
+    ),
+  ]);
+  const initialPeriods: Period[] = periodRows.rows.map((r) => ({ id: r.id, label: r.label, start: r.start_min, end: r.end_min }));
+
+  return (
+    <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <header style={{ borderBottom: "1px solid var(--line)", background: "var(--card)", flex: "none" }}>
+        <div className="px-5 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Link href="/home" className="chip" style={{ textDecoration: "none" }}>‹ 홈</Link>
+            <span style={{ fontWeight: 700 }}>학생 스케쥴러</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="hide-mobile" style={{ fontSize: 12.5, color: "var(--dim)" }}>
+              학생 {students.rows.length}명
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <ScheduleDemo students={students.rows} today={todayKey()} initialPeriods={initialPeriods} />
+    </main>
+  );
+}

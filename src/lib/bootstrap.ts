@@ -117,7 +117,7 @@ const BOOT_LOCK =
 
 // 스키마·시드 내용이 바뀌면 이 값을 올린다. 그때만 DDL 이 다시 돈다.
 // (schema.modules.ts / CORE_SQL / PERMISSIONS / MODULES 를 수정하면 반드시 갱신)
-const SCHEMA_VERSION = "2026-08-04.1"; // 관리자 계정(irium) 시드 추가
+const SCHEMA_VERSION = "2026-08-11.4"; // 학생 스케쥴러 모듈 이관(schedule_period/rule/exception/hours) + 구방식 자습 블록 정리
 
 /** 이미 이 버전으로 부팅된 DB인지 한 번의 쿼리로 판정 */
 async function alreadyBooted(): Promise<boolean> {
@@ -141,6 +141,10 @@ async function boot() {
   await db.exec(BOOT_LOCK + MODULE_SQL); // 이식된 모듈 테이블
   // 상태 모델 변경(2026-07-20): 퇴원(withdrawn) 폐지 → 휴원(leave)로 통합
   await db.query(`update student set status='leave' where status='withdrawn'`);
+  // 자습은 더 이상 블록으로 저장하지 않는다(등하원 시각 + statusAt 파생 판정으로 대체). 구방식 잔여 행 정리.
+  // 운영 DB 엔 해당 행이 없어 no-op 이지만 dev 와의 일관성을 위해 넣는다.
+  await db.query(`delete from schedule_rule where kind='study'`);
+  await db.query(`delete from schedule_exception where kind='study' and skip_rule_id is null`);
 
   // 권한 카탈로그
   for (const p of PERMISSIONS) {

@@ -15,6 +15,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   seat: "/m/seat",
   patrol: "/m/patrol",
   penalty: "/m/penalty",
+  schedule: "/m/schedule",
 };
 
 export const MODULES: ModuleDef[] = [

@@ -139,4 +139,66 @@ create table if not exists penalty_event(
 );
 create index if not exists idx_penalty_sd on penalty_event(student_id, date);
 create index if not exists idx_penalty_bd on penalty_event(branch_id, date);
+
+-- ================= 학생 스케쥴러 (원 운영 시간표 + 학생별 정기·예외 일정) =================
+-- 원 운영 시간표(교시) — 지점 단위. 학생 화면의 배경 음영 + 자습 일괄생성의 소스.
+create table if not exists schedule_period(
+  id         uuid primary key default gen_random_uuid(),
+  branch_id  uuid not null references branch(id) on delete cascade,
+  label      text not null,
+  start_min  int  not null,
+  end_min    int  not null,
+  ord        int  not null default 0,
+  check (start_min >= 0 and end_min > start_min)
+);
+create index if not exists idx_schedule_period_branch on schedule_period(branch_id);
+
+-- 학생별 정기(매주 반복) 규칙. days=CSV "1,3,5"(1=월..7=일). 자정 넘김은 end_min>=1440(예: 1500=익일 01:00).
+create table if not exists schedule_rule(
+  id         uuid primary key default gen_random_uuid(),
+  branch_id  uuid not null references branch(id) on delete cascade,
+  student_id uuid not null references student(id) on delete cascade,
+  reason     text not null,
+  kind       text not null check (kind in ('study','academy','counsel','absent')),
+  title      text not null default '',
+  start_min  int  not null,
+  end_min    int  not null,
+  days       text not null default '',
+  created_at timestamptz not null default now(),
+  check (start_min >= 0 and end_min > start_min)
+);
+create index if not exists idx_schedule_rule_bs on schedule_rule(branch_id, student_id);
+
+-- 예외(1회성). skip_rule_id 가 있으면 그 날만 해당 정기 규칙을 대체.
+create table if not exists schedule_exception(
+  id           uuid primary key default gen_random_uuid(),
+  branch_id    uuid not null references branch(id) on delete cascade,
+  student_id   uuid not null references student(id) on delete cascade,
+  reason       text not null,
+  kind         text not null check (kind in ('study','academy','counsel','absent')),
+  title        text not null default '',
+  start_min    int  not null,
+  end_min      int  not null,
+  date         date not null,
+  skip_rule_id uuid references schedule_rule(id) on delete set null,
+  created_at   timestamptz not null default now(),
+  check (start_min >= 0 and end_min > start_min)
+);
+create index if not exists idx_schedule_exception_bs on schedule_exception(branch_id, student_id);
+create index if not exists idx_schedule_exception_bd on schedule_exception(branch_id, date);
+
+-- 학생×요일 등원/하원 시각(자습 블록 폐지, 등하원만 저장). 자습은 "다른 일정이 없고 등원~하원 사이"로 파생 판정(src/lib/schedule.ts statusAt).
+-- 자정 넘김은 leave_min>1440 으로 저장(예: 익일 00:30 = 1470).
+create table if not exists schedule_hours(
+  id         uuid primary key default gen_random_uuid(),
+  branch_id  uuid not null references branch(id) on delete cascade,
+  student_id uuid not null references student(id) on delete cascade,
+  day        int  not null check (day between 1 and 7),
+  arrive_min int  not null,
+  leave_min  int  not null,
+  created_at timestamptz not null default now(),
+  check (leave_min > arrive_min),
+  unique(student_id, day)
+);
+create index if not exists idx_schedule_hours_bs on schedule_hours(branch_id, student_id);
 `;
