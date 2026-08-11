@@ -101,13 +101,15 @@ export function ghostStyleOf(state: 'scheduled' | 'study' | 'break' | 'away' | '
 
 /**
  * 순찰 "미점검" 집계(경고·점검 N/M 분모)에서 제외할 학생인지 — 고스트 상태가 없음(스케쥴 정보 자체가
- * scheduleMap 에 없어 ghostOf 에 엔트리가 안 잡힌 경우 = 미설정) 또는 away(등원전/하원)면 제외한다.
- * study(자습)·break(쉬는시간)·scheduled(일정)는 정상 집계 대상(등하원 시간 안에 있으므로 확인이 필요한
- * 학생이다). 제외돼도 탭해서 찍으면 그 기록은 그대로 남는다(이 함수는 집계용일 뿐 입력 자체를 막지
- * 않는다). 모바일(MobilePatrol.tsx)·데스크탑(FloorEditor.tsx) 공용.
+ * scheduleMap 에 없어 ghostOf 에 엔트리가 안 잡힌 경우 = 미설정), away(등원전/하원), 또는
+ * break(쉬는시간)면 제외한다. 쉬는시간은 교시 사이 자리를 비울 수 있는 시간이라 미점검 경고 대상이
+ * 아니다(좌석 표시는 그대로 "쉬는시간" 라벨 유지 — 이 함수는 집계에서만 뺀다).
+ * study(자습)·scheduled(일정)만 정상 집계 대상(실제로 확인이 필요한 학생)이다. 제외돼도 탭해서 찍으면
+ * 그 기록은 그대로 남는다(이 함수는 집계용일 뿐 입력 자체를 막지 않는다).
+ * 모바일(MobilePatrol.tsx)·데스크탑(FloorEditor.tsx) 공용.
  */
 export function isPatrolExempt(state: "scheduled" | "study" | "break" | "away" | "none" | undefined): boolean {
-  return state === undefined || state === "none" || state === "away";
+  return state === undefined || state === "none" || state === "away" || state === "break";
 }
 
 export type BlockStyle = { bg: string; bd: string; fg: string };

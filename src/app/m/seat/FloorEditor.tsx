@@ -577,9 +577,11 @@ export default function FloorEditor({
       .sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
   }, [patrolMode, floorSel, rooms, seats, patrolMarks, ghostOf]);
 
-  // 순찰 툴바 요약 — 점검 N/M · 제외 K명 · 예상 재실 K명 · 미등원 J명(방 단위 배지가 없는 데스크탑 대체).
-  // M(total)·K(exempt)는 고스트 none/away 를 분모에서 뺀 값 — N(marked)은 제외 대상이라도 실제로 찍었으면 포함한다.
-  // present 에는 study·break·scheduled 를 모두 합산한다(등하원 시간 안에 있으므로 "예상 재실").
+  // 순찰 툴바 요약 — 점검 N/M · 제외 K명 · 예상 재실 K명 · 쉬는시간/등원전/미설정 J명(방 단위 배지가 없는
+  // 데스크탑 대체). M(total)·K(exempt)는 고스트 none/away/break 를 분모에서 뺀 값 — N(marked)은 제외
+  // 대상이라도 실제로 찍었으면 포함한다.
+  // present 에는 study·scheduled 만 합산한다(실제로 확인이 필요한 인원). break 는 exempt 로 잡히므로
+  // present 에서 빼고 별도(brk)로 센다 — 각 좌석은 ghost.state 하나에만 속하므로 중복 집계는 없다.
   const patrolSummary = useMemo(() => {
     if (!patrolMode || typeof floorSel !== 'number') return null;
     const roomIds = new Set(rooms.filter((r) => r.floor === floorSel).map((r) => r.id));
@@ -587,7 +589,7 @@ export default function FloorEditor({
     const exempt = floorAssigned.filter((s) => isPatrolExempt(ghostOf.get(s.current_student_id!)?.state)).length;
     const total = floorAssigned.length - exempt;
     const marked = floorAssigned.filter((s) => patrolMarks[s.current_student_id!]).length;
-    let present = 0, away = 0, unset = 0;
+    let present = 0, away = 0, unset = 0, brk = 0;
     if (nowMin != null) {
       for (const s of floorAssigned) {
         const sid = s.current_student_id!;
@@ -595,11 +597,12 @@ export default function FloorEditor({
         if (g) {
           if (g.state === 'away') away++;
           else if (g.state === 'none') unset++;
+          else if (g.state === 'break') brk++;
           else present++;
         }
       }
     }
-    return { marked, total, exempt, present, away, unset };
+    return { marked, total, exempt, present, away, unset, brk };
   }, [patrolMode, floorSel, rooms, seats, nowMin, ghostOf, patrolMarks]);
 
   const roomsOnFloor = (fl: number) => rooms.filter((r) => r.floor === fl);
@@ -1364,6 +1367,7 @@ export default function FloorEditor({
               점검 {patrolSummary.marked}/{patrolSummary.total}
               {patrolSummary.exempt > 0 && <span style={{ color: 'var(--faint)', fontWeight: 700 }}> · 제외 {patrolSummary.exempt}명</span>}
               {patrolSummary.present > 0 && ` · 예상 재실 ${patrolSummary.present}명`}
+              {patrolSummary.brk > 0 && ` · 쉬는시간 ${patrolSummary.brk}명`}
               {patrolSummary.away > 0 && ` · 등원전 ${patrolSummary.away}명`}
               {patrolSummary.unset > 0 && ` · 미설정 ${patrolSummary.unset}명`}
             </span>

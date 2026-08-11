@@ -280,18 +280,20 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
   const roomAssigned = roomSeats.filter((s) => s.current_student_id).length - roomExempt;
 
   // 이 방의 "예상 재실/미등원" 요약 — 스케쥴 정보가 있는 배정 학생만 집계(실제 체크 여부와 무관하게 예상치).
+  // break(쉬는시간)는 isExempt 로 "제외" 쪽에 잡히므로 여기서는 present 에서 빼고 별도로 센다(중복 방지).
   const roomExpected = useMemo(() => {
     if (nowMin == null) return null;
-    let present = 0, away = 0, unset = 0;
+    let present = 0, away = 0, unset = 0, brk = 0;
     for (const s of roomSeats) {
       const sid = s.current_student_id;
       const g = sid ? ghostOf.get(sid) : undefined;
       if (!g) continue;
       if (g.state === "away") away++;
       else if (g.state === "none") unset++;
+      else if (g.state === "break") brk++;
       else present++;
     }
-    return { present, away, unset };
+    return { present, away, unset, brk };
   }, [nowMin, roomSeats, ghostOf]);
 
   // 배정된 학생이 있는데 이번 세션에서 마크가 없는 좌석 — 좌석번호 오름차순.
@@ -477,6 +479,7 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
               {roomExpected && (
                 <>
                   {" · "}예상 재실 {roomExpected.present}명
+                  {roomExpected.brk > 0 && <span style={{ color: "var(--faint)", fontWeight: 700 }}> · 쉬는시간 {roomExpected.brk}명</span>}
                   {roomExpected.away > 0 && <span style={{ color: "var(--faint)", fontWeight: 700 }}> · 등원전 {roomExpected.away}명</span>}
                   {roomExpected.unset > 0 && <span style={{ color: "var(--faint)", fontWeight: 700 }}> · 미설정 {roomExpected.unset}명</span>}
                 </>
