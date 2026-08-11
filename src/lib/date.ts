@@ -42,6 +42,15 @@ export function weekDays(weekStart: string): { key: string; wd: string; dayNum: 
   });
 }
 
+/** timestamptz 문자열 → KST 기준 "HH:MM"(24시간제). 서버에서 미리 포맷해 클라로 내려주기 위함
+ * (클라 렌더에서 new Date()/toLocale* 호출 금지 — 좌석 배치도의 "순찰 20:12 · 자리비움" 같은 title 용). */
+export function timeLabel(at: string): string {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: KST, hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(at));
+  const h = parts.find((p) => p.type === "hour")?.value ?? "00";
+  const m = parts.find((p) => p.type === "minute")?.value ?? "00";
+  return `${h}:${m}`;
+}
+
 /** 주 시작 라벨 "7월 20일 (월)" — KST 날짜 문자열 기준. */
 export function weekStartLabel(key: string): string {
   const [y, m, d] = key.split("-").map(Number);

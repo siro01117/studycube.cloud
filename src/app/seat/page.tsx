@@ -3,8 +3,9 @@ import type { Viewport } from "next";
 import { getMe, can } from "@/lib/auth";
 import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
-import { todayKey } from "@/lib/date";
-import MobileSeat, { type SRoom, type SSeat, type SStudent, type Att } from "./MobileSeat";
+import { todayKey, timeLabel } from "@/lib/date";
+import { PATROL_BY_KEY } from "@/lib/patrol";
+import MobileSeat, { type SRoom, type SSeat, type SStudent, type Att, type LastPatrol } from "./MobileSeat";
 
 export const runtime = "nodejs";
 
@@ -19,7 +20,8 @@ export default async function MobileSeatPage() {
   await ready();
   const branch = me.activeBranchId;
 
-  const [rooms, seats, students, att] = await Promise.all([
+  const today = todayKey();
+  const [rooms, seats, students, att, pat] = await Promise.all([
     db.query<SRoom>(`select id, name, floor from room where branch_id=$1 order by floor, name`, [branch]),
     db.query<SSeat>(
       `select id, room_id, grid_x, grid_y, number, label, current_student_id from seat where branch_id=$1`,
@@ -33,12 +35,26 @@ export default async function MobileSeatPage() {
       `select distinct on (student_id) student_id, kind
          from attendance_event where branch_id=$1 and date=$2
          order by student_id, at desc`,
-      [branch, todayKey()],
+      [branch, today],
+    ),
+    // 오늘 학생별 마지막 순찰 기록 — 지점 전체 1쿼리(학생별 루프 없음). 좌석 재실/부재 표시가
+    // attendance 보다 이걸 우선한다(없으면 attendance 폴백, MobileSeat.tsx 참고).
+    db.query<{ student_id: string; state: string; at: string }>(
+      `select distinct on (student_id) student_id, state, at::text as at
+         from patrol_event where branch_id=$1 and date=$2
+         order by student_id, at desc`,
+      [branch, today],
     ),
   ]);
 
   const attendance: Record<string, Att> = {};
   for (const r of att.rows) attendance[r.student_id] = r.kind === "in" ? "in" : "out";
+  const lastPatrol: Record<string, LastPatrol> = {};
+  for (const r of pat.rows) {
+    const cfg = PATROL_BY_KEY[r.state];
+    const asIn = cfg?.asIn ?? true;
+    lastPatrol[r.student_id] = { asIn, atLabel: `순찰 ${timeLabel(r.at)} · ${cfg?.label ?? r.state} · ${asIn ? "입실 간주" : "퇴실 간주"}` };
+  }
 
   return (
     <MobileSeat
@@ -46,6 +62,7 @@ export default async function MobileSeatPage() {
       seats={seats.rows}
       students={students.rows}
       attendance={attendance}
+      lastPatrol={lastPatrol}
       canAttend={can(me, "attendance.edit")}
     />
   );

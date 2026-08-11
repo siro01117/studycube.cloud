@@ -280,6 +280,85 @@ export async function clearPatrolMark(formData: FormData) {
   revalidatePath("/m/seat");
 }
 
+// 미종료 순찰 세션 조회 (모바일 "이어하기") — 지점당 최신 1건.
+// 12시간 넘게 방치된 세션은 이어하기 대상에서 제외하고 조용히 종료 처리한다
+// (ended_at = 마지막 patrol_event 시각, 없으면 started_at). 자동 종료는 여기서만 일어난다.
+//
+// 미종료 세션이 최신 1건보다 더 있으면(중복 시작 레이스·과거 예외 등으로 발생 가능) 그 낡은 것들은
+// 나이와 무관하게 여기서 함께 정리한다 — 그러지 않으면 최신 세션 뒤에 가려져 영영 "진행중"으로
+// 순찰 기록에 남는다(이어하기는 항상 최신 1건만 대상으로 하므로 그 뒤의 것들은 다시는 조회되지 않음).
+export type OpenPatrolSession = {
+  sessionId: string;
+  startedByName: string;
+  markedCount: number;
+  dayLabel: string;   // "오늘" | "8월 10일" — 서버에서 포맷(하이드레이션 불일치 방지)
+  timeLabel: string;  // "19:40"
+  lastLabel: string | null; // "20:12" | 기록 없으면 null
+};
+const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
+
+export async function getOpenPatrolSession(): Promise<OpenPatrolSession | null> {
+  const me = await guard("patrol.view");
+  // raw = 오프셋 포함 텍스트(::text, 예 "...+00") — Date.parse 로 절대 시각을 안전하게 얻어 age 계산·
+  // ended_at 재기록(::timestamptz)에 쓴다. kst = 'Asia/Seoul' 로 명시 변환한 오프셋 없는 텍스트 —
+  // 화면 표시 전용(다시 timestamptz 로 캐스팅하지 않는다: 오프셋이 없으면 DB 세션 타임존 기준으로
+  // 재해석돼 배포 환경(기본 UTC)에서 값이 틀어진다). date.ts 의 todayKey() 와 같은 이유로 DB 세션
+  // 타임존(배포 Postgres는 기본 UTC)에 기대지 않는다.
+  const r = await db.query<{
+    id: string; started_at: string; started_at_kst: string; started_by_name: string | null;
+    marked: number; last_at: string | null; last_at_kst: string | null;
+  }>(
+    `select ps.id, ps.started_at::text as started_at,
+            (ps.started_at at time zone 'Asia/Seoul')::text as started_at_kst,
+            p.name as started_by_name, count(pe.id)::int as marked,
+            max(pe.at)::text as last_at,
+            (max(pe.at) at time zone 'Asia/Seoul')::text as last_at_kst
+       from patrol_session ps
+       left join person p on p.id = ps.created_by
+       left join patrol_event pe on pe.session_id = ps.id
+      where ps.branch_id=$1 and ps.ended_at is null
+      group by ps.id, p.name
+      order by ps.started_at desc`,
+    [me.activeBranchId],
+  );
+  const [row, ...stale] = r.rows;
+  if (!row) return null;
+
+  // 최신 1건을 제외한 나머지 미종료 세션은 여기서 곧바로 정리(그 세션의 마지막 기록 시각, 없으면 시작 시각).
+  for (const s of stale) {
+    const endAt = s.last_at ?? s.started_at;
+    await db.query(
+      `update patrol_session set ended_at=$1::timestamptz where id=$2 and branch_id=$3 and ended_at is null`,
+      [endAt, s.id, me.activeBranchId],
+    );
+  }
+
+  const startedMs = Date.parse(row.started_at);
+  const ageMs = Number.isFinite(startedMs) ? Date.now() - startedMs : Infinity;
+  if (ageMs > TWELVE_HOURS_MS) {
+    // 오래 방치된 세션 — 조용히 종료 처리(로그 없음), 이어하기 대상에서 제외
+    const endAt = row.last_at ?? row.started_at;
+    await db.query(
+      `update patrol_session set ended_at=$1::timestamptz where id=$2 and branch_id=$3 and ended_at is null`,
+      [endAt, row.id, me.activeBranchId],
+    );
+    return null;
+  }
+
+  const today = todayStr();
+  const day = row.started_at_kst.slice(0, 10);
+  const time = row.started_at_kst.slice(11, 16);
+  const [, mo, da] = day.split("-");
+  return {
+    sessionId: row.id,
+    startedByName: row.started_by_name ?? "알 수 없음",
+    markedCount: row.marked,
+    dayLabel: day === today ? "오늘" : `${Number(mo)}월 ${Number(da)}일`,
+    timeLabel: time,
+    lastLabel: row.last_at_kst ? row.last_at_kst.slice(11, 16) : null,
+  };
+}
+
 // 특정 학생·날짜 순찰 기록 (팝업용)
 export async function getPatrolEvents(studentId: string, date: string) {
   const me = await guard("patrol.view");

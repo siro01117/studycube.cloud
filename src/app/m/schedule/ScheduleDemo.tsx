@@ -8,20 +8,19 @@ import {
   type Period, type Rule, type Exc, type Kind, type Hours,
 } from "./actions";
 import { importFromSheet, type ImportResult } from "./importActions";
+import { blockStyleOf } from "@/lib/schedule";
 
-export type SStudent = { id: string; name: string; seat_number: number | null };
+// hoursCount: 등하원(schedule_hours) 행 개수 — page.tsx 에서 지점 전체를 한 번에 집계해 내려준다.
+export type SStudent = { id: string; name: string; seat_number: number | null; hoursCount: number };
 
 const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 const START = 7 * 60, END = 25 * 60, STEP = 30, ROW = 28;
 const SLOTS = (END - START) / STEP;
 const SCROLL_TO_HOUR = 14; // 최초 진입 시 스크롤 기준 시각
 
-const KIND: Record<Kind, { label: string; bg: string; bd: string; fg: string }> = {
-  study:   { label: "자습",     bg: "var(--ok-soft)",     bd: "rgba(18,184,134,.45)",  fg: "#0b7a5a" },
-  academy: { label: "학원",     bg: "var(--warn-soft)",   bd: "rgba(245,158,11,.5)",   fg: "#b45309" },
-  counsel: { label: "상담",     bg: "var(--accent-soft)", bd: "rgba(79,70,229,.4)",    fg: "var(--accent)" },
-  absent:  { label: "사유결석", bg: "#fbe9f2",            bd: "rgba(215,85,144,.4)",   fg: "var(--danger)" },
-};
+// 행 종류(kind)별 색은 더 이상 여기서 따로 정의하지 않는다 — kind 는 "외부 학원"과 "원내 수업"을
+// 둘 다 academy 로 묶어버려 구분이 안 됐던 원인이라, 테이블·팝오버 칩 색도 실제 사유(reason) 기준인
+// blockStyleOf() 를 그대로 쓴다(위 타임테이블 블록과 같은 계산 — 화면 전체가 한 색 체계로 통일됨).
 const fmt = (m: number) => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
 /** 24:00 이상(익일 표시 범위)을 00:00/01:00 처럼 실제 시계 표기로 감싼다. */
 const fmtClock = (m: number) => fmt(((m % 1440) + 1440) % 1440);
@@ -103,7 +102,7 @@ function Sel({ style, wrapStyle, onFocus, onBlur, children, ...rest }: SelProps)
 // 하단 슬롯형 입력 바로 자유 텍스트 파싱 없이 넣고, 겹침은 모달로 명시적으로 처리한다.
 
 type Sched = { rules: Rule[]; excs: Exc[]; hours: Hours[] };
-type DBlock = { id: string; day: number; start: number; end: number; kind: Kind; title: string; ruleId?: string; excId?: string; isExc?: boolean };
+type DBlock = { id: string; day: number; start: number; end: number; kind: Kind; reason: string; title: string; ruleId?: string; excId?: string; isExc?: boolean };
 
 // 자리 비움 사유 처리용 — 자습을 제외한 고정 5종만 둔다(자습은 등하원에서 파생되는 상태라 더 이상 블록으로 저장하지 않음).
 // 각 사유는 색상 계열(Kind)에 매핑된다.
@@ -148,7 +147,7 @@ function expandWeek(sched: Sched, weekStart: string): DBlock[] {
     for (const r of sched.rules) {
       if (!r.days.includes(dnum)) continue;
       if (sched.excs.some((e) => e.skipRuleId === r.id && e.date === iso)) continue;
-      out.push({ id: uid(), day: d, start: r.start, end: r.end, kind: r.kind, title: dispTitle(r.title, r.reason), ruleId: r.id });
+      out.push({ id: uid(), day: d, start: r.start, end: r.end, kind: r.kind, reason: r.reason, title: dispTitle(r.title, r.reason), ruleId: r.id });
     }
   }
   for (const e of sched.excs) {
@@ -156,7 +155,7 @@ function expandWeek(sched: Sched, weekStart: string): DBlock[] {
     if (e.skipRuleId && e.kind === "study" && e.reason === "자습" && !e.title.trim()) continue;
     const d = dateToDayIdx(e.date, weekStart);
     if (d == null) continue;
-    out.push({ id: uid(), day: d, start: e.start, end: e.end, kind: e.kind, title: dispTitle(e.title, e.reason), excId: e.id, isExc: true });
+    out.push({ id: uid(), day: d, start: e.start, end: e.end, kind: e.kind, reason: e.reason, title: dispTitle(e.title, e.reason), excId: e.id, isExc: true });
   }
   return out;
 }
@@ -280,6 +279,16 @@ function IconSearch() {
     <svg {...iconBase}>
       <circle cx="7" cy="7" r="4.5" />
       <path d="M13.5 13.5l-3-3" />
+    </svg>
+  );
+}
+/** 등하원 시간 미설정 경고 — 원 안 느낌표, 14px 고정(iconBase 의 16px 과 별도). */
+function IconWarn() {
+  return (
+    <svg viewBox="0 0 16 16" width={14} height={14} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--warn)" }}>
+      <circle cx="8" cy="8" r="6" />
+      <path d="M8 5.2v3.4" />
+      <circle cx="8" cy="10.8" r="0.9" fill="currentColor" stroke="none" />
     </svg>
   );
 }
@@ -520,6 +529,17 @@ export default function ScheduleDemo({ students, today, initialPeriods }: { stud
     return t ? students.filter((s) => s.name.includes(t) || String(s.seat_number ?? "").includes(t)) : students;
   }, [students, q]);
 
+  // 등하원 미설정 판정 — page.tsx 가 내려준 서버 집계(hoursCount)를 기본값으로 쓰되, 이미 이 세션에서
+  // listSchedule 로 로드했거나(선택/이전 선택 학생) 낙관적으로 갱신한 학생은 실제 hours 배열 길이를 우선한다
+  // (등하원 저장·해제·엑셀 임포트 직후 목록이 서버 재조회 없이 즉시 갱신되도록).
+  const baseHoursCount = useMemo(() => new Map(students.map((s) => [s.id, s.hoursCount])), [students]);
+  const hoursCountFor = (id: string) => schedByStudent[id]?.hours.length ?? baseHoursCount.get(id) ?? 0;
+  const unsetCount = useMemo(
+    () => students.reduce((acc, s) => acc + (hoursCountFor(s.id) === 0 ? 1 : 0), 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [students, schedByStudent, baseHoursCount],
+  );
+
   const startMin = useMemo(() => normTime(startRaw), [startRaw]);
   const endMinRaw = useMemo(() => normTime(endRaw), [endRaw]);
   const endMin = useMemo(() => (startMin != null && endMinRaw != null ? normOvernight(startMin, endMinRaw) : endMinRaw), [startMin, endMinRaw]);
@@ -749,19 +769,26 @@ export default function ScheduleDemo({ students, today, initialPeriods }: { stud
               <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "var(--dim)" }}><IconSearch /></span>
               <Inp value={q} onChange={(e) => setQ(e.target.value)} placeholder="이름 · 좌석" style={{ height: 36, fontSize: 12.5, paddingLeft: 32, width: "100%" }} />
             </div>
+            {unsetCount > 0 && (
+              <div style={{ fontSize: 11, color: "var(--warn)", fontWeight: 700, marginTop: 5, padding: "0 2px" }}>미설정 {unsetCount}명</div>
+            )}
           </div>
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 7px 9px", display: "flex", flexDirection: "column", gap: 2 }}>
             {shown.map((s) => {
               const on = !showOpsView && s.id === dsid;
               const n = schedByStudent[s.id]?.rules.length ?? 0;
+              const hoursUnset = hoursCountFor(s.id) === 0;
               return (
                 <button key={s.id} onClick={() => { setDsid(s.id); setShowOpsView(false); }}
                   style={{ display: "grid", gridTemplateColumns: "44px 1fr", alignItems: "center", columnGap: 10, padding: "7px 9px", borderRadius: 9, cursor: "pointer", textAlign: "left",
                     border: `1px solid ${on ? "var(--accent)" : "transparent"}`, background: on ? "var(--accent-soft)" : "transparent" }}>
                   <span style={{ fontSize: 12.5, color: "var(--sub)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{s.seat_number != null ? s.seat_number : "–"}</span>
-                  <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, minWidth: 0 }}>
-                    <span style={{ fontSize: 14.5, fontWeight: on ? 800 : 600, color: on ? "var(--accent)" : "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
-                    {n > 0 && <span style={{ flex: "none", fontSize: 10, fontWeight: 700, color: "var(--sub)", background: "var(--card)", border: "1px solid var(--line)", borderRadius: 999, padding: "1px 6px" }}>{n}</span>}
+                  <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: 14.5, fontWeight: on ? 800 : 600, color: on ? "var(--accent)" : "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
+                    <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 4 }}>
+                      {hoursUnset && <span title="등하원 시간 미설정" style={{ display: "inline-flex" }}><IconWarn /></span>}
+                      {n > 0 && <span style={{ fontSize: 10, fontWeight: 700, color: "var(--sub)", background: "var(--card)", border: "1px solid var(--line)", borderRadius: 999, padding: "1px 6px" }}>{n}</span>}
+                    </span>
                   </span>
                 </button>
               );
@@ -891,21 +918,23 @@ export default function ScheduleDemo({ students, today, initialPeriods }: { stud
                             {arrTop > 0 && <div style={{ position: "absolute", left: 0, right: 0, top: 0, height: arrTop, background: "var(--panel2)", opacity: 0.6, pointerEvents: "none" }} />}
                             {lvTop < colH && <div style={{ position: "absolute", left: 0, right: 0, top: lvTop, bottom: 0, background: "var(--panel2)", opacity: 0.6, pointerEvents: "none" }} />}
                             <div style={{ position: "absolute", left: 0, right: 0, top: arrTop, height: 0, borderTop: "1.5px solid var(--sub)", pointerEvents: "none" }} />
-                            <span style={{ position: "absolute", left: 3, top: arrTop, transform: "translateY(2px)", fontSize: 9.5, fontWeight: 700, color: "var(--sub)", whiteSpace: "nowrap", pointerEvents: "none" }}>
+                            <span style={{ position: "absolute", left: 3, top: arrTop, transform: "translateY(2px)", fontSize: 9.5, fontWeight: 700, color: "var(--sub)", whiteSpace: "nowrap", pointerEvents: "none",
+                              zIndex: 3, background: "var(--panel2)", borderRadius: 4, padding: "0 3px" }}>
                               {narrowCols ? fmtClock(dh.arrive_min) : `등원 ${fmtClock(dh.arrive_min)}`}
                             </span>
                             <div style={{ position: "absolute", left: 0, right: 0, top: lvTop, height: 0, borderTop: "1.5px solid var(--sub)", pointerEvents: "none" }} />
-                            <span style={{ position: "absolute", left: 3, top: lvTop, transform: "translateY(-100%)", fontSize: 9.5, fontWeight: 700, color: "var(--sub)", whiteSpace: "nowrap", pointerEvents: "none" }}>
+                            <span style={{ position: "absolute", left: 3, top: lvTop, transform: "translateY(-100%)", fontSize: 9.5, fontWeight: 700, color: "var(--sub)", whiteSpace: "nowrap", pointerEvents: "none",
+                              zIndex: 3, background: "var(--panel2)", borderRadius: 4, padding: "0 3px" }}>
                               {narrowCols ? fmtClock(dh.leave_min) : `하원 ${fmtClock(dh.leave_min)}`}
                             </span>
                           </>
                         )}
                         {dayBlocks.map((b) => {
-                          const k = KIND[b.kind];
+                          const c = blockStyleOf(b.reason);
                           const w = 100 / b.cols;
                           const blockH = hPx(b.start, b.end, rowH) - 3;
-                          const showTitle = blockH >= 26;
-                          const showTime = blockH >= 40;
+                          const showTitle = blockH >= 30;
+                          const showTime = blockH >= 50;
                           const isNow = isCurrentWeek && isToday && nowGridMin != null && nowGridMin >= b.start && nowGridMin < b.end;
                           const isSibling = !isNow && !!(b.ruleId && activeRuleId && b.ruleId === activeRuleId);
                           const emph = isNow || isSibling; // 지금 > 형제 강조. 오늘 열 테두리(위 border)는 별도로 항상 유지.
@@ -918,17 +947,17 @@ export default function ScheduleDemo({ students, today, initialPeriods }: { stud
                               onMouseLeave={() => setHoverRuleId((cur) => (cur === b.ruleId ? null : cur))}
                               style={{ position: "absolute", left: `calc(${b.col * w}% + 2px)`, width: `calc(${w}% - 4px)`,
                                 top: yPx(b.start, rowH), height: blockH, zIndex: isNow ? 4 : 2, boxSizing: "border-box",
-                                borderRadius: 7, padding: "3px 6px", overflow: "hidden", lineHeight: 1.25,
+                                borderRadius: 7, padding: "4px 6px", overflow: "hidden", lineHeight: 1.4,
                                 cursor: "pointer",
-                                background: emph ? "var(--accent-soft)" : k.bg,
-                                border: `${emph ? 1.5 : 1}px ${b.isExc ? "dashed" : "solid"} ${emph ? "color-mix(in srgb, var(--accent) 65%, transparent)" : k.bd}`,
-                                color: k.fg, boxShadow: isNow ? "0 0 0 1px var(--accent), var(--shadow)" : "var(--shadow)" }}>
+                                background: emph ? "var(--accent-soft)" : c.bg,
+                                border: `${emph ? 1.5 : 1}px ${b.isExc ? "dashed" : "solid"} ${emph ? "color-mix(in srgb, var(--accent) 65%, transparent)" : c.bd}`,
+                                color: c.fg, boxShadow: isNow ? "0 0 0 1px var(--accent), var(--shadow)" : "var(--shadow)" }}>
                               {b.isExc && <span style={{ position: "absolute", top: 1, right: 3, fontSize: 8.5, fontWeight: 800, opacity: 0.75 }}>임시 일정</span>}
                               {isNow && showTitle && <span style={{ position: "absolute", top: 1, left: 4, fontSize: 8.5, fontWeight: 800, color: "#fff", background: "var(--accent)", borderRadius: 3, padding: "0 4px" }}>지금</span>}
                               {showTitle && (
                                 <>
-                                  <div style={{ paddingRight: b.isExc ? 20 : 0, paddingTop: isNow ? 11 : 0, fontSize: 14.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.title}</div>
-                                  {showTime && <div style={{ marginTop: 2, fontSize: 12, fontWeight: 600, opacity: 0.75, fontVariantNumeric: "tabular-nums", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtClock(b.start)}–{fmtClock(b.end)}</div>}
+                                  <div style={{ paddingRight: b.isExc ? 20 : 0, paddingTop: isNow ? 12 : 0, fontSize: 14.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.title}</div>
+                                  {showTime && <div style={{ marginTop: 4, fontSize: 12, fontWeight: 600, opacity: 0.75, fontVariantNumeric: "tabular-nums", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtClock(b.start)}–{fmtClock(b.end)}</div>}
                                 </>
                               )}
                             </div>
@@ -988,7 +1017,7 @@ export default function ScheduleDemo({ students, today, initialPeriods }: { stud
                     <tbody>
                       {sched.rules.map((r) => {
                         const editing = editRuleId === r.id;
-                        const k = KIND[r.kind];
+                        const k = blockStyleOf(r.reason);
                         return editing && editDraft ? (
                           <tr key={r.id}>
                             <td style={thtd}><span style={{ ...kchip, background: k.bg, border: `1px solid ${k.bd}`, color: k.fg }}>{r.reason}</span></td>
@@ -1069,7 +1098,7 @@ export default function ScheduleDemo({ students, today, initialPeriods }: { stud
                     </thead>
                     <tbody>
                       {[...sched.excs].sort((a, b) => a.date.localeCompare(b.date)).map((e) => {
-                        const k = KIND[e.kind];
+                        const k = blockStyleOf(e.reason);
                         const past = e.date < today;
                         const target = e.skipRuleId ? sched.rules.find((r) => r.id === e.skipRuleId) : undefined;
                         return (
@@ -1333,8 +1362,8 @@ export default function ScheduleDemo({ students, today, initialPeriods }: { stud
 
       {/* 블록 팝오버 */}
       {pop && (() => {
-        const k = KIND[pop.block.kind];
         const reason = popRule?.reason ?? popExc?.reason ?? pop.block.kind;
+        const k = blockStyleOf(reason);
         const memo = (popRule?.title ?? popExc?.title ?? "").trim();
         const excDow = popExc ? DAYS[dateToDayIdx(popExc.date, mondayOf(popExc.date)) ?? pop.block.day] : null;
         const daysLabel = popRule ? popRule.days.map((d) => DAYS[d - 1]).join("·") : popExc ? `${popExc.date} (${excDow})` : "";

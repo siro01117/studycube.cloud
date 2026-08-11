@@ -17,8 +17,8 @@ export default async function SchedulePage() {
   if (!can(me, "schedule.view")) redirect("/home");
   await ready();
 
-  const [students, periodRows] = await Promise.all([
-    db.query<SStudent>(
+  const [studentRows, periodRows, hoursCountRows] = await Promise.all([
+    db.query<{ id: string; name: string; seat_number: number | null }>(
       `select s.id, s.name, seat.number as seat_number
          from student s
          left join seat on seat.current_student_id = s.id and seat.branch_id = s.branch_id
@@ -30,7 +30,14 @@ export default async function SchedulePage() {
       `select id, label, start_min, end_min, ord from schedule_period where branch_id=$1 order by ord`,
       [me.activeBranchId],
     ),
+    // 학생별 등하원 설정 여부 판정용 — 학생마다 개별 쿼리 대신 지점 전체를 한 번에 집계한다.
+    db.query<{ student_id: string; cnt: number }>(
+      `select student_id, count(*)::int as cnt from schedule_hours where branch_id=$1 group by student_id`,
+      [me.activeBranchId],
+    ),
   ]);
+  const hoursCountOf = new Map(hoursCountRows.rows.map((r) => [r.student_id, r.cnt]));
+  const students: SStudent[] = studentRows.rows.map((r) => ({ ...r, hoursCount: hoursCountOf.get(r.id) ?? 0 }));
   const initialPeriods: Period[] = periodRows.rows.map((r) => ({ id: r.id, label: r.label, start: r.start_min, end: r.end_min }));
 
   return (
@@ -43,13 +50,13 @@ export default async function SchedulePage() {
           </div>
           <div className="flex items-center gap-3">
             <div className="hide-mobile" style={{ fontSize: 12.5, color: "var(--dim)" }}>
-              학생 {students.rows.length}명
+              학생 {students.length}명
             </div>
           </div>
         </div>
       </header>
 
-      <ScheduleDemo students={students.rows} today={todayKey()} initialPeriods={initialPeriods} />
+      <ScheduleDemo students={students} today={todayKey()} initialPeriods={initialPeriods} />
     </main>
   );
 }

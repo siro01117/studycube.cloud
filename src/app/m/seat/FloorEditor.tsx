@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
 import {
   saveSeatPositions, updateSeat, removeSeat, assignSeat, releaseSeat,
@@ -12,8 +12,10 @@ import StudentPopup from '../_shared/StudentPopup';
 import ContextMenu, { type MenuItem } from '../_shared/ContextMenu';
 import { useLongPress } from '../_shared/useLongPress';
 import Link from 'next/link';
-import { recordPatrol, clearPatrolMark, startPatrol, endPatrol } from './patrolActions';
+import { recordPatrol, clearPatrolMark, startPatrol, endPatrol, getPatrolSessionDetail, type OpenPatrolSession } from './patrolActions';
 import { PATROL_STATES, PATROL_BY_KEY } from '@/lib/patrol';
+import { statusAt, upcomingAt, ghostStyleOf, reasonColor, isPatrolExempt, type DaySlot } from '@/lib/schedule';
+import { tint, line, ink } from '@/lib/semantic-color';
 
 // ---------------- types ----------------
 export type Room = { id: string; name: string; floor: number; cols: number; rows: number; pos_x: number; pos_y: number; door_side: string | null };
@@ -44,7 +46,39 @@ const FACE_LABEL: Record<string, string> = { down: '↓ 아래', up: '↑ 위', 
 const SEAT_STATUS: Record<string, string> = { empty: '공석', occupied: '사용중', maintenance: '점검' };
 
 // ---------------- 순찰(오늘 마지막 상태 + 벌점 합계) ----------------
-export type PatrolInfo = { state: string; points: number };
+// asIn/atLabel 은 page.tsx 에서 서버 계산해 내려준다(asIn = PATROL_BY_KEY[state].asIn,
+// atLabel = "순찰 20:12 · 자리비움 · 퇴실 간주" 같은 title 문구 — 클라에서 new Date()/toLocale* 호출 금지 원칙).
+// 평상시(순찰 모드 아님) 좌석 배치도의 재실/부재 표시가 이 값을 attendance 보다 우선한다(없으면 attendance 폴백).
+export type PatrolInfo = { state: string; points: number; asIn: boolean; atLabel: string };
+// 이번 순찰 세션 중에 클라에서 찍은 마크 — 서버 계산 필드(asIn/atLabel) 없이 state/points 만 즉시 반영된다.
+// PatrolInfo(오늘 마지막 기록 전체)와는 목적이 달라 별도 타입으로 둔다.
+type PatrolMark = { state: string; points: number };
+
+// ---------------- 스케쥴 고스트(오늘 요일 기준 학생별 파생 정보) ----------------
+// page.tsx 에서 branch 전체를 3개 쿼리로 읽어 memory join(모바일 순찰 page.tsx 와 동일 패턴).
+// hours 도 slots 도 없으면(=이 학생은 스케쥴 정보가 아예 없음) 고스트를 그리지 않는다.
+export type ScheduleInfo = { hours: { arrive_min: number; leave_min: number } | null; slots: DaySlot[] };
+type Ghost = { state: 'scheduled' | 'study' | 'away' | 'none'; label: string; slot?: DaySlot };
+type Upcoming = { inMin: number; slot: DaySlot };
+
+// 임박 일정 미리 알림 — 이 분 이내에 시작하는 일정만 보조 라벨로 보여준다.
+const UPCOMING_WITHIN_MIN = 60;
+const UPCOMING_SOON_MIN = 10; // 이 이하로 남으면 강조(warn) 색 + "곧 이동" 집계
+// 좌석이 이 높이 미만이면 보조 라벨(세 번째 줄)은 생략하고 title 로만 남긴다.
+const MIN_SEAT_H_FOR_SUBLABEL = 60;
+// scheduled 상태 예상 표시 색 · 배경/스트립/흐림 계산은 src/lib/schedule.ts 의 REASON_SEMANTIC/ghostStyleOf/reasonColor
+// (모바일 MobilePatrol.tsx 와 공용 — 계산이 갈리지 않도록 여기서 재정의하지 않는다).
+
+// KST 기준 분(minute-of-day) 계산 — new Date() 호출은 반드시 useEffect/이벤트 핸들러 안에서만 이 함수를 통해.
+function kstNowMin(): number {
+  const d = new Date();
+  return (d.getUTCHours() * 60 + d.getUTCMinutes() + 540) % 1440;
+}
+// nowMin(분) → "HH:MM" — 순수 포맷팅, Date 미사용.
+function fmtHM(min: number): string {
+  const h = Math.floor(min / 60) % 24, m = min % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
 
 // 순찰 경과 시간 — 자체 타이머를 갖는 독립 컴포넌트. 매초 이 작은 조각만 리렌더되고
 // 부모(FloorEditor)와 좌석 90개는 건드리지 않는다.
@@ -65,9 +99,10 @@ function PatrolElapsed({ startedAt }: { startedAt: number | null }) {
 // ---------------- 출결(입·퇴실 상태 = 오늘 마지막 이벤트) ----------------
 export type AttInfo = 'in' | 'out';
 const ATT_LABEL: Record<AttInfo, string> = { in: '재실', out: '하원' };
+// 재실(in) = 순찰 '입석'/스케쥴 '자습'과 같은 의미 → SEMANTIC.present 재사용. 하원(out)은 무채색(none).
 const ATT_COLOR: Record<AttInfo, { bg: string; bd: string }> = {
-  in: { bg: 'rgba(18,184,134,.15)', bd: 'rgba(18,184,134,.55)' },
-  out: { bg: 'rgba(120,130,150,.12)', bd: 'rgba(120,130,150,.4)' },
+  in: { bg: tint('present', 15), bd: line('present', 55) },
+  out: { bg: tint('none', 12), bd: line('none', 40) },
 };
 
 // 대시보드 통계 타일 — 순수 프레젠테이션. 모듈 스코프에 두어 리렌더마다 재마운트 방지.
@@ -136,13 +171,272 @@ const I_GEAR = 'M4 8h10M18 8h2M4 16h2M10 16h10M14 6v4M8 14v4'; // 슬라이더�
 const I_PATROL = 'M12 3l7 3v5c0 4-3 7-7 8-4-1-7-4-7-8V6z'; // 방패(순찰)
 const I_CLOCK = 'M12 21a9 9 0 110-18 9 9 0 010 18M12 8v4l3 2'; // 시계(순찰 기록)
 
+// ---------------- 좌석 프레젠테이션 헬퍼 (state 미사용 → 모듈 스코프) ----------------
+// 조건부로 바뀌는 색은 항상 개별 속성(borderColor/backgroundColor/opacity)으로 통일한다 — border/background
+// 축약형과 섞으면 React 의 style diff 가 "사라진 속성" 을 축약형이 다시 채워주기 전에 지워버려(clear 가
+// 먼저, 값 적용이 나중) 렌더가 이전 값으로 눌어붙거나 깨진다(과거에도 같은 원인으로 경고가 났던 패턴).
+// opacity 도 기본값을 항상 갖고 있어야 같은 이유로 "적용 안 됨" 현상이 재발하지 않는다.
+// 좌석 테두리 두께·라운드 — 고스트 좌측 스트립을 테두리 안쪽으로 들일 때도 이 값을 참조한다(하드코딩 금지).
+const SEAT_BORDER_W = 1.5;
+const SEAT_RADIUS = 12;
+const seatStyle = (status: string, sel: boolean, editable: boolean): CSSProperties => ({
+  position: 'absolute', width: SW, height: SH, borderRadius: SEAT_RADIUS,
+  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
+  userSelect: 'none', padding: 2,
+  borderWidth: SEAT_BORDER_W, borderStyle: 'solid',
+  borderColor: sel ? 'var(--accent)' : status === 'occupied' ? 'rgba(91,141,239,.5)' : status === 'maintenance' ? 'rgba(201,138,43,.5)' : 'var(--line)',
+  backgroundColor: status === 'occupied' ? 'rgba(91,141,239,.14)' : status === 'maintenance' ? 'rgba(201,138,43,.16)' : 'var(--panel2)',
+  opacity: 1,
+  boxShadow: sel ? '0 0 0 3px rgba(91,141,239,.25)' : undefined,
+  cursor: editable ? 'grab' : 'pointer', transition: 'box-shadow .12s, border-color .12s',
+});
+const faceStyle = (f: string | null): CSSProperties => {
+  const base: CSSProperties = { position: 'absolute', background: 'var(--accent)', borderRadius: 3, opacity: 0.85 };
+  const ff = f || 'down';
+  if (ff === 'down') return { ...base, left: 22, right: 22, bottom: -1, height: 3 };
+  if (ff === 'up') return { ...base, left: 22, right: 22, top: -1, height: 3 };
+  if (ff === 'left') return { ...base, top: 18, bottom: 18, left: -1, width: 3 };
+  return { ...base, top: 18, bottom: 18, right: -1, width: 3 };
+};
+const seatInner = (num: number | null, label: string, who: string | null) => (
+  who ? (
+    // 배정된 좌석: 번호는 좌상단에 작게, 이름 가운데 — 번호·이름 같은 톤
+    <>
+      <span style={{ position: 'absolute', top: 4, left: 6, fontSize: 9, fontWeight: 700, color: 'var(--faint)', lineHeight: 1 }}>{num ?? label}</span>
+      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--dim)', maxWidth: 74, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1 }}>{who}</span>
+    </>
+  ) : (
+    // 공석: 번호만 가운데
+    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--faint)', lineHeight: 1 }}>{num ?? label}</span>
+  )
+);
+
+// 방 입구(문) 마커 — 방 블록의 지정된 벽에 '입구' 표시
+const doorMark = (side: string | null) => {
+  if (!side) return null;
+  const pill: CSSProperties = {
+    position: 'absolute', zIndex: 6, background: 'var(--accent)', color: '#fff', fontSize: 10, fontWeight: 800,
+    padding: '2px 8px', borderRadius: 999, lineHeight: 1.4, whiteSpace: 'nowrap', boxShadow: '0 1px 3px rgba(0,0,0,.2)',
+  };
+  if (side === 'top') return <span style={{ ...pill, top: -11, left: '50%', transform: 'translateX(-50%)' }}>입구</span>;
+  if (side === 'bottom') return <span style={{ ...pill, bottom: -11, left: '50%', transform: 'translateX(-50%)' }}>입구</span>;
+  if (side === 'left') return <span style={{ ...pill, left: -16, top: '50%', transform: 'translateY(-50%) rotate(-90deg)' }}>입구</span>;
+  return <span style={{ ...pill, right: -16, top: '50%', transform: 'translateY(-50%) rotate(90deg)' }}>입구</span>;
+};
+
+// ---------------- 좌석 상호작용 컨텍스트 (부모의 안정적 핸들러 묶음) ----------------
+type SeatMenuState = { x: number; y: number; seat: Seat };
+type CallFn = (action: (fd: FormData) => Promise<unknown>, fields: Record<string, string | number>, after?: () => void) => void;
+type SeatCtx = {
+  moveTo: (s: Seat) => void;
+  openSeat: (id: string) => void;
+  setPatrolMenu: (v: SeatMenuState | null) => void;
+  setSeatMenu: (v: SeatMenuState | null) => void;
+  call: CallFn;
+};
+
+// 정적(보기/전체보기) 좌석 — 모듈 스코프 + memo. 부모 state 변경 시 element.type 정체성이
+// 유지되어 좌석이 재마운트되지 않는다(box-shadow 트랜지션·번호 input 포커스 보존).
+type StaticSeatProps = {
+  s: Seat; i: number; clickable: boolean;
+  numberEditMode: boolean;
+  stuById: Map<string, Student>;
+  att: AttInfo | undefined;
+  lastPatrol: PatrolInfo | undefined; // 오늘 마지막 순찰 기록(세션 무관) — 평상시 재실/부재 표시에 attendance 보다 우선
+  patrolMode: boolean;
+  patrolMark: PatrolMark | undefined;
+  ghost: Ghost | undefined;
+  upcoming: Upcoming | undefined;
+  movingStudentId: string | null;
+  ctx: SeatCtx;
+};
+const StaticSeat = memo(function StaticSeat({
+  s, i, clickable, numberEditMode, stuById, att, lastPatrol, patrolMode, patrolMark, ghost, upcoming, movingStudentId, ctx,
+}: StaticSeatProps) {
+  const { moveTo, openSeat, setPatrolMenu, setSeatMenu, call } = ctx;
+  // 터치 꾹누르기 = 좌석 컨텍스트 메뉴(데스크톱 우클릭 대체). 순찰/이동 중엔 비활성.
+  // 좌석마다 자체 useLongPress — 부모 ctx 를 오염시키지 않아 memo 경계가 유지된다.
+  const lp = useLongPress<Seat>((seat, x, y) => {
+    if (!movingStudentId && !patrolMode) setSeatMenu({ x, y, seat });
+  });
+  const { x, y } = seatXY(s, i);
+  // 번호 재지정 모드: 좌석마다 번호 텍스트박스
+  if (numberEditMode) {
+    const style: CSSProperties = { ...seatStyle(s.status, false, false), left: x, top: y, cursor: 'default', borderColor: 'var(--accent)', backgroundColor: 'var(--accent-soft)' };
+    return (
+      <div className="seatbox" style={style}>
+        <input
+          key={s.id}
+          defaultValue={s.number ?? ''}
+          inputMode="numeric"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+          onBlur={(e) => {
+            const v = e.target.value.trim();
+            if (v && v !== String(s.number ?? '')) call(updateSeat, { seatId: s.id, number: v });
+          }}
+          style={{ width: 46, height: 30, textAlign: 'center', border: '1px solid var(--accent)', borderRadius: 7, fontSize: 15, fontWeight: 800, background: '#fff', color: 'var(--ink)', outline: 'none' }}
+        />
+      </div>
+    );
+  }
+  const who = s.current_student_id ? stuById.get(s.current_student_id)?.name ?? null : null;
+  const patSt = patrolMark?.state ? PATROL_BY_KEY[patrolMark.state] : undefined;
+  const pts = patrolMode ? patrolMark?.points ?? 0 : 0;
+  const moveTarget = !!movingStudentId && !s.current_student_id; // 이동 중이며 이 자리가 빈자리
+  const style: CSSProperties = { ...seatStyle(s.status, false, false), left: x, top: y, cursor: (clickable || moveTarget) ? 'pointer' : 'default' };
+  // 평상시(순찰 모드 아님) 재실/부재 판정: 오늘 마지막 순찰 기록이 있으면 그 asIn 을 우선(→ 기존
+  // 재실('in')/하원('out') 색·라벨을 그대로 재사용), 없으면 attendance 기반 판정으로 폴백.
+  const attKind: AttInfo | undefined = lastPatrol ? (lastPatrol.asIn ? 'in' : 'out') : att;
+  const attTitle = lastPatrol?.atLabel || undefined;
+  // 순찰 모드면 순찰 상태 색이 출결/순찰기록 색을 덮고, 순찰 모드 자체에서는 마크 없는 좌석에 그 색을
+  // 쓰지 않는다(고스트가 생겼으니 이제 불필요하고 고스트 색과 섞여 판단을 방해한다).
+  // 우선순위(순찰 모드): 실제 마크 색(patSt) > 고스트 색(ghost, 아래) > 기본 좌석 색.
+  if (patSt) {
+    style.backgroundColor = patSt.bg;
+    style.borderColor = patSt.bd;
+  } else if (!patrolMode && attKind && ATT_COLOR[attKind]) {
+    style.backgroundColor = ATT_COLOR[attKind].bg;
+    style.borderColor = ATT_COLOR[attKind].bd;
+  }
+  if (moveTarget) { style.borderColor = 'var(--accent)'; style.backgroundColor = 'var(--accent-soft)'; }
+  // 스케쥴 고스트(예상 상태) — 아직 마크 안 된(patSt 없는) 좌석에만 온다(ghost prop 자체가 이미 그렇게 필터됨).
+  // 배경은 예상 상태 색으로 옅게 물들이고(실제 마크된 진한 프리셋 색과 구분), away 는 좌석 전체를 흐리게.
+  // 테두리는 건드리지 않는다(선택·체크 표시용). 색 계산은 모바일과 공유하는 lib/schedule.ts 의 ghostStyleOf.
+  // 좌측 스트립은 별도 절대배치 요소 대신 배경의 linear-gradient 로 그린다 — background 는 border-box 안쪽에
+  // 클리핑되고 border 가 그 위에 그려지므로, 테두리 두께·라운드를 따로 계산하지 않아도 모서리 밖으로 새지 않는다.
+  let ghostLabelColor: string | undefined;
+  if (ghost) {
+    const gs = ghostStyleOf(ghost.state, ghost.label);
+    style.backgroundColor = gs.bg;
+    style.opacity = gs.dim;
+    if (gs.strip) style.backgroundImage = `linear-gradient(to right, ${gs.strip} 0 3px, transparent 3px)`;
+    ghostLabelColor = ghost.state === 'away' || ghost.state === 'none' ? 'var(--faint)' : reasonColor(ghost.label);
+  }
+  const upcomingText = upcoming ? `${upcoming.inMin}분 뒤 ${upcoming.slot.reason}` : undefined;
+  const showUpcomingLabel = !!upcoming && SH >= MIN_SEAT_H_FOR_SUBLABEL;
+  return (
+    <div
+      className="seatbox"
+      {...lp.bind(s)}
+      onClick={(e) => {
+        if (lp.consumed()) return; // 방금 꾹누르기로 메뉴 열렸으면 클릭 무시
+        if (!clickable && !moveTarget) return;
+        if (movingStudentId) { moveTo(s); return; }
+        if (patrolMode) { if (s.current_student_id) setPatrolMenu({ x: e.clientX, y: e.clientY, seat: s }); return; }
+        if (clickable) openSeat(s.id);
+      }}
+      onContextMenu={(e) => { e.preventDefault(); if (!movingStudentId && !patrolMode) setSeatMenu({ x: e.clientX, y: e.clientY, seat: s }); }}
+      style={style}
+      title={upcomingText && !showUpcomingLabel ? upcomingText : (!patrolMode ? attTitle : undefined)}
+    >
+      {seatInner(s.number, s.label, who)}
+      {showUpcomingLabel && upcoming && (
+        <span
+          title={upcomingText}
+          style={{
+            fontSize: 10, fontWeight: upcoming.inMin <= UPCOMING_SOON_MIN ? 700 : 400,
+            color: upcoming.inMin <= UPCOMING_SOON_MIN ? 'var(--warn)' : 'var(--dim)',
+            lineHeight: 1.1, maxWidth: SW - 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}
+        >
+          {upcoming.inMin}분 뒤 {upcoming.slot.reason}
+        </span>
+      )}
+      {patSt ? (
+        <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: patSt.dot }}>
+          {patSt.label}
+        </span>
+      ) : ghost ? (
+        <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: ghostLabelColor, opacity: 0.48 }}>
+          {ghost.label}
+        </span>
+      ) : !patrolMode && attKind && (
+        <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: attKind === 'in' ? ink('present') : 'var(--faint)' }}>
+          {ATT_LABEL[attKind]}
+        </span>
+      )}
+      {patrolMode && pts > 0 && (
+        <span style={{ position: 'absolute', bottom: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: '#fff', background: '#e5484d', borderRadius: 8, padding: '0 5px', lineHeight: '14px' }}>
+          {pts}
+        </span>
+      )}
+      <span style={faceStyle(s.facing)} />
+    </div>
+  );
+});
+
+// ---------------- overview (모든 방 / 전층) 한 칸 — 모듈 스코프 + memo ----------------
+type OvRoomProps = {
+  r: Room;
+  seats: Seat[];
+  numberEditMode: boolean;
+  stuById: Map<string, Student>;
+  attendance: Record<string, AttInfo>;
+  todayPatrol: Record<string, PatrolInfo>; // 오늘 마지막 순찰 기록(세션 무관) — 평상시 재실/부재 표시용
+  patrolMode: boolean;
+  patrolMarks: Record<string, PatrolMark>;
+  ghostOf: Map<string, Ghost>;
+  upcomingOf: Map<string, Upcoming>;
+  movingStudentId: string | null;
+  ctx: SeatCtx;
+};
+const OvRoom = memo(function OvRoom({
+  r, seats, numberEditMode, stuById, attendance, todayPatrol, patrolMode, patrolMarks, ghostOf, upcomingOf, movingStudentId, ctx,
+}: OvRoomProps) {
+  const rs = seats;
+  const list = rs.map((s, i) => seatXY(s, i));
+  const b = bounds(list);
+  const occ = rs.filter((s) => s.status === 'occupied').length;
+  return (
+    <div>
+      <div style={{ textAlign: 'center', marginBottom: 9 }}>
+        <span style={{ fontSize: 13.5, fontWeight: 700 }}>
+          {r.name} <span style={{ color: 'var(--accent)' }}>{String(rs.length - occ).padStart(2, '0')}</span>/{String(rs.length).padStart(2, '0')}
+        </span>
+      </div>
+      <div style={{
+        position: 'relative', width: b.w, height: b.h, borderRadius: 14,
+        border: '1px solid var(--line)', background: 'var(--panel)',
+      }}>
+        {rs.map((s, i) => {
+          const sid = s.current_student_id;
+          const mark = patrolMode && sid ? patrolMarks[sid] : undefined;
+          const unmarked = patrolMode && !!sid && !mark;
+          return (
+            <StaticSeat
+              key={s.id}
+              s={s}
+              i={i}
+              clickable
+              numberEditMode={numberEditMode}
+              stuById={stuById}
+              att={sid ? attendance[sid] : undefined}
+              lastPatrol={sid ? todayPatrol[sid] : undefined}
+              patrolMode={patrolMode}
+              patrolMark={mark}
+              ghost={unmarked ? ghostOf.get(sid!) : undefined}
+              upcoming={unmarked ? upcomingOf.get(sid!) : undefined}
+              movingStudentId={movingStudentId}
+              ctx={ctx}
+            />
+          );
+        })}
+        {doorMark(r.door_side)}
+      </div>
+    </div>
+  );
+});
+
 export default function FloorEditor({
   rooms, seats, students, canManage, canEditStudent, initialRoomId, attendance, canAttend, patrol, canPatrol, lastPatrolAt,
+  openSession, scheduleMap,
 }: {
   rooms: Room[]; seats: Seat[]; students: Student[];
   canManage: boolean; canEditStudent: boolean; initialRoomId: string | null;
   attendance: Record<string, AttInfo>; canAttend: boolean;
   patrol: Record<string, PatrolInfo>; canPatrol: boolean; lastPatrolAt: string | null;
+  openSession: OpenPatrolSession | null; scheduleMap: Record<string, ScheduleInfo>;
 }) {
   const floors = useMemo(
     () => Array.from(new Set(rooms.map((r) => r.floor))).sort((a, b) => a - b),
@@ -163,6 +457,15 @@ export default function FloorEditor({
   const [modal, setModal] = useState<'student' | 'room' | null>(null);
   const [, start] = useTransition();
 
+  // ---------------- server action helper ----------------
+  // useCallback 으로 안정화 — SeatCtx 를 통해 memo 된 좌석에 내려가므로 정체성이 바뀌면 안 됨.
+  // (첫 사용처인 doStartPatrol 보다 위에 선언해야 컴파일러의 mutable-range 분석이 깔끔하다.)
+  const call = useCallback<CallFn>((action, fields, after) => {
+    const fd = new FormData();
+    Object.entries(fields).forEach(([k, v]) => fd.set(k, String(v)));
+    start(async () => { await action(fd); after?.(); });
+  }, [start]);
+
   // 전체 배치 편집(방 드래그)
   const [arrange, setArrange] = useState(false);
   const [roomPos, setRoomPos] = useState<Record<string, { x: number; y: number }>>({});
@@ -177,9 +480,19 @@ export default function FloorEditor({
   const [patrolSession, setPatrolSession] = useState<string | null>(null); // 이번 순찰 세션 id
   const [patrolStartedAt, setPatrolStartedAt] = useState<number | null>(null); // 시작 시각(ms)
   const [patrolMenu, setPatrolMenu] = useState<{ x: number; y: number; seat: Seat } | null>(null); // 순찰 상태 선택
-  const [patrolConfirm, setPatrolConfirm] = useState<null | 'start' | 'end'>(null); // 시작/종료 확인창
+  const [patrolConfirm, setPatrolConfirm] = useState<null | 'start' | 'end' | 'resume'>(null); // 시작/종료/이어하기 확인창
   const [patrolMarks, setPatrolMarks] = useState<Record<string, { state: string; points: number }>>({}); // 이번 세션에 찍은 것(시작 시 리셋)
   const [patrolToast, setPatrolToast] = useState<string | null>(null); // 종료 알림
+  // 서버가 감지한 미종료 세션("이어하기" 대상). 이어하기/새로시작을 거치면 비운다.
+  const [resume, setResume] = useState<OpenPatrolSession | null>(openSession);
+  // ── 예상 상태(고스트) 기준 시각: 현재 KST 분(minute-of-day). 초기 렌더는 null(하이드레이션 안전).
+  // 인터벌로 계속 갱신하지 않고, 마운트/순찰 시작·이어받기/수동 갱신 시점에만 새로 계산해 고정한다. ──
+  const [nowMin, setNowMin] = useState<number | null>(null);
+  useEffect(() => { setNowMin(kstNowMin()); }, []);
+  const refreshNowMin = () => {
+    setNowMin(kstNowMin());
+    setPatrolToast('기준 시각 갱신됨');
+  };
   // 실제 시작/종료(확인창 확인 후). 이동 모드와 상호배타.
   const doStartPatrol = () => {
     setMovingStudentId(null);
@@ -188,12 +501,37 @@ export default function FloorEditor({
     setPatrolMarks({}); // 이전 순찰 표시 리셋 → 빈 화면에서 시작
     call(startPatrol, { sessionId: id });
     setPatrolConfirm(null);
+    setResume(null);
+    setNowMin(kstNowMin()); // 순찰 시작 시점 기준으로 고스트 기준 시각을 다시 고정
   };
   const doEndPatrol = () => {
     if (patrolSession) call(endPatrol, { sessionId: patrolSession });
     setPatrolMode(false); setPatrolSession(null); setPatrolStartedAt(null); setPatrolMarks({});
     setPatrolConfirm(null);
     setPatrolToast('순찰 종료 · 순찰 기록에 저장되었습니다');
+  };
+  // 이어하기 — 새 세션을 만들지 않고 기존 세션 id 로 진입, 기존 마크를 불러와 복원한다.
+  const doResumePatrol = () => {
+    if (!resume) return;
+    const target = resume.sessionId;
+    setMovingStudentId(null);
+    setPatrolSession(target); setPatrolStartedAt(Date.now()); setPatrolMode(true);
+    setPatrolConfirm(null);
+    setResume(null);
+    setNowMin(kstNowMin()); // 이어받는 시점 기준으로 고스트 기준 시각을 다시 고정
+    getPatrolSessionDetail(target)
+      .then((rows) => {
+        const m: Record<string, { state: string; points: number }> = {};
+        for (const r of rows) m[r.student_id] = { state: r.state, points: r.points };
+        setPatrolMarks(m);
+      })
+      .catch(() => setPatrolToast('기존 기록 불러오기 실패 — 새로고침 후 다시 시도하세요'));
+  };
+  // 새로 시작 — 미종료 세션을 종료 처리한 뒤 새 세션을 시작(미종료 세션이 쌓이지 않게).
+  const doFreshPatrol = () => {
+    if (!resume) return;
+    const target = resume.sessionId;
+    call(endPatrol, { sessionId: target }, () => { setResume(null); doStartPatrol(); });
   };
   // (경과 시각은 아래 PatrolElapsed 가 자체 타이머로 갱신 — 매초 FloorEditor 전체가
   //  리렌더되어 좌석 90개가 재마운트되던 문제를 없앤다. 확인창은 스냅샷이면 충분.)
@@ -203,10 +541,6 @@ export default function FloorEditor({
     const t = setTimeout(() => setPatrolToast(null), 2800);
     return () => clearTimeout(t);
   }, [patrolToast]);
-  // 터치 꾹누르기 = 좌석 컨텍스트 메뉴(데스크톱 우클릭 대체). 순찰/이동 중엔 비활성(우클릭과 동일).
-  const seatLP = useLongPress<Seat>((seat, x, y) => {
-    if (!movingStudentId && !patrolMode) setSeatMenu({ x, y, seat });
-  });
   const arrangeRef = useRef<HTMLDivElement>(null);
   // 층 스크롤 스냅(5층 위→4층, 자석처럼)
   const stageRef = useRef<HTMLDivElement>(null);
@@ -235,6 +569,75 @@ export default function FloorEditor({
     () => students.filter((s) => s.status === 'enrolled' && !seatedSet.has(s.id)),
     [students, seatedSet],
   );
+  // 학생별 예상 상태 — 스케쥴 정보(hours/slots)가 아예 없으면 state:'none'('미설정')으로 표시(away 와 구분).
+  // 자정 넘김 대비: 새벽 시간대(0~5시)는 오늘 분(minute) 과 +1440 좌표계 둘 다로 판정해 away 아닌 쪽을 채택.
+  const ghostOf = useMemo(() => {
+    const m = new Map<string, Ghost>();
+    if (nowMin == null) return m;
+    for (const [sid, info] of Object.entries(scheduleMap)) {
+      // 등하원·오늘 일정 둘 다 없으면 "모르는 것"(none/미설정) — away(등원전/하원)와 구분해 회색으로 표시한다.
+      if (!info.hours && info.slots.length === 0) { m.set(sid, { state: 'none', label: '미설정' }); continue; }
+      let result = statusAt(nowMin, info.hours, info.slots);
+      if (result.state === 'away' && nowMin < 300) {
+        const alt = statusAt(nowMin + 1440, info.hours, info.slots);
+        if (alt.state !== 'away') result = alt;
+      }
+      m.set(sid, result);
+    }
+    return m;
+  }, [scheduleMap, nowMin]);
+
+  // 학생별 임박 일정 — 기준 시각으로부터 UPCOMING_WITHIN_MIN 분 이내에 시작하는 다음 일정.
+  const upcomingOf = useMemo(() => {
+    const m = new Map<string, Upcoming>();
+    if (nowMin == null) return m;
+    for (const [sid, info] of Object.entries(scheduleMap)) {
+      if (info.slots.length === 0) continue;
+      const up = upcomingAt(nowMin, info.slots, UPCOMING_WITHIN_MIN);
+      if (up) m.set(sid, up);
+    }
+    return m;
+  }, [scheduleMap, nowMin]);
+
+  // 순찰 종료 시 미점검 경고 — 현재 층에 배정된 학생이 있는데 이번 세션에 마크가 없는 좌석.
+  // 오프라인 큐 대기분도 patrolMarks 에 즉시 반영되므로(patrolMenuItems) 별도 처리 불필요.
+  // 고스트 none(미설정)/away(등원전·하원)인 학생은 확인이 필요 없으니 경고에서 제외한다(탭 자체는 막지 않음).
+  const uncheckedPatrol = useMemo(() => {
+    if (!patrolMode || typeof floorSel !== 'number') return [];
+    const roomIds = new Set(rooms.filter((r) => r.floor === floorSel).map((r) => r.id));
+    return seats
+      .filter((s) => s.room_id && roomIds.has(s.room_id) && s.current_student_id && !patrolMarks[s.current_student_id]
+        && !isPatrolExempt(ghostOf.get(s.current_student_id!)?.state))
+      .sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
+  }, [patrolMode, floorSel, rooms, seats, patrolMarks, ghostOf]);
+
+  // 순찰 툴바 요약 — 점검 N/M · 제외 K명 · 예상 재실 K명 · 미등원 J명 · 곧 이동 P명(방 단위 배지가 없는 데스크탑 대체).
+  // M(total)·K(exempt)는 고스트 none/away 를 분모에서 뺀 값 — N(marked)은 제외 대상이라도 실제로 찍었으면 포함한다.
+  const patrolSummary = useMemo(() => {
+    if (!patrolMode || typeof floorSel !== 'number') return null;
+    const roomIds = new Set(rooms.filter((r) => r.floor === floorSel).map((r) => r.id));
+    const floorAssigned = seats.filter((s) => s.room_id && roomIds.has(s.room_id) && s.current_student_id);
+    const exempt = floorAssigned.filter((s) => isPatrolExempt(ghostOf.get(s.current_student_id!)?.state)).length;
+    const total = floorAssigned.length - exempt;
+    const marked = floorAssigned.filter((s) => patrolMarks[s.current_student_id!]).length;
+    let present = 0, away = 0, unset = 0, soon = 0;
+    if (nowMin != null) {
+      for (const s of floorAssigned) {
+        const sid = s.current_student_id!;
+        const g = ghostOf.get(sid);
+        if (g) {
+          if (g.state === 'away') away++;
+          else if (g.state === 'none') unset++;
+          else present++;
+        }
+        if (!patrolMarks[sid]) {
+          const up = upcomingOf.get(sid);
+          if (up && up.inMin <= UPCOMING_SOON_MIN) soon++;
+        }
+      }
+    }
+    return { marked, total, exempt, present, away, unset, soon };
+  }, [patrolMode, floorSel, rooms, seats, nowMin, ghostOf, upcomingOf, patrolMarks]);
 
   const roomsOnFloor = (fl: number) => rooms.filter((r) => r.floor === fl);
   const selRoom = roomSel !== 'all' ? rooms.find((r) => r.id === roomSel) ?? null : null;
@@ -244,12 +647,58 @@ export default function FloorEditor({
   const curRoomSeats = selRoom ? (seatsByRoom.get(selRoom.id) ?? []) : [];
   const selSeat = selSeatId ? seats.find((s) => s.id === selSeatId) ?? null : null;
 
-  // ---------------- server action helper ----------------
-  const call = (action: (fd: FormData) => Promise<unknown>, fields: Record<string, string | number>, after?: () => void) => {
-    const fd = new FormData();
-    Object.entries(fields).forEach(([k, v]) => fd.set(k, String(v)));
-    start(async () => { await action(fd); after?.(); });
+  // ---------------- 좌석 상호작용 핸들러 (모두 안정적 → memo 경계 유지) ----------------
+  // 롱프레스는 StaticSeat 안에서 자체 useLongPress 로 처리(부모 ctx 에서 제외 → 안정성 확보).
+  const openSeat = useCallback((id: string) => { setSelSeatId(id); }, []);
+  // 좌석 이동: 이동 중인 학생을 빈자리로 (assignSeat 이 기존 자리 자동 비움)
+  const moveTo = useCallback((seat: Seat) => {
+    if (!movingStudentId || seat.current_student_id) return;
+    call(assignSeat, { seatId: seat.id, studentId: movingStudentId }, () => setMovingStudentId(null));
+  }, [call, movingStudentId]);
+  const ctx = useMemo<SeatCtx>(() => ({
+    moveTo, openSeat, setPatrolMenu, setSeatMenu, call,
+  }), [moveTo, openSeat, setPatrolMenu, setSeatMenu, call]);
+  // 좌석/방 렌더 헬퍼 — 부모 컨텍스트를 모듈 스코프 컴포넌트에 주입
+  const staticSeat = (s: Seat, i: number, clickable: boolean) => {
+    const sid = s.current_student_id;
+    const mark = patrolMode && sid ? patrolMarks[sid] : undefined;
+    const unmarked = patrolMode && !!sid && !mark;
+    return (
+      <StaticSeat
+        key={s.id}
+        s={s}
+        i={i}
+        clickable={clickable}
+        numberEditMode={numberEditMode}
+        stuById={stuById}
+        att={sid ? attendance[sid] : undefined}
+        lastPatrol={sid ? patrol[sid] : undefined}
+        patrolMode={patrolMode}
+        patrolMark={mark}
+        ghost={unmarked ? ghostOf.get(sid!) : undefined}
+        upcoming={unmarked ? upcomingOf.get(sid!) : undefined}
+        movingStudentId={movingStudentId}
+        ctx={ctx}
+      />
+    );
   };
+  const ovRoom = (r: Room) => (
+    <OvRoom
+      key={r.id}
+      r={r}
+      seats={seatsByRoom.get(r.id) ?? []}
+      numberEditMode={numberEditMode}
+      stuById={stuById}
+      attendance={attendance}
+      todayPatrol={patrol}
+      patrolMode={patrolMode}
+      patrolMarks={patrolMarks}
+      ghostOf={ghostOf}
+      upcomingOf={upcomingOf}
+      movingStudentId={movingStudentId}
+      ctx={ctx}
+    />
+  );
 
   // 스크롤로 층 넘길 때 현재 보이는 층으로 라디오 동기화
   useEffect(() => {
@@ -454,116 +903,6 @@ export default function FloorEditor({
   };
 
   // ---------------- seat rendering ----------------
-  const seatStyle = (status: string, sel: boolean, editable: boolean): CSSProperties => ({
-    position: 'absolute', width: SW, height: SH, borderRadius: 12,
-    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3,
-    userSelect: 'none', padding: 2,
-    border: `1.5px solid ${sel ? 'var(--accent)' : status === 'occupied' ? 'rgba(91,141,239,.5)' : status === 'maintenance' ? 'rgba(201,138,43,.5)' : 'var(--line)'}`,
-    background: status === 'occupied' ? 'rgba(91,141,239,.14)' : status === 'maintenance' ? 'rgba(201,138,43,.16)' : 'var(--panel2)',
-    boxShadow: sel ? '0 0 0 3px rgba(91,141,239,.25)' : undefined,
-    cursor: editable ? 'grab' : 'pointer', transition: 'box-shadow .12s, border-color .12s',
-  });
-  const faceStyle = (f: string | null): CSSProperties => {
-    const base: CSSProperties = { position: 'absolute', background: 'var(--accent)', borderRadius: 3, opacity: 0.85 };
-    const ff = f || 'down';
-    if (ff === 'down') return { ...base, left: 22, right: 22, bottom: -1, height: 3 };
-    if (ff === 'up') return { ...base, left: 22, right: 22, top: -1, height: 3 };
-    if (ff === 'left') return { ...base, top: 18, bottom: 18, left: -1, width: 3 };
-    return { ...base, top: 18, bottom: 18, right: -1, width: 3 };
-  };
-  const seatInner = (num: number | null, label: string, who: string | null) => (
-    who ? (
-      // 배정된 좌석: 번호는 좌상단에 작게, 이름 가운데 — 번호·이름 같은 톤
-      <>
-        <span style={{ position: 'absolute', top: 4, left: 6, fontSize: 9, fontWeight: 700, color: 'var(--faint)', lineHeight: 1 }}>{num ?? label}</span>
-        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--dim)', maxWidth: 74, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1 }}>{who}</span>
-      </>
-    ) : (
-      // 공석: 번호만 가운데
-      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--faint)', lineHeight: 1 }}>{num ?? label}</span>
-    )
-  );
-
-  // 정적(보기/전체보기) 좌석
-  const StaticSeat = ({ s, i, clickable }: { s: Seat; i: number; clickable: boolean }) => {
-    const { x, y } = seatXY(s, i);
-    // 번호 재지정 모드: 좌석마다 번호 텍스트박스
-    if (numberEditMode) {
-      const style: CSSProperties = { ...seatStyle(s.status, false, false), left: x, top: y, cursor: 'default', borderColor: 'var(--accent)', background: 'var(--accent-soft)' };
-      return (
-        <div className="seatbox" style={style}>
-          <input
-            key={s.id}
-            defaultValue={s.number ?? ''}
-            inputMode="numeric"
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-            onBlur={(e) => {
-              const v = e.target.value.trim();
-              if (v && v !== String(s.number ?? '')) call(updateSeat, { seatId: s.id, number: v });
-            }}
-            style={{ width: 46, height: 30, textAlign: 'center', border: '1px solid var(--accent)', borderRadius: 7, fontSize: 15, fontWeight: 800, background: '#fff', color: 'var(--ink)', outline: 'none' }}
-          />
-        </div>
-      );
-    }
-    const who = s.current_student_id ? stuById.get(s.current_student_id)?.name ?? null : null;
-    const occ = s.status === 'occupied';
-    const att = s.current_student_id ? attendance[s.current_student_id] : undefined;
-    const pat = patrolMode && s.current_student_id ? patrolMarks[s.current_student_id] : undefined;
-    const patSt = pat?.state ? PATROL_BY_KEY[pat.state] : undefined;
-    const pts = patrolMode && s.current_student_id ? patrolMarks[s.current_student_id]?.points ?? 0 : 0;
-    const moveTarget = !!movingStudentId && !s.current_student_id; // 이동 중이며 이 자리가 빈자리
-    const style: CSSProperties = { ...seatStyle(s.status, false, false), left: x, top: y, cursor: (clickable || moveTarget) ? 'pointer' : 'default' };
-    // 순찰 모드면 순찰 상태 색이 출결 색을 덮음
-    if (patSt) {
-      style.background = patSt.bg;
-      style.borderColor = patSt.bd;
-    } else if (att && ATT_COLOR[att]) {
-      style.background = ATT_COLOR[att].bg;
-      style.borderColor = ATT_COLOR[att].bd;
-    }
-    if (moveTarget) { style.borderColor = 'var(--accent)'; style.background = 'var(--accent-soft)'; }
-    return (
-      <div
-        className="seatbox"
-        {...seatLP.bind(s)}
-        onClick={(e) => {
-          if (seatLP.consumed()) return; // 방금 꾹누르기로 메뉴 열렸으면 클릭 무시
-          if (!clickable && !moveTarget) return;
-          if (movingStudentId) { moveTo(s); return; }
-          if (patrolMode) { if (s.current_student_id) setPatrolMenu({ x: e.clientX, y: e.clientY, seat: s }); return; }
-          if (clickable) openSeat(s.id);
-        }}
-        onContextMenu={(e) => { e.preventDefault(); if (!movingStudentId && !patrolMode) setSeatMenu({ x: e.clientX, y: e.clientY, seat: s }); }}
-        style={style}
-      >
-        {seatInner(s.number, s.label, who)}
-        {patSt ? (
-          <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: patSt.dot }}>
-            {patSt.label}
-          </span>
-        ) : att && (
-          <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: att === 'in' ? '#0a7a52' : 'var(--faint)' }}>
-            {ATT_LABEL[att]}
-          </span>
-        )}
-        {patrolMode && pts > 0 && (
-          <span style={{ position: 'absolute', bottom: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: '#fff', background: '#e5484d', borderRadius: 8, padding: '0 5px', lineHeight: '14px' }}>
-            {pts}
-          </span>
-        )}
-        <span style={faceStyle(s.facing)} />
-      </div>
-    );
-  };
-
-  const openSeat = (id: string) => { setSelSeatId(id); };
-  // 좌석 이동: 이동 중인 학생을 빈자리로 (assignSeat 이 기존 자리 자동 비움)
-  const moveTo = (seat: Seat) => {
-    if (!movingStudentId || seat.current_student_id) return;
-    call(assignSeat, { seatId: seat.id, studentId: movingStudentId }, () => setMovingStudentId(null));
-  };
   // 우클릭 컨텍스트 메뉴 항목 (좌석 상태별)
   const seatMenuItems = (s: Seat): MenuItem[] => {
     const sid = s.current_student_id;
@@ -616,20 +955,6 @@ export default function FloorEditor({
   const closeDrawer = () => setSelSeatId(null);
   // 순찰 벌점 합계(오늘, 전체)
   const patrolTally = Object.values(patrolMarks).reduce((n, p) => n + (p?.points ?? 0), 0);
-
-
-  // 방 입구(문) 마커 — 방 블록의 지정된 벽에 '입구' 표시
-  const doorMark = (side: string | null) => {
-    if (!side) return null;
-    const pill: CSSProperties = {
-      position: 'absolute', zIndex: 6, background: 'var(--accent)', color: '#fff', fontSize: 10, fontWeight: 800,
-      padding: '2px 8px', borderRadius: 999, lineHeight: 1.4, whiteSpace: 'nowrap', boxShadow: '0 1px 3px rgba(0,0,0,.2)',
-    };
-    if (side === 'top') return <span style={{ ...pill, top: -11, left: '50%', transform: 'translateX(-50%)' }}>입구</span>;
-    if (side === 'bottom') return <span style={{ ...pill, bottom: -11, left: '50%', transform: 'translateX(-50%)' }}>입구</span>;
-    if (side === 'left') return <span style={{ ...pill, left: -16, top: '50%', transform: 'translateY(-50%) rotate(-90deg)' }}>입구</span>;
-    return <span style={{ ...pill, right: -16, top: '50%', transform: 'translateY(-50%) rotate(90deg)' }}>입구</span>;
-  };
 
   // ---------------- canvas (single room) ----------------
   const renderSingleRoom = () => {
@@ -692,7 +1017,7 @@ export default function FloorEditor({
               const sel = isEdit ? selected.has(s.id) : selSeatId === s.id;
               const att = !isEdit && s.current_student_id ? attendance[s.current_student_id] : undefined;
               const st: CSSProperties = { ...seatStyle(s.status, sel, isEdit), left: s.x, top: s.y };
-              if (att && ATT_COLOR[att]) { st.background = ATT_COLOR[att].bg; st.borderColor = ATT_COLOR[att].bd; }
+              if (att && ATT_COLOR[att]) { st.backgroundColor = ATT_COLOR[att].bg; st.borderColor = ATT_COLOR[att].bd; }
               return (
                 <div
                   key={s.id}
@@ -703,7 +1028,7 @@ export default function FloorEditor({
                 >
                   {seatInner(s.number, s.label, who)}
                   {att && (
-                    <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: att === 'in' ? '#0a7a52' : 'var(--faint)' }}>
+                    <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: att === 'in' ? ink('present') : 'var(--faint)' }}>
                       {ATT_LABEL[att]}
                     </span>
                   )}
@@ -755,29 +1080,6 @@ export default function FloorEditor({
   };
 
   // ---------------- overview (모든 방 / 전층) ----------------
-  const OvRoom = ({ r }: { r: Room }) => {
-    const rs = seatsByRoom.get(r.id) ?? [];
-    const list = rs.map((s, i) => seatXY(s, i));
-    const b = bounds(list);
-    const occ = rs.filter((s) => s.status === 'occupied').length;
-    return (
-      <div>
-        <div style={{ textAlign: 'center', marginBottom: 9 }}>
-          <span style={{ fontSize: 13.5, fontWeight: 700 }}>
-            {r.name} <span style={{ color: 'var(--accent)' }}>{String(rs.length - occ).padStart(2, '0')}</span>/{String(rs.length).padStart(2, '0')}
-          </span>
-        </div>
-        <div style={{
-          position: 'relative', width: b.w, height: b.h, borderRadius: 14,
-          border: '1px solid var(--line)', background: 'var(--panel)',
-        }}>
-          {rs.map((s, i) => <StaticSeat key={s.id} s={s} i={i} clickable />)}
-          {doorMark(r.door_side)}
-        </div>
-      </div>
-    );
-  };
-
   // 방 하나의 오늘 통계(배정·재실)
   const roomStat = (room: Room) => {
     const rs = seatsByRoom.get(room.id) ?? [];
@@ -885,14 +1187,14 @@ export default function FloorEditor({
       return (
         <div style={{ position: 'relative', width: W, height: H, margin: '0 auto' }}>
           {rms.map((r) => (
-            <div key={r.id} style={{ position: 'absolute', left: r.pos_x, top: r.pos_y }}><OvRoom r={r} /></div>
+            <div key={r.id} style={{ position: 'absolute', left: r.pos_x, top: r.pos_y }}>{ovRoom(r)}</div>
           ))}
         </div>
       );
     }
     return (
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 30, justifyContent: 'center', alignItems: 'flex-start' }}>
-        {rms.map((r) => <OvRoom key={r.id} r={r} />)}
+        {rms.map((r) => ovRoom(r))}
       </div>
     );
   };
@@ -928,7 +1230,7 @@ export default function FloorEditor({
             return (
               <div key={fl} style={{ marginBottom: 34 }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 30, justifyContent: 'center', alignItems: 'flex-start' }}>
-                  {rms.map((r) => <OvRoom key={r.id} r={r} />)}
+                  {rms.map((r) => ovRoom(r))}
                 </div>
               </div>
             );
@@ -945,14 +1247,14 @@ export default function FloorEditor({
       return (
         <div style={{ position: 'relative', width: W, height: H, margin: '0 auto' }}>
           {rms.map((r) => (
-            <div key={r.id} style={{ position: 'absolute', left: r.pos_x, top: r.pos_y }}><OvRoom r={r} /></div>
+            <div key={r.id} style={{ position: 'absolute', left: r.pos_x, top: r.pos_y }}>{ovRoom(r)}</div>
           ))}
         </div>
       );
     }
     return (
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 30, justifyContent: 'center', alignItems: 'flex-start' }}>
-        {rms.map((r) => <OvRoom key={r.id} r={r} />)}
+        {rms.map((r) => ovRoom(r))}
       </div>
     );
   };
@@ -994,7 +1296,7 @@ export default function FloorEditor({
                   </button>
                 </div>
                 <div style={{ position: 'relative', width: bb.w, height: bb.h, borderRadius: 12, border: '1.5px solid var(--accent)', background: 'rgba(91,141,239,.06)' }}>
-                  {rs.map((s, i) => <StaticSeat key={s.id} s={s} i={i} clickable={false} />)}
+                  {rs.map((s, i) => staticSeat(s, i, false))}
                 </div>
               </div>
             );
@@ -1035,11 +1337,11 @@ export default function FloorEditor({
           {!arrange && mode === 'view' && floorSel !== 'all' && canPatrol && (
             <button
               className="btn"
-              onClick={() => setPatrolConfirm(patrolMode ? 'end' : 'start')}
+              onClick={() => setPatrolConfirm(patrolMode ? 'end' : (resume ? 'resume' : 'start'))}
               title="순찰 모드"
               style={{ height: 36, padding: '0 14px', fontSize: 13, ...(patrolMode ? { background: '#e5484d', borderColor: '#e5484d', color: '#fff' } : {}) }}
             >
-              <Ic d={I_PATROL} /> {patrolMode ? '순찰 종료' : '순찰'}
+              <Ic d={I_PATROL} /> {patrolMode ? '순찰 종료' : resume ? '이어하기' : '순찰'}
             </button>
           )}
           {!arrange && mode === 'view' && canPatrol && (
@@ -1090,13 +1392,30 @@ export default function FloorEditor({
       )}
 
       {patrolMode && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '9px 20px', background: 'rgba(229,72,77,.08)', borderBottom: '1px solid var(--line)', flex: 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '9px 20px', background: 'rgba(229,72,77,.08)', borderBottom: '1px solid var(--line)', flex: 'none', flexWrap: 'wrap' }}>
           <span style={{ fontSize: 13, fontWeight: 800, color: '#e5484d' }}>순찰 중</span>
           <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>
             시작 {patrolStartedAt ? new Date(patrolStartedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : ''} · 경과 <PatrolElapsed startedAt={patrolStartedAt} />
           </span>
           <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>누적 벌점 <b style={{ color: '#e5484d' }}>{patrolTally}점</b></span>
-          <button className="chip" onClick={() => setPatrolConfirm('end')} style={{ cursor: 'pointer' }}>종료</button>
+          {patrolSummary && (
+            <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>
+              점검 {patrolSummary.marked}/{patrolSummary.total}
+              {patrolSummary.exempt > 0 && <span style={{ color: 'var(--faint)', fontWeight: 700 }}> · 제외 {patrolSummary.exempt}명</span>}
+              {patrolSummary.present > 0 && ` · 예상 재실 ${patrolSummary.present}명`}
+              {patrolSummary.away > 0 && ` · 등원전 ${patrolSummary.away}명`}
+              {patrolSummary.unset > 0 && ` · 미설정 ${patrolSummary.unset}명`}
+              {patrolSummary.soon > 0 && <span style={{ color: 'var(--warn)', fontWeight: 700 }}> · 곧 이동 {patrolSummary.soon}명</span>}
+            </span>
+          )}
+          <button
+            onClick={refreshNowMin}
+            title="지금 시각으로 갱신"
+            className="chip"
+            style={{ cursor: 'pointer', fontVariantNumeric: 'tabular-nums' }}
+          >
+            기준 {nowMin != null ? fmtHM(nowMin) : '--:--'}
+          </button>
         </div>
       )}
 
@@ -1232,8 +1551,33 @@ export default function FloorEditor({
         />
       )}
 
+      {/* 이어하기 확인창 (시작/종료와 버튼 구성이 달라 별도 분기) */}
+      {patrolConfirm === 'resume' && resume && (
+        <>
+          <div onClick={() => setPatrolConfirm(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(20,22,30,.45)', zIndex: 70 }} />
+          <div style={{
+            position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 360, maxWidth: 'calc(100vw - 32px)',
+            background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 20, boxShadow: '0 24px 70px rgba(20,22,30,.35)', zIndex: 71, padding: 24,
+          }}>
+            <div style={{ width: 46, height: 46, borderRadius: 14, margin: '0 auto 14px', display: 'grid', placeItems: 'center', background: 'rgba(229,72,77,.12)', color: '#e5484d' }}>
+              <Ic d={I_PATROL} size={22} />
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 800, textAlign: 'center', marginBottom: 8 }}>하던 순찰을 이어할까요?</div>
+            <div style={{ fontSize: 12.5, color: 'var(--dim)', marginBottom: 18, lineHeight: 1.6, textAlign: 'center' }}>
+              {resume.dayLabel} {resume.timeLabel} 시작 · {resume.startedByName} · {resume.markedCount}명 점검
+              {resume.lastLabel ? ` · 마지막 기록 ${resume.lastLabel}` : ''}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <button className="btn btn-accent" onClick={doResumePatrol} style={{ height: 44, fontWeight: 800 }}>이어하기</button>
+              <button className="btn" onClick={doFreshPatrol} style={{ height: 44, color: 'var(--danger)' }}>새로 시작 (기존 기록은 종료 처리)</button>
+              <button className="btn" onClick={() => setPatrolConfirm(null)} style={{ height: 44 }}>취소</button>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* 순찰 시작/종료 확인창 */}
-      {patrolConfirm && (() => {
+      {patrolConfirm && patrolConfirm !== 'resume' && (() => {
         const now = Date.now(); // 확인창은 잠깐 뜨는 모달 — 스냅샷으로 충분(매초 갱신 불필요)
         const fmtClock = (ms: number) => {
           const d = new Date(ms); const h = d.getHours(), m = d.getMinutes();
@@ -1253,6 +1597,9 @@ export default function FloorEditor({
           const m = Math.floor(sec / 60), ss = sec % 60;
           line1 = `이번 순찰에 소요된 시간 ${m > 0 ? `${m}분 ` : ''}${ss}초`;
         }
+        const hasWarn = !isStart && uncheckedPatrol.length > 0;
+        const shown = uncheckedPatrol.slice(0, 12).map((s) => `${s.number ?? s.label}번 ${s.current_student_id ? stuById.get(s.current_student_id)?.name ?? '' : ''}`);
+        const rest = uncheckedPatrol.length - shown.length;
         return (
           <>
             <div onClick={() => setPatrolConfirm(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(20,22,30,.45)', zIndex: 70 }} />
@@ -1266,9 +1613,17 @@ export default function FloorEditor({
               <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--dim)' }}>{line1}</div>
               <div style={{ fontSize: 13, color: 'var(--faint)', marginTop: 4 }}>현재 시각 {fmtClock(now)}</div>
               <div style={{ fontSize: 16, fontWeight: 800, margin: '14px 0 18px' }}>{isStart ? '순찰을 시작하시겠습니까?' : '순찰을 종료하시겠습니까?'}</div>
+              {hasWarn && (
+                <div style={{ background: 'var(--warn-soft)', border: '1px solid var(--warn)', borderRadius: 12, padding: '10px 12px', margin: '-8px 0 18px', fontSize: 12.5, color: 'var(--ink)', lineHeight: 1.6, textAlign: 'left' }}>
+                  <div style={{ fontWeight: 800, marginBottom: 4 }}>미점검 {uncheckedPatrol.length}명</div>
+                  {shown.join(', ')}{rest > 0 ? ` 외 ${rest}명` : ''}
+                </div>
+              )}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <button className="btn" onClick={() => setPatrolConfirm(null)} style={{ height: 44 }}>취소</button>
-                <button className="btn btn-accent" onClick={isStart ? doStartPatrol : doEndPatrol} style={{ height: 44, ...(isStart ? {} : { background: '#e5484d', borderColor: '#e5484d' }) }}>{isStart ? '시작' : '종료'}</button>
+                <button className="btn btn-accent" onClick={isStart ? doStartPatrol : doEndPatrol} style={{ height: 44, ...(isStart ? {} : { background: '#e5484d', borderColor: '#e5484d' }) }}>
+                  {isStart ? '시작' : hasWarn ? `미점검 ${uncheckedPatrol.length}명 · 그대로 종료` : '종료'}
+                </button>
               </div>
             </div>
           </>

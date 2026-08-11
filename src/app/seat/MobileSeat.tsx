@@ -8,20 +8,26 @@ import SeatCanvas from "../_shared/SeatCanvas";
 import MobileNav from "../_shared/MobileNav";
 import { SW, xyOf } from "@/lib/seatmap";
 import { checkIn, checkOut } from "../m/seat/attendanceActions";
+import { tint, line, ink } from "@/lib/semantic-color";
 
 export type SRoom = { id: string; name: string; floor: number };
 export type SSeat = { id: string; room_id: string | null; grid_x: number | null; grid_y: number | null; number: number | null; label: string; current_student_id: string | null };
 export type SStudent = { id: string; name: string; grade: string | null; school: string | null; student_phone: string | null; guardian_phone: string | null };
 export type Att = "in" | "out";
+// 오늘 마지막 순찰 기록 — page.tsx 에서 서버 계산해 내려준다(atLabel 은 "순찰 20:12 · 자리비움" 같은
+// title 문구, 클라 렌더에서 new Date()/toLocale* 호출 금지 원칙). 재실/부재 표시가 attendance 보다 이걸 우선한다.
+export type LastPatrol = { asIn: boolean; atLabel: string };
 
+// 재실(in) = 순찰 '입석'/스케쥴 '자습'과 같은 의미 → SEMANTIC.present 재사용(FloorEditor.tsx 의
+// ATT_COLOR 와 동일 계산). 하원(out)은 무채색(none).
 const ATT = {
-  in: { bg: "rgba(18,184,134,.15)", bd: "rgba(18,184,134,.55)", fg: "#0f9d76", label: "재실" },
-  out: { bg: "rgba(120,130,150,.12)", bd: "rgba(120,130,150,.4)", fg: "var(--faint)", label: "하원" },
+  in: { bg: tint("present", 15), bd: line("present", 55), fg: ink("present"), label: "재실" },
+  out: { bg: tint("none", 12), bd: line("none", 40), fg: "var(--faint)", label: "하원" },
 } as const;
 
-export default function MobileSeat({ rooms, seats, students, attendance, canAttend }: {
+export default function MobileSeat({ rooms, seats, students, attendance, lastPatrol, canAttend }: {
   rooms: SRoom[]; seats: SSeat[]; students: SStudent[];
-  attendance: Record<string, Att>; canAttend: boolean;
+  attendance: Record<string, Att>; lastPatrol: Record<string, LastPatrol>; canAttend: boolean;
 }) {
   const [roomIdx, setRoomIdx] = useState(0);
   const [att, setAtt] = useState(attendance);
@@ -72,10 +78,13 @@ export default function MobileSeat({ rooms, seats, students, attendance, canAtte
         renderSeat={(id) => {
           const s = seatById.get(id)!;
           const sid = s.current_student_id;
-          const a = sid ? att[sid] : undefined;
+          // 재실/부재 판정: 오늘 마지막 순찰 기록이 있으면 그 asIn 우선(→ 기존 재실/하원 색·라벨 재사용),
+          // 없으면 attendance 기반 판정으로 폴백.
+          const lp = sid ? lastPatrol[sid] : undefined;
+          const a: Att | undefined = lp ? (lp.asIn ? "in" : "out") : (sid ? att[sid] : undefined);
           const c = a ? ATT[a] : null;
           return (
-            <div style={{
+            <div title={lp?.atLabel || undefined} style={{
               width: "100%", height: "100%", borderRadius: 10,
               background: c ? c.bg : sid ? "var(--card)" : "var(--panel2)",
               border: `1.5px solid ${c ? c.bd : "var(--line)"}`,
@@ -132,7 +141,7 @@ export default function MobileSeat({ rooms, seats, students, attendance, canAtte
             )}
             {canAttend && (
               <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn" onClick={() => mark(sel.current_student_id!, "in")} style={{ height: 54, flex: 1, fontSize: 15, fontWeight: 800, color: "#0f9d76", borderColor: "rgba(18,184,134,.5)", background: "rgba(18,184,134,.1)" }}>입실</button>
+                <button className="btn" onClick={() => mark(sel.current_student_id!, "in")} style={{ height: 54, flex: 1, fontSize: 15, fontWeight: 800, color: ink("present"), borderColor: line("present", 50), background: tint("present", 10) }}>입실</button>
                 <button className="btn" onClick={() => mark(sel.current_student_id!, "out")} style={{ height: 54, flex: 1, fontSize: 15, fontWeight: 800 }}>하원</button>
               </div>
             )}
