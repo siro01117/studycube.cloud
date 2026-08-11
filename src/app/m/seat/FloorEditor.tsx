@@ -16,6 +16,7 @@ import { recordPatrol, clearPatrolMark, startPatrol, endPatrol, getPatrolSession
 import { PATROL_STATES, PATROL_BY_KEY } from '@/lib/patrol';
 import { statusAt, ghostStyleOf, reasonColor, isPatrolExempt, type DaySlot, type Period } from '@/lib/schedule';
 import { tint, line, ink } from '@/lib/semantic-color';
+import type { OccKind, SeatOcc } from '@/lib/occupancy';
 
 // ---------------- types ----------------
 export type Room = { id: string; name: string; floor: number; cols: number; rows: number; pos_x: number; pos_y: number; door_side: string | null };
@@ -45,13 +46,7 @@ const FACINGS = ['down', 'up', 'left', 'right'];
 const FACE_LABEL: Record<string, string> = { down: '↓ 아래', up: '↑ 위', left: '← 왼쪽', right: '→ 오른쪽' };
 const SEAT_STATUS: Record<string, string> = { empty: '공석', occupied: '사용중', maintenance: '점검' };
 
-// ---------------- 순찰(오늘 마지막 상태 + 벌점 합계) ----------------
-// asIn/atLabel 은 page.tsx 에서 서버 계산해 내려준다(asIn = PATROL_BY_KEY[state].asIn,
-// atLabel = "순찰 20:12 · 자리비움 · 퇴실 간주" 같은 title 문구 — 클라에서 new Date()/toLocale* 호출 금지 원칙).
-// 평상시(순찰 모드 아님) 좌석 배치도의 재실/부재 표시가 이 값을 attendance 보다 우선한다(없으면 attendance 폴백).
-export type PatrolInfo = { state: string; points: number; asIn: boolean; atLabel: string };
-// 이번 순찰 세션 중에 클라에서 찍은 마크 — 서버 계산 필드(asIn/atLabel) 없이 state/points 만 즉시 반영된다.
-// PatrolInfo(오늘 마지막 기록 전체)와는 목적이 달라 별도 타입으로 둔다.
+// 이번 순찰 세션 중에 클라에서 찍은 마크 — state/points 만 즉시 반영된다(순찰 모드 전용 배지).
 type PatrolMark = { state: string; points: number };
 
 // ---------------- 스케쥴 고스트(오늘 요일 기준 학생별 파생 정보) ----------------
@@ -90,8 +85,13 @@ function PatrolElapsed({ startedAt }: { startedAt: number | null }) {
   return <b style={{ color: 'var(--ink)', fontVariantNumeric: 'tabular-nums' }}>{s}</b>;
 }
 
-// ---------------- 출결(입·퇴실 상태 = 오늘 마지막 이벤트) ----------------
-export type AttInfo = 'in' | 'out';
+// ---------------- 출결(입·퇴실 상태 = 순찰/출결 중 더 최근 기록) ----------------
+// occupancy(재실/부재 + title)는 page.tsx 가 src/lib/occupancy.ts 의 buildOccupancy() 로 서버에서
+// 미리 계산해 내려준다 — 오늘 마지막 순찰 기록과 마지막 출결 기록 중 시각이 더 늦은 쪽(동시각이면 출결)을
+// 이미 반영한 최종값이므로, 클라에서는 우선순위 비교 없이 그대로 쓴다(수동 버튼 클릭 직후 revalidatePath
+// 로 이 값이 새로 내려오면 그게 곧 화면에 반영된다 — 예전엔 순찰 기록이 있으면 항상 그걸 우선해 수동
+// 입/퇴실을 눌러도 화면이 안 바뀌는 버그가 있었다).
+export type AttInfo = OccKind;
 const ATT_LABEL: Record<AttInfo, string> = { in: '재실', out: '하원' };
 // 재실(in) = 순찰 '입석'/스케쥴 '자습'과 같은 의미 → SEMANTIC.present 재사용. 하원(out)은 무채색(none).
 const ATT_COLOR: Record<AttInfo, { bg: string; bd: string }> = {
@@ -235,8 +235,7 @@ type StaticSeatProps = {
   s: Seat; i: number; clickable: boolean;
   numberEditMode: boolean;
   stuById: Map<string, Student>;
-  att: AttInfo | undefined;
-  lastPatrol: PatrolInfo | undefined; // 오늘 마지막 순찰 기록(세션 무관) — 평상시 재실/부재 표시에 attendance 보다 우선
+  occ: SeatOcc | undefined; // 오늘 재실/부재 최종 판정(순찰·출결 중 더 최근 것) — page.tsx 에서 서버 계산
   patrolMode: boolean;
   patrolMark: PatrolMark | undefined;
   ghost: Ghost | undefined;
@@ -244,7 +243,7 @@ type StaticSeatProps = {
   ctx: SeatCtx;
 };
 const StaticSeat = memo(function StaticSeat({
-  s, i, clickable, numberEditMode, stuById, att, lastPatrol, patrolMode, patrolMark, ghost, movingStudentId, ctx,
+  s, i, clickable, numberEditMode, stuById, occ, patrolMode, patrolMark, ghost, movingStudentId, ctx,
 }: StaticSeatProps) {
   const { moveTo, openSeat, setPatrolMenu, setSeatMenu, call } = ctx;
   // 터치 꾹누르기 = 좌석 컨텍스트 메뉴(데스크톱 우클릭 대체). 순찰/이동 중엔 비활성.
@@ -278,10 +277,9 @@ const StaticSeat = memo(function StaticSeat({
   const pts = patrolMode ? patrolMark?.points ?? 0 : 0;
   const moveTarget = !!movingStudentId && !s.current_student_id; // 이동 중이며 이 자리가 빈자리
   const style: CSSProperties = { ...seatStyle(s.status, false, false), left: x, top: y, cursor: (clickable || moveTarget) ? 'pointer' : 'default' };
-  // 평상시(순찰 모드 아님) 재실/부재 판정: 오늘 마지막 순찰 기록이 있으면 그 asIn 을 우선(→ 기존
-  // 재실('in')/하원('out') 색·라벨을 그대로 재사용), 없으면 attendance 기반 판정으로 폴백.
-  const attKind: AttInfo | undefined = lastPatrol ? (lastPatrol.asIn ? 'in' : 'out') : att;
-  const attTitle = lastPatrol?.atLabel || undefined;
+  // 평상시(순찰 모드 아님) 재실/부재 판정: page.tsx 가 이미 순찰·출결 중 더 최근 기록으로 계산해 내려준 값을 그대로 쓴다.
+  const attKind: AttInfo | undefined = occ?.kind;
+  const attTitle = occ?.title || undefined;
   // 순찰 모드면 순찰 상태 색이 출결/순찰기록 색을 덮고, 순찰 모드 자체에서는 마크 없는 좌석에 그 색을
   // 쓰지 않는다(고스트가 생겼으니 이제 불필요하고 고스트 색과 섞여 판단을 방해한다).
   // 우선순위(순찰 모드): 실제 마크 색(patSt) > 고스트 색(ghost, 아래) > 기본 좌석 색.
@@ -351,8 +349,7 @@ type OvRoomProps = {
   seats: Seat[];
   numberEditMode: boolean;
   stuById: Map<string, Student>;
-  attendance: Record<string, AttInfo>;
-  todayPatrol: Record<string, PatrolInfo>; // 오늘 마지막 순찰 기록(세션 무관) — 평상시 재실/부재 표시용
+  occupancy: Record<string, SeatOcc>; // 오늘 재실/부재 최종 판정(순찰·출결 중 더 최근 것)
   patrolMode: boolean;
   patrolMarks: Record<string, PatrolMark>;
   ghostOf: Map<string, Ghost>;
@@ -360,7 +357,7 @@ type OvRoomProps = {
   ctx: SeatCtx;
 };
 const OvRoom = memo(function OvRoom({
-  r, seats, numberEditMode, stuById, attendance, todayPatrol, patrolMode, patrolMarks, ghostOf, movingStudentId, ctx,
+  r, seats, numberEditMode, stuById, occupancy, patrolMode, patrolMarks, ghostOf, movingStudentId, ctx,
 }: OvRoomProps) {
   const rs = seats;
   const list = rs.map((s, i) => seatXY(s, i));
@@ -389,8 +386,7 @@ const OvRoom = memo(function OvRoom({
               clickable
               numberEditMode={numberEditMode}
               stuById={stuById}
-              att={sid ? attendance[sid] : undefined}
-              lastPatrol={sid ? todayPatrol[sid] : undefined}
+              occ={sid ? occupancy[sid] : undefined}
               patrolMode={patrolMode}
               patrolMark={mark}
               ghost={unmarked ? ghostOf.get(sid!) : undefined}
@@ -406,13 +402,13 @@ const OvRoom = memo(function OvRoom({
 });
 
 export default function FloorEditor({
-  rooms, seats, students, canManage, canEditStudent, initialRoomId, attendance, canAttend, patrol, canPatrol, lastPatrolAt,
+  rooms, seats, students, canManage, canEditStudent, initialRoomId, occupancy, canAttend, canPatrol, lastPatrolAt,
   openSession, scheduleMap, periods,
 }: {
   rooms: Room[]; seats: Seat[]; students: Student[];
   canManage: boolean; canEditStudent: boolean; initialRoomId: string | null;
-  attendance: Record<string, AttInfo>; canAttend: boolean;
-  patrol: Record<string, PatrolInfo>; canPatrol: boolean; lastPatrolAt: string | null;
+  occupancy: Record<string, SeatOcc>; canAttend: boolean; // 오늘 재실/부재 최종 판정(순찰·출결 중 더 최근 것)
+  canPatrol: boolean; lastPatrolAt: string | null;
   openSession: OpenPatrolSession | null; scheduleMap: Record<string, ScheduleInfo>;
   periods: Period[];
 }) {
@@ -637,8 +633,7 @@ export default function FloorEditor({
         clickable={clickable}
         numberEditMode={numberEditMode}
         stuById={stuById}
-        att={sid ? attendance[sid] : undefined}
-        lastPatrol={sid ? patrol[sid] : undefined}
+        occ={sid ? occupancy[sid] : undefined}
         patrolMode={patrolMode}
         patrolMark={mark}
         ghost={unmarked ? ghostOf.get(sid!) : undefined}
@@ -654,8 +649,7 @@ export default function FloorEditor({
       seats={seatsByRoom.get(r.id) ?? []}
       numberEditMode={numberEditMode}
       stuById={stuById}
-      attendance={attendance}
-      todayPatrol={patrol}
+      occupancy={occupancy}
       patrolMode={patrolMode}
       patrolMarks={patrolMarks}
       ghostOf={ghostOf}
@@ -979,7 +973,7 @@ export default function FloorEditor({
               const who = s.current_student_id ? stuById.get(s.current_student_id)?.name ?? null : null;
               const occ = s.status === 'occupied';
               const sel = isEdit ? selected.has(s.id) : selSeatId === s.id;
-              const att = !isEdit && s.current_student_id ? attendance[s.current_student_id] : undefined;
+              const att = !isEdit && s.current_student_id ? occupancy[s.current_student_id]?.kind : undefined;
               const st: CSSProperties = { ...seatStyle(s.status, sel, isEdit), left: s.x, top: s.y };
               if (att && ATT_COLOR[att]) { st.backgroundColor = ATT_COLOR[att].bg; st.borderColor = ATT_COLOR[att].bd; }
               return (
@@ -1052,7 +1046,7 @@ export default function FloorEditor({
     for (const s of rs) {
       if (!s.current_student_id) continue;
       assigned++;
-      if (attendance[s.current_student_id] === 'in') inRoom++;
+      if (occupancy[s.current_student_id]?.kind === 'in') inRoom++;
     }
     return { total, assigned, in: inRoom, vacant: total - assigned };
   };
@@ -1064,9 +1058,9 @@ export default function FloorEditor({
       .map((r) => { const st = roomStat(r); totalSeats += st.total; return { r, st }; })
       .sort((a, b) => a.r.floor - b.r.floor || a.r.name.localeCompare(b.r.name, 'ko'));
     let inNow = 0, out = 0;
-    for (const a of Object.values(attendance)) {
-      if (a === 'in') inNow++;
-      else if (a === 'out') out++;
+    for (const o of Object.values(occupancy)) {
+      if (o.kind === 'in') inNow++;
+      else if (o.kind === 'out') out++;
     }
     const vacant = Math.max(0, totalSeats - inNow);
     return (

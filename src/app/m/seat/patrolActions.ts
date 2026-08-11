@@ -61,6 +61,7 @@ export async function recordPatrol(formData: FormData) {
     await ensureCheckedInFromPatrol(me.activeBranchId, id, date, me.id);
   }
   revalidatePath("/m/seat");
+  revalidatePath("/seat");
 }
 
 // 여러 학생 상태를 한 번에 기록 (모바일 순찰의 '이 방 완료' — 미점검 좌석을 일괄 입석 처리).
@@ -141,6 +142,7 @@ export async function recordPatrolBulk(formData: FormData) {
   }
 
   revalidatePath("/m/seat");
+  revalidatePath("/seat");
 }
 
 // 순찰 이벤트 1건 삭제 (벌점 내역에서 정정 — id로)
@@ -152,6 +154,7 @@ export async function removePatrolEvent(formData: FormData) {
   revalidatePath("/m/penalty");
   revalidatePath("/m/patrol");
   revalidatePath("/m/seat");
+  revalidatePath("/seat");
 }
 
 // 마지막 순찰 기록 취소 (오탭 정정)
@@ -167,6 +170,7 @@ export async function undoLastPatrol(formData: FormData) {
     [id, me.activeBranchId, todayStr()],
   );
   revalidatePath("/m/seat");
+  revalidatePath("/seat");
 }
 
 // 순찰 시작 — 세션 행 생성(시작 시각 기록). id 는 클라가 생성해 patrol_event 와 매칭.
@@ -182,7 +186,16 @@ export async function startPatrol(formData: FormData) {
   revalidatePath("/m/seat");
 }
 
-// 순찰 종료 — 종료 시각 기록
+// 순찰 종료 — 종료 시각 기록 + 이 세션에서 찍은 학생별 마지막 마크를 출결로 확정한다.
+// recordPatrol/recordPatrolBulk 의 즉시 입실 연동(입석 → in)은 순찰 도중의 잠정 처리이고, 종료 시
+// 여기서 그 세션의 모든 마크(asIn true/false)를 최종적으로 출결에 반영해 정리한다.
+//
+// 쿼리 3개로 고정(학생별 루프 없음):
+//  1) 세션의 학생별 마지막 마크 — recordPatrol/recordPatrolBulk 가 세션당 학생 1행으로
+//     delete-then-insert 하므로 (student_id, session_id) 는 이미 유일 → distinct 불필요.
+//  2) 그 학생들의 오늘 마지막 출결 상태(이미 같은 kind 면 중복 삽입 방지) — 배열 파라미터로 세션
+//     학생만 필터(지점 전체가 아니라 이 세션 인원으로 한정되므로 학생별 루프보다 훨씬 적은 비용).
+//  3) 필요한 행만 모아 단일 multi-row insert.
 export async function endPatrol(formData: FormData) {
   const me = await guard("patrol.manage");
   const id = s(formData.get("sessionId"));
@@ -191,7 +204,47 @@ export async function endPatrol(formData: FormData) {
     `update patrol_session set ended_at=now() where id=$1 and branch_id=$2 and ended_at is null`,
     [id, me.activeBranchId],
   );
+
+  const marks = await db.query<{ student_id: string; state: string; at: string }>(
+    `select student_id, state, at::text as at from patrol_event where session_id=$1 and branch_id=$2`,
+    [id, me.activeBranchId],
+  );
+  if (marks.rows.length > 0) {
+    const date = todayStr();
+    const ids = marks.rows.map((r) => r.student_id);
+    const idArr = "{" + ids.join(",") + "}"; // fetch_types:false → 배열은 리터럴 문자열로 전달
+    const lastAtt = await db.query<{ student_id: string; kind: string }>(
+      `select distinct on (student_id) student_id, kind
+         from attendance_event
+        where branch_id=$1 and date=$2 and student_id = any($3::uuid[])
+        order by student_id, at desc`,
+      [me.activeBranchId, date, idArr],
+    );
+    const lastKind = new Map(lastAtt.rows.map((r) => [r.student_id, r.kind]));
+
+    // params 앞 3개(branch_id/date/created_by)는 모든 행이 공유 — 학생별로는 student_id/kind/at 만 붙인다.
+    const params: (string | null)[] = [me.activeBranchId, date, me.id];
+    const values: string[] = [];
+    for (const r of marks.rows) {
+      const asIn = PATROL_BY_KEY[r.state]?.asIn ?? true;
+      const kind = asIn ? "in" : "out";
+      if (lastKind.get(r.student_id) === kind) continue; // 이미 같은 상태 — 중복 방지
+      const i = params.length;
+      params.push(r.student_id, kind, r.at);
+      values.push(`($1,$${i + 1},$${i + 2},true,$2,$3,$${i + 3})`);
+    }
+    if (values.length > 0) {
+      // at 은 그 학생의 마지막 마크 시각을 그대로 쓴다(종료 시각 대신 — 실제 상태가 확정된 시점).
+      await db.query(
+        `insert into attendance_event(branch_id, student_id, kind, auto, date, created_by, at)
+         values ${values.join(",")}`,
+        params,
+      );
+    }
+  }
+
   revalidatePath("/m/seat");
+  revalidatePath("/seat");
 }
 
 // 순찰 세션 삭제 (오시작·테스트 정정) — 세션 행 + 그 세션의 순찰 기록 함께 삭제
@@ -202,6 +255,7 @@ export async function deletePatrolSession(formData: FormData) {
   await db.query(`delete from patrol_event where session_id=$1 and branch_id=$2`, [id, me.activeBranchId]);
   await db.query(`delete from patrol_session where id=$1 and branch_id=$2`, [id, me.activeBranchId]);
   revalidatePath("/m/seat");
+  revalidatePath("/seat");
 }
 
 // 순찰 이력 — 세션별 시각 + 점검 인원 + 벌점 합계
@@ -264,6 +318,7 @@ export async function setPatrolMark(formData: FormData) {
   }
   revalidatePath("/m/patrol");
   revalidatePath("/m/seat");
+  revalidatePath("/seat");
 }
 
 // 지난 순찰 기록에서 학생 상태 지우기(오탭 삭제)
@@ -278,6 +333,7 @@ export async function clearPatrolMark(formData: FormData) {
   );
   revalidatePath("/m/patrol");
   revalidatePath("/m/seat");
+  revalidatePath("/seat");
 }
 
 // 미종료 순찰 세션 조회 (모바일 "이어하기") — 지점당 최신 1건.

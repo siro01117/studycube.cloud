@@ -19,12 +19,15 @@ async function record(branchId: string | null, studentId: string, kind: "in" | "
 }
 
 // 입실 기록 (불변)
+// /m/seat(데스크톱)·/seat(모바일) 두 화면 모두 이 출결이 재실/부재 판정에 들어가므로 둘 다 갱신한다
+// (예전엔 /m/seat 만 revalidate 해서 /seat 화면 수동 버튼이 로컬 낙관적 state 없인 반영되지 않았다).
 export async function checkIn(formData: FormData) {
   const me = await guard("attendance.edit");
   const id = s(formData.get("studentId"));
   if (!id) return;
   await record(me.activeBranchId, id, "in", false, me.id);
   revalidatePath("/m/seat");
+  revalidatePath("/seat");
 }
 
 // 퇴실 기록 (불변)
@@ -34,6 +37,7 @@ export async function checkOut(formData: FormData) {
   if (!id) return;
   await record(me.activeBranchId, id, "out", false, me.id);
   revalidatePath("/m/seat");
+  revalidatePath("/seat");
 }
 
 // 마지막 기록 취소(오입력 정정용)
@@ -50,6 +54,7 @@ export async function undoLastEvent(formData: FormData) {
     [id, me.activeBranchId, date],
   );
   revalidatePath("/m/seat");
+  revalidatePath("/seat");
 }
 
 // 특정 학생·날짜의 입·퇴실 기록 조회 (팝업용)

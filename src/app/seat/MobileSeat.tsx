@@ -9,14 +9,13 @@ import MobileNav from "../_shared/MobileNav";
 import { SW, xyOf } from "@/lib/seatmap";
 import { checkIn, checkOut } from "../m/seat/attendanceActions";
 import { tint, line, ink } from "@/lib/semantic-color";
+import type { OccKind, SeatOcc } from "@/lib/occupancy";
 
 export type SRoom = { id: string; name: string; floor: number };
 export type SSeat = { id: string; room_id: string | null; grid_x: number | null; grid_y: number | null; number: number | null; label: string; current_student_id: string | null };
 export type SStudent = { id: string; name: string; grade: string | null; school: string | null; student_phone: string | null; guardian_phone: string | null };
-export type Att = "in" | "out";
-// 오늘 마지막 순찰 기록 — page.tsx 에서 서버 계산해 내려준다(atLabel 은 "순찰 20:12 · 자리비움" 같은
-// title 문구, 클라 렌더에서 new Date()/toLocale* 호출 금지 원칙). 재실/부재 표시가 attendance 보다 이걸 우선한다.
-export type LastPatrol = { asIn: boolean; atLabel: string };
+// 오늘 재실/부재 최종 판정 = 순찰·출결 중 더 최근 기록(src/lib/occupancy.ts, page.tsx 가 서버에서 계산).
+export type Att = OccKind;
 
 // 재실(in) = 순찰 '입석'/스케쥴 '자습'과 같은 의미 → SEMANTIC.present 재사용(FloorEditor.tsx 의
 // ATT_COLOR 와 동일 계산). 하원(out)은 무채색(none).
@@ -25,12 +24,11 @@ const ATT = {
   out: { bg: tint("none", 12), bd: line("none", 40), fg: "var(--faint)", label: "하원" },
 } as const;
 
-export default function MobileSeat({ rooms, seats, students, attendance, lastPatrol, canAttend }: {
+export default function MobileSeat({ rooms, seats, students, occupancy, canAttend }: {
   rooms: SRoom[]; seats: SSeat[]; students: SStudent[];
-  attendance: Record<string, Att>; lastPatrol: Record<string, LastPatrol>; canAttend: boolean;
+  occupancy: Record<string, SeatOcc>; canAttend: boolean;
 }) {
   const [roomIdx, setRoomIdx] = useState(0);
-  const [att, setAtt] = useState(attendance);
   const [sel, setSel] = useState<SSeat | null>(null);
   const [, start] = useTransition();
 
@@ -47,18 +45,20 @@ export default function MobileSeat({ rooms, seats, students, attendance, lastPat
   const seatById = useMemo(() => new Map(roomSeats.map((s) => [s.id, s])), [roomSeats]);
   const canvasSeats = useMemo(() => roomSeats.map((s, i) => ({ id: s.id, ...xyOf(s, i) })), [roomSeats]);
 
-  const inCount = roomSeats.filter((s) => s.current_student_id && att[s.current_student_id] === "in").length;
+  const inCount = roomSeats.filter((s) => s.current_student_id && occupancy[s.current_student_id]?.kind === "in").length;
   const assigned = roomSeats.filter((s) => s.current_student_id).length;
 
+  // 수동 입/퇴실 버튼 — 로컬에 낙관적 상태를 두지 않고 서버 액션의 revalidatePath("/m/seat") 로 이
+  // 페이지가 다시 렌더될 때 새로 내려오는 occupancy 를 그대로 반영한다(FloorEditor.tsx 와 동일 방식).
+  // 예전엔 로컬 낙관적 state 가 순찰 기록 우선순위 버그와 겹쳐 수동 버튼을 눌러도 화면이 안 바뀌었다.
   const mark = (studentId: string, kind: Att) => {
-    setAtt((a) => ({ ...a, [studentId]: kind }));
     const fd = new FormData(); fd.set("studentId", studentId);
     start(async () => { await (kind === "in" ? checkIn(fd) : checkOut(fd)); });
     setSel(null);
   };
 
   const selStudent = sel?.current_student_id ? stOf.get(sel.current_student_id) : null;
-  const selAtt = sel?.current_student_id ? att[sel.current_student_id] : undefined;
+  const selAtt = sel?.current_student_id ? occupancy[sel.current_student_id]?.kind : undefined;
 
   return (
     <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column", background: "var(--bg)" }}>
@@ -78,13 +78,12 @@ export default function MobileSeat({ rooms, seats, students, attendance, lastPat
         renderSeat={(id) => {
           const s = seatById.get(id)!;
           const sid = s.current_student_id;
-          // 재실/부재 판정: 오늘 마지막 순찰 기록이 있으면 그 asIn 우선(→ 기존 재실/하원 색·라벨 재사용),
-          // 없으면 attendance 기반 판정으로 폴백.
-          const lp = sid ? lastPatrol[sid] : undefined;
-          const a: Att | undefined = lp ? (lp.asIn ? "in" : "out") : (sid ? att[sid] : undefined);
+          // 재실/부재 판정: page.tsx 가 순찰·출결 중 더 최근 기록으로 이미 계산해 내려준 값을 그대로 쓴다.
+          const o = sid ? occupancy[sid] : undefined;
+          const a = o?.kind;
           const c = a ? ATT[a] : null;
           return (
-            <div title={lp?.atLabel || undefined} style={{
+            <div title={o?.title || undefined} style={{
               width: "100%", height: "100%", borderRadius: 10,
               background: c ? c.bg : sid ? "var(--card)" : "var(--panel2)",
               border: `1.5px solid ${c ? c.bd : "var(--line)"}`,

@@ -3,9 +3,9 @@ import type { Viewport } from "next";
 import { getMe, can } from "@/lib/auth";
 import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
-import { todayKey, timeLabel } from "@/lib/date";
-import { PATROL_BY_KEY } from "@/lib/patrol";
-import MobileSeat, { type SRoom, type SSeat, type SStudent, type Att, type LastPatrol } from "./MobileSeat";
+import { todayKey } from "@/lib/date";
+import { buildOccupancy, type SeatOcc } from "@/lib/occupancy";
+import MobileSeat, { type SRoom, type SSeat, type SStudent } from "./MobileSeat";
 
 export const runtime = "nodejs";
 
@@ -31,14 +31,14 @@ export default async function MobileSeatPage() {
       `select id, name, grade, school, student_phone, guardian_phone from student where branch_id=$1`,
       [branch],
     ),
-    db.query<{ student_id: string; kind: string }>(
-      `select distinct on (student_id) student_id, kind
+    // 오늘 학생별 마지막 출결 이벤트 — at/auto 도 함께(순찰 기록과 시각 비교 + title 표시용).
+    db.query<{ student_id: string; kind: string; at: string; auto: boolean }>(
+      `select distinct on (student_id) student_id, kind, at::text as at, auto
          from attendance_event where branch_id=$1 and date=$2
          order by student_id, at desc`,
       [branch, today],
     ),
-    // 오늘 학생별 마지막 순찰 기록 — 지점 전체 1쿼리(학생별 루프 없음). 좌석 재실/부재 표시가
-    // attendance 보다 이걸 우선한다(없으면 attendance 폴백, MobileSeat.tsx 참고).
+    // 오늘 학생별 마지막 순찰 기록 — 지점 전체 1쿼리(학생별 루프 없음).
     db.query<{ student_id: string; state: string; at: string }>(
       `select distinct on (student_id) student_id, state, at::text as at
          from patrol_event where branch_id=$1 and date=$2
@@ -47,22 +47,16 @@ export default async function MobileSeatPage() {
     ),
   ]);
 
-  const attendance: Record<string, Att> = {};
-  for (const r of att.rows) attendance[r.student_id] = r.kind === "in" ? "in" : "out";
-  const lastPatrol: Record<string, LastPatrol> = {};
-  for (const r of pat.rows) {
-    const cfg = PATROL_BY_KEY[r.state];
-    const asIn = cfg?.asIn ?? true;
-    lastPatrol[r.student_id] = { asIn, atLabel: `순찰 ${timeLabel(r.at)} · ${cfg?.label ?? r.state} · ${asIn ? "입실 간주" : "퇴실 간주"}` };
-  }
+  // 오늘 재실/부재 최종 판정 — 학생별 마지막 순찰 기록과 마지막 출결 기록 중 시각이 더 늦은 쪽(동시각이면
+  // 출결)을 따른다(src/lib/occupancy.ts, /m/seat 화면과 동일 규칙 공유).
+  const occupancy: Record<string, SeatOcc> = buildOccupancy(att.rows, pat.rows);
 
   return (
     <MobileSeat
       rooms={rooms.rows}
       seats={seats.rows}
       students={students.rows}
-      attendance={attendance}
-      lastPatrol={lastPatrol}
+      occupancy={occupancy}
       canAttend={can(me, "attendance.edit")}
     />
   );

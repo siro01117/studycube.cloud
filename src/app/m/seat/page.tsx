@@ -3,12 +3,12 @@ import Link from "next/link";
 import { getMe, can } from "@/lib/auth";
 import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
-import FloorEditor, { type Room, type Seat, type Student, type AttInfo, type PatrolInfo, type ScheduleInfo } from "./FloorEditor";
+import FloorEditor, { type Room, type Seat, type Student, type ScheduleInfo } from "./FloorEditor";
 import PhoneRedirect from "../_shared/PhoneRedirect";
-import { todayKey as todayStr, weekdayOf, timeLabel } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
+import { todayKey as todayStr, weekdayOf } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
 import type { DaySlot, Period } from "@/lib/schedule";
 import { getOpenPatrolSession } from "./patrolActions";
-import { PATROL_BY_KEY } from "@/lib/patrol";
+import { buildOccupancy, type SeatOcc } from "@/lib/occupancy";
 
 export const runtime = "nodejs";
 
@@ -48,14 +48,15 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
       [branch],
     ),
     db.query<{ name: string }>(`select name from branch where id=$1`, [branch]),
-    db.query<{ student_id: string; kind: string }>(
-      `select distinct on (student_id) student_id, kind
+    // 오늘 학생별 마지막 출결 이벤트 — at/auto 도 함께 가져온다(순찰 기록과 시각 비교 + title 표시용).
+    db.query<{ student_id: string; kind: string; at: string; auto: boolean }>(
+      `select distinct on (student_id) student_id, kind, at::text as at, auto
          from attendance_event where branch_id=$1 and date=$2
          order by student_id, at desc`,
       [branch, todayStr()],
     ),
     // 오늘 순찰: 최신 상태·시각 + 점수합을 한 번의 스캔으로(같은 테이블 두 번 읽지 않음, 학생별 루프 없음).
-    // at 은 평상시 좌석 배치도의 재실/부재 title("순찰 20:12 · 자리비움")에 쓴다.
+    // at 은 좌석 배치도 재실/부재 판정에서 출결 기록과 시각을 비교하는 데 쓴다(buildOccupancy).
     db.query<{ student_id: string; state: string | null; at: string | null; points: number }>(
       `select student_id,
               (array_agg(state order by at desc))[1] as state,
@@ -101,20 +102,9 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
   const periods: Period[] = periodRows.rows.map((r) => ({ start: r.start_min, end: r.end_min }));
 
   const branchName = br.rows[0]?.name ?? "";
-  const attendance: Record<string, AttInfo> = {};
-  for (const r of att.rows) attendance[r.student_id] = r.kind === "in" ? "in" : "out";
-  // 오늘 마지막 순찰 기록 — 좌석 배치도 평상시 재실/부재 표시가 attendance 보다 이걸 우선한다(없으면 폴백).
-  const patrol: Record<string, PatrolInfo> = {};
-  for (const r of pat.rows) {
-    const cfg = r.state ? PATROL_BY_KEY[r.state] : undefined;
-    const asIn = cfg?.asIn ?? true;
-    patrol[r.student_id] = {
-      state: r.state ?? "",
-      points: r.points,
-      asIn,
-      atLabel: r.at ? `순찰 ${timeLabel(r.at)} · ${cfg?.label ?? r.state} · ${asIn ? "입실 간주" : "퇴실 간주"}` : "",
-    };
-  }
+  // 오늘 재실/부재 최종 판정 — 학생별 마지막 순찰 기록과 마지막 출결 기록 중 시각이 더 늦은 쪽(동시각이면
+  // 출결)을 따른다(src/lib/occupancy.ts, /seat 화면과 동일 규칙 공유).
+  const occupancy: Record<string, SeatOcc> = buildOccupancy(att.rows, pat.rows);
   const initialRoomId =
     (sp.room && rooms.rows.some((r) => r.id === sp.room) ? sp.room : rooms.rows[0]?.id) ?? null;
 
@@ -159,9 +149,8 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
         canManage={canManage}
         canEditStudent={canEditStudent}
         initialRoomId={initialRoomId}
-        attendance={attendance}
+        occupancy={occupancy}
         canAttend={canAttend}
-        patrol={patrol}
         canPatrol={canPatrol}
         lastPatrolAt={lastPat.rows[0]?.last ?? null}
         openSession={openSession}
