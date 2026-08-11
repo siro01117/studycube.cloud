@@ -4,7 +4,7 @@ import { getMe, can } from "@/lib/auth";
 import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
 import { todayKey, weekdayOf } from "@/lib/date";
-import type { DaySlot } from "@/lib/schedule";
+import type { DaySlot, Period } from "@/lib/schedule";
 import { getOpenPatrolSession } from "../m/seat/patrolActions";
 import MobilePatrol, { type MRoom, type MSeat, type MStudent, type MScheduleInfo } from "./MobilePatrol";
 
@@ -33,7 +33,7 @@ export default async function MobilePatrolPage() {
   const jsDow = weekdayOf(today);
   const dbDay = jsDow === 0 ? 7 : jsDow;
 
-  const [rooms, seats, students, att, openSession, hoursRows, ruleRows, excRows] = await Promise.all([
+  const [rooms, seats, students, att, openSession, hoursRows, ruleRows, excRows, periodRows] = await Promise.all([
     db.query<MRoom>(`select id, name, floor from room where branch_id=$1 order by floor, name`, [branch]),
     db.query<MSeat>(
       `select id, room_id, grid_x, grid_y, number, label, current_student_id from seat where branch_id=$1`,
@@ -68,7 +68,13 @@ export default async function MobilePatrolPage() {
          from schedule_exception where branch_id=$1 and date=$2`,
       [branch, today],
     ),
+    // 4) 원 운영 시간표(교시) — 지점 단위, 자습 판정에 반영(등하원 안 + 교시 안이어야 자습).
+    db.query<{ start_min: number; end_min: number }>(
+      `select start_min, end_min from schedule_period where branch_id=$1 order by ord`,
+      [branch],
+    ),
   ]);
+  const periods: Period[] = periodRows.rows.map((r) => ({ start: r.start_min, end: r.end_min }));
 
   const attendance: Record<string, "in" | "out"> = {};
   for (const r of att.rows) attendance[r.student_id] = r.kind === "in" ? "in" : "out";
@@ -99,6 +105,7 @@ export default async function MobilePatrolPage() {
       branchKey={branch ?? "nobranch"}
       openSession={openSession}
       scheduleMap={scheduleMap}
+      periods={periods}
     />
   );
 }

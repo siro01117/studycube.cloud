@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import FloorEditor, { type Room, type Seat, type Student, type AttInfo, type PatrolInfo, type ScheduleInfo } from "./FloorEditor";
 import PhoneRedirect from "../_shared/PhoneRedirect";
 import { todayKey as todayStr, weekdayOf, timeLabel } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
-import type { DaySlot } from "@/lib/schedule";
+import type { DaySlot, Period } from "@/lib/schedule";
 import { getOpenPatrolSession } from "./patrolActions";
 import { PATROL_BY_KEY } from "@/lib/patrol";
 
@@ -31,7 +31,7 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
   const jsDow = weekdayOf(today);
   const dbDay = jsDow === 0 ? 7 : jsDow;
 
-  const [rooms, students, seats, br, att, pat, lastPat, openSession, hoursRows, ruleRows, excRows] = await Promise.all([
+  const [rooms, students, seats, br, att, pat, lastPat, openSession, hoursRows, ruleRows, excRows, periodRows] = await Promise.all([
     db.query<Room>(
       `select id, name, floor, cols, rows, pos_x, pos_y, door_side from room where branch_id=$1 order by floor, name`,
       [branch],
@@ -92,7 +92,13 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
          from schedule_exception where branch_id=$1 and date=$2`,
       [branch, today],
     ),
+    // 4) 원 운영 시간표(교시) — 지점 단위, 자습 판정에 반영(등하원 안 + 교시 안이어야 자습).
+    db.query<{ start_min: number; end_min: number }>(
+      `select start_min, end_min from schedule_period where branch_id=$1 order by ord`,
+      [branch],
+    ),
   ]);
+  const periods: Period[] = periodRows.rows.map((r) => ({ start: r.start_min, end: r.end_min }));
 
   const branchName = br.rows[0]?.name ?? "";
   const attendance: Record<string, AttInfo> = {};
@@ -160,6 +166,7 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
         lastPatrolAt={lastPat.rows[0]?.last ?? null}
         openSession={openSession}
         scheduleMap={scheduleMap}
+        periods={periods}
       />
     </main>
   );

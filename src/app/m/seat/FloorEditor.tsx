@@ -14,7 +14,7 @@ import { useLongPress } from '../_shared/useLongPress';
 import Link from 'next/link';
 import { recordPatrol, clearPatrolMark, startPatrol, endPatrol, getPatrolSessionDetail, type OpenPatrolSession } from './patrolActions';
 import { PATROL_STATES, PATROL_BY_KEY } from '@/lib/patrol';
-import { statusAt, upcomingAt, ghostStyleOf, reasonColor, isPatrolExempt, type DaySlot } from '@/lib/schedule';
+import { statusAt, ghostStyleOf, reasonColor, isPatrolExempt, type DaySlot, type Period } from '@/lib/schedule';
 import { tint, line, ink } from '@/lib/semantic-color';
 
 // ---------------- types ----------------
@@ -58,14 +58,8 @@ type PatrolMark = { state: string; points: number };
 // page.tsx 에서 branch 전체를 3개 쿼리로 읽어 memory join(모바일 순찰 page.tsx 와 동일 패턴).
 // hours 도 slots 도 없으면(=이 학생은 스케쥴 정보가 아예 없음) 고스트를 그리지 않는다.
 export type ScheduleInfo = { hours: { arrive_min: number; leave_min: number } | null; slots: DaySlot[] };
-type Ghost = { state: 'scheduled' | 'study' | 'away' | 'none'; label: string; slot?: DaySlot };
-type Upcoming = { inMin: number; slot: DaySlot };
+type Ghost = { state: 'scheduled' | 'study' | 'break' | 'away' | 'none'; label: string; slot?: DaySlot };
 
-// 임박 일정 미리 알림 — 이 분 이내에 시작하는 일정만 보조 라벨로 보여준다.
-const UPCOMING_WITHIN_MIN = 60;
-const UPCOMING_SOON_MIN = 10; // 이 이하로 남으면 강조(warn) 색 + "곧 이동" 집계
-// 좌석이 이 높이 미만이면 보조 라벨(세 번째 줄)은 생략하고 title 로만 남긴다.
-const MIN_SEAT_H_FOR_SUBLABEL = 60;
 // scheduled 상태 예상 표시 색 · 배경/스트립/흐림 계산은 src/lib/schedule.ts 의 REASON_SEMANTIC/ghostStyleOf/reasonColor
 // (모바일 MobilePatrol.tsx 와 공용 — 계산이 갈리지 않도록 여기서 재정의하지 않는다).
 
@@ -246,12 +240,11 @@ type StaticSeatProps = {
   patrolMode: boolean;
   patrolMark: PatrolMark | undefined;
   ghost: Ghost | undefined;
-  upcoming: Upcoming | undefined;
   movingStudentId: string | null;
   ctx: SeatCtx;
 };
 const StaticSeat = memo(function StaticSeat({
-  s, i, clickable, numberEditMode, stuById, att, lastPatrol, patrolMode, patrolMark, ghost, upcoming, movingStudentId, ctx,
+  s, i, clickable, numberEditMode, stuById, att, lastPatrol, patrolMode, patrolMark, ghost, movingStudentId, ctx,
 }: StaticSeatProps) {
   const { moveTo, openSeat, setPatrolMenu, setSeatMenu, call } = ctx;
   // 터치 꾹누르기 = 좌석 컨텍스트 메뉴(데스크톱 우클릭 대체). 순찰/이동 중엔 비활성.
@@ -313,8 +306,6 @@ const StaticSeat = memo(function StaticSeat({
     if (gs.strip) style.backgroundImage = `linear-gradient(to right, ${gs.strip} 0 3px, transparent 3px)`;
     ghostLabelColor = ghost.state === 'away' || ghost.state === 'none' ? 'var(--faint)' : reasonColor(ghost.label);
   }
-  const upcomingText = upcoming ? `${upcoming.inMin}분 뒤 ${upcoming.slot.reason}` : undefined;
-  const showUpcomingLabel = !!upcoming && SH >= MIN_SEAT_H_FOR_SUBLABEL;
   return (
     <div
       className="seatbox"
@@ -328,21 +319,9 @@ const StaticSeat = memo(function StaticSeat({
       }}
       onContextMenu={(e) => { e.preventDefault(); if (!movingStudentId && !patrolMode) setSeatMenu({ x: e.clientX, y: e.clientY, seat: s }); }}
       style={style}
-      title={upcomingText && !showUpcomingLabel ? upcomingText : (!patrolMode ? attTitle : undefined)}
+      title={!patrolMode ? attTitle : undefined}
     >
       {seatInner(s.number, s.label, who)}
-      {showUpcomingLabel && upcoming && (
-        <span
-          title={upcomingText}
-          style={{
-            fontSize: 10, fontWeight: upcoming.inMin <= UPCOMING_SOON_MIN ? 700 : 400,
-            color: upcoming.inMin <= UPCOMING_SOON_MIN ? 'var(--warn)' : 'var(--dim)',
-            lineHeight: 1.1, maxWidth: SW - 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}
-        >
-          {upcoming.inMin}분 뒤 {upcoming.slot.reason}
-        </span>
-      )}
       {patSt ? (
         <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: patSt.dot }}>
           {patSt.label}
@@ -377,12 +356,11 @@ type OvRoomProps = {
   patrolMode: boolean;
   patrolMarks: Record<string, PatrolMark>;
   ghostOf: Map<string, Ghost>;
-  upcomingOf: Map<string, Upcoming>;
   movingStudentId: string | null;
   ctx: SeatCtx;
 };
 const OvRoom = memo(function OvRoom({
-  r, seats, numberEditMode, stuById, attendance, todayPatrol, patrolMode, patrolMarks, ghostOf, upcomingOf, movingStudentId, ctx,
+  r, seats, numberEditMode, stuById, attendance, todayPatrol, patrolMode, patrolMarks, ghostOf, movingStudentId, ctx,
 }: OvRoomProps) {
   const rs = seats;
   const list = rs.map((s, i) => seatXY(s, i));
@@ -416,7 +394,6 @@ const OvRoom = memo(function OvRoom({
               patrolMode={patrolMode}
               patrolMark={mark}
               ghost={unmarked ? ghostOf.get(sid!) : undefined}
-              upcoming={unmarked ? upcomingOf.get(sid!) : undefined}
               movingStudentId={movingStudentId}
               ctx={ctx}
             />
@@ -430,13 +407,14 @@ const OvRoom = memo(function OvRoom({
 
 export default function FloorEditor({
   rooms, seats, students, canManage, canEditStudent, initialRoomId, attendance, canAttend, patrol, canPatrol, lastPatrolAt,
-  openSession, scheduleMap,
+  openSession, scheduleMap, periods,
 }: {
   rooms: Room[]; seats: Seat[]; students: Student[];
   canManage: boolean; canEditStudent: boolean; initialRoomId: string | null;
   attendance: Record<string, AttInfo>; canAttend: boolean;
   patrol: Record<string, PatrolInfo>; canPatrol: boolean; lastPatrolAt: string | null;
   openSession: OpenPatrolSession | null; scheduleMap: Record<string, ScheduleInfo>;
+  periods: Period[];
 }) {
   const floors = useMemo(
     () => Array.from(new Set(rooms.map((r) => r.floor))).sort((a, b) => a - b),
@@ -577,27 +555,15 @@ export default function FloorEditor({
     for (const [sid, info] of Object.entries(scheduleMap)) {
       // 등하원·오늘 일정 둘 다 없으면 "모르는 것"(none/미설정) — away(등원전/하원)와 구분해 회색으로 표시한다.
       if (!info.hours && info.slots.length === 0) { m.set(sid, { state: 'none', label: '미설정' }); continue; }
-      let result = statusAt(nowMin, info.hours, info.slots);
+      let result = statusAt(nowMin, info.hours, info.slots, periods);
       if (result.state === 'away' && nowMin < 300) {
-        const alt = statusAt(nowMin + 1440, info.hours, info.slots);
+        const alt = statusAt(nowMin + 1440, info.hours, info.slots, periods);
         if (alt.state !== 'away') result = alt;
       }
       m.set(sid, result);
     }
     return m;
-  }, [scheduleMap, nowMin]);
-
-  // 학생별 임박 일정 — 기준 시각으로부터 UPCOMING_WITHIN_MIN 분 이내에 시작하는 다음 일정.
-  const upcomingOf = useMemo(() => {
-    const m = new Map<string, Upcoming>();
-    if (nowMin == null) return m;
-    for (const [sid, info] of Object.entries(scheduleMap)) {
-      if (info.slots.length === 0) continue;
-      const up = upcomingAt(nowMin, info.slots, UPCOMING_WITHIN_MIN);
-      if (up) m.set(sid, up);
-    }
-    return m;
-  }, [scheduleMap, nowMin]);
+  }, [scheduleMap, nowMin, periods]);
 
   // 순찰 종료 시 미점검 경고 — 현재 층에 배정된 학생이 있는데 이번 세션에 마크가 없는 좌석.
   // 오프라인 큐 대기분도 patrolMarks 에 즉시 반영되므로(patrolMenuItems) 별도 처리 불필요.
@@ -611,8 +577,9 @@ export default function FloorEditor({
       .sort((a, b) => (a.number ?? 0) - (b.number ?? 0));
   }, [patrolMode, floorSel, rooms, seats, patrolMarks, ghostOf]);
 
-  // 순찰 툴바 요약 — 점검 N/M · 제외 K명 · 예상 재실 K명 · 미등원 J명 · 곧 이동 P명(방 단위 배지가 없는 데스크탑 대체).
+  // 순찰 툴바 요약 — 점검 N/M · 제외 K명 · 예상 재실 K명 · 미등원 J명(방 단위 배지가 없는 데스크탑 대체).
   // M(total)·K(exempt)는 고스트 none/away 를 분모에서 뺀 값 — N(marked)은 제외 대상이라도 실제로 찍었으면 포함한다.
+  // present 에는 study·break·scheduled 를 모두 합산한다(등하원 시간 안에 있으므로 "예상 재실").
   const patrolSummary = useMemo(() => {
     if (!patrolMode || typeof floorSel !== 'number') return null;
     const roomIds = new Set(rooms.filter((r) => r.floor === floorSel).map((r) => r.id));
@@ -620,7 +587,7 @@ export default function FloorEditor({
     const exempt = floorAssigned.filter((s) => isPatrolExempt(ghostOf.get(s.current_student_id!)?.state)).length;
     const total = floorAssigned.length - exempt;
     const marked = floorAssigned.filter((s) => patrolMarks[s.current_student_id!]).length;
-    let present = 0, away = 0, unset = 0, soon = 0;
+    let present = 0, away = 0, unset = 0;
     if (nowMin != null) {
       for (const s of floorAssigned) {
         const sid = s.current_student_id!;
@@ -630,14 +597,10 @@ export default function FloorEditor({
           else if (g.state === 'none') unset++;
           else present++;
         }
-        if (!patrolMarks[sid]) {
-          const up = upcomingOf.get(sid);
-          if (up && up.inMin <= UPCOMING_SOON_MIN) soon++;
-        }
       }
     }
-    return { marked, total, exempt, present, away, unset, soon };
-  }, [patrolMode, floorSel, rooms, seats, nowMin, ghostOf, upcomingOf, patrolMarks]);
+    return { marked, total, exempt, present, away, unset };
+  }, [patrolMode, floorSel, rooms, seats, nowMin, ghostOf, patrolMarks]);
 
   const roomsOnFloor = (fl: number) => rooms.filter((r) => r.floor === fl);
   const selRoom = roomSel !== 'all' ? rooms.find((r) => r.id === roomSel) ?? null : null;
@@ -676,7 +639,6 @@ export default function FloorEditor({
         patrolMode={patrolMode}
         patrolMark={mark}
         ghost={unmarked ? ghostOf.get(sid!) : undefined}
-        upcoming={unmarked ? upcomingOf.get(sid!) : undefined}
         movingStudentId={movingStudentId}
         ctx={ctx}
       />
@@ -694,7 +656,6 @@ export default function FloorEditor({
       patrolMode={patrolMode}
       patrolMarks={patrolMarks}
       ghostOf={ghostOf}
-      upcomingOf={upcomingOf}
       movingStudentId={movingStudentId}
       ctx={ctx}
     />
@@ -1405,7 +1366,6 @@ export default function FloorEditor({
               {patrolSummary.present > 0 && ` · 예상 재실 ${patrolSummary.present}명`}
               {patrolSummary.away > 0 && ` · 등원전 ${patrolSummary.away}명`}
               {patrolSummary.unset > 0 && ` · 미설정 ${patrolSummary.unset}명`}
-              {patrolSummary.soon > 0 && <span style={{ color: 'var(--warn)', fontWeight: 700 }}> · 곧 이동 {patrolSummary.soon}명</span>}
             </span>
           )}
           <button

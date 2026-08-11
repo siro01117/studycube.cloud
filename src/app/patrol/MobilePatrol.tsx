@@ -8,7 +8,7 @@ import { PATROL_STATES, PATROL_BY_KEY } from "@/lib/patrol";
 import { SW, SH, xyOf, boundsOf } from "@/lib/seatmap";
 import { PatrolQueue, type QueueStatus } from "@/lib/patrol-queue";
 import { startPatrol, endPatrol, recordPatrolBulk, clearPatrolMark, getPatrolSessionDetail } from "../m/seat/patrolActions";
-import { statusAt, upcomingAt, ghostStyleOf, reasonColor, isPatrolExempt, type DaySlot } from "@/lib/schedule";
+import { statusAt, ghostStyleOf, reasonColor, isPatrolExempt, type DaySlot, type Period } from "@/lib/schedule";
 
 export type MRoom = { id: string; name: string; floor: number };
 export type MSeat = { id: string; room_id: string | null; grid_x: number | null; grid_y: number | null; number: number | null; label: string; current_student_id: string | null };
@@ -29,11 +29,6 @@ export type MOpenSession = {
 // 이 화면은 항상 "순찰 모드"다(별도의 평소 배치도 뷰가 없다) — 출결(입/하원) 색은 마크 없는 좌석에
 // 더 이상 쓰지 않는다(고스트 색과 섞여 판단을 방해했다). 실제 마크(preset) > 고스트 > 기본 좌석 색.
 const MIN_S = 0.5, MAX_S = 3;
-// 임박 일정 미리 알림 — 이 분 이내에 시작하는 일정만 보조 라벨로 보여준다.
-const UPCOMING_WITHIN_MIN = 60;
-const UPCOMING_SOON_MIN = 10; // 이 이하로 남으면 강조(warn) 색
-// 좌석이 이 높이 미만이면 이름+상태 두 줄도 빠듯해 보조 라벨(세 번째 줄)은 title 로만 남긴다.
-const MIN_SEAT_H_FOR_SUBLABEL = 60;
 // 좌석 테두리 두께·라운드 — 고스트 좌측 스트립을 테두리 안쪽으로 들일 때도 이 값을 참조한다(하드코딩 금지).
 const SEAT_BORDER_W = 1.5;
 const SEAT_RADIUS = 10;
@@ -63,11 +58,12 @@ function Elapsed({ startedAt }: { startedAt: number }) {
   return <span style={{ fontVariantNumeric: "tabular-nums" }}>{(hh > 0 ? hh + ":" : "") + String(mm).padStart(2, "0") + ":" + String(ss).padStart(2, "0")}</span>;
 }
 
-export default function MobilePatrol({ rooms, seats, students, attendance, canManage, branchKey, openSession, scheduleMap }: {
+export default function MobilePatrol({ rooms, seats, students, attendance, canManage, branchKey, openSession, scheduleMap, periods }: {
   rooms: MRoom[]; seats: MSeat[]; students: MStudent[];
   attendance: Record<string, "in" | "out">; canManage: boolean; branchKey: string;
   openSession: MOpenSession | null;
   scheduleMap: Record<string, MScheduleInfo>;
+  periods: Period[];
 }) {
   const [roomIdx, setRoomIdx] = useState(0);
   const [view, setView] = useState({ tx: 12, ty: 12, s: 1 });
@@ -103,33 +99,20 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
   // 학생별 예상 상태 — 스케쥴 정보(hours/slots)가 아예 없으면 state:"none"("미설정")으로 표시(away 와 구분).
   // 자정 넘김 대비: 새벽 시간대(0~5시)는 오늘 분(minute) 과 +1440 좌표계 둘 다로 판정해 away 아닌 쪽을 채택.
   const ghostOf = useMemo(() => {
-    const m = new Map<string, { state: "scheduled" | "study" | "away" | "none"; label: string; slot?: DaySlot }>();
+    const m = new Map<string, { state: "scheduled" | "study" | "break" | "away" | "none"; label: string; slot?: DaySlot }>();
     if (nowMin == null) return m;
     for (const [sid, info] of Object.entries(scheduleMap)) {
       // 등하원·오늘 일정 둘 다 없으면 "모르는 것"(none/미설정) — away(등원전/하원)와 구분해 회색으로 표시한다.
       if (!info.hours && info.slots.length === 0) { m.set(sid, { state: "none", label: "미설정" }); continue; }
-      let result = statusAt(nowMin, info.hours, info.slots);
+      let result = statusAt(nowMin, info.hours, info.slots, periods);
       if (result.state === "away" && nowMin < 300) {
-        const alt = statusAt(nowMin + 1440, info.hours, info.slots);
+        const alt = statusAt(nowMin + 1440, info.hours, info.slots, periods);
         if (alt.state !== "away") result = alt;
       }
       m.set(sid, result);
     }
     return m;
-  }, [scheduleMap, nowMin]);
-
-  // 학생별 임박 일정 — 기준 시각으로부터 UPCOMING_WITHIN_MIN 분 이내에 시작하는 다음 일정.
-  // 체크 여부와 무관하게 전 학생분을 미리 계산해두고, 실제 표시는 렌더에서 미체크 좌석만 걸러 쓴다.
-  const upcomingOf = useMemo(() => {
-    const m = new Map<string, { inMin: number; slot: DaySlot }>();
-    if (nowMin == null) return m;
-    for (const [sid, info] of Object.entries(scheduleMap)) {
-      if (info.slots.length === 0) continue;
-      const up = upcomingAt(nowMin, info.slots, UPCOMING_WITHIN_MIN);
-      if (up) m.set(sid, up);
-    }
-    return m;
-  }, [scheduleMap, nowMin]);
+  }, [scheduleMap, nowMin, periods]);
 
   const queueRef = useRef<PatrolQueue | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -311,19 +294,6 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
     return { present, away, unset };
   }, [nowMin, roomSeats, ghostOf]);
 
-  // 이 방에서 곧(UPCOMING_SOON_MIN 분 이내) 일정이 시작해 이동해야 하는, 아직 미체크인 학생 수.
-  const roomSoon = useMemo(() => {
-    if (nowMin == null) return 0;
-    let n = 0;
-    for (const s of roomSeats) {
-      const sid = s.current_student_id;
-      if (!sid || marks[sid]) continue;
-      const up = upcomingOf.get(sid);
-      if (up && up.inMin <= UPCOMING_SOON_MIN) n++;
-    }
-    return n;
-  }, [nowMin, roomSeats, marks, upcomingOf]);
-
   // 배정된 학생이 있는데 이번 세션에서 마크가 없는 좌석 — 좌석번호 오름차순.
   // 오프라인 큐 대기분은 이미 marks 에 즉시 반영되므로(applyMark) 별도 처리 불필요.
   // 미점검 집계 제외 대상(고스트 none/away)은 경고에서도 뺀다.
@@ -449,10 +419,6 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
               const preset = mk ? PATROL_BY_KEY[mk] : undefined;
               // 예상 상태(고스트) — 아직 체크 안 된(mk 없는) 좌석에만. 채움색(fill)에는 절대 관여하지 않는다(축 분리).
               const ghost = sid && !mk ? ghostOf.get(sid) : undefined;
-              // 임박 일정 보조 라벨 — 역시 미체크 좌석에만. 좌석이 좁으면(세 줄이 안 들어가면) 시각 표시는 생략하고 title 로만.
-              const upcoming = sid && !mk ? upcomingOf.get(sid) : undefined;
-              const upcomingText = upcoming ? `${upcoming.inMin}분 뒤 ${upcoming.slot.reason}` : undefined;
-              const showUpcomingLabel = !!upcoming && SH >= MIN_SEAT_H_FOR_SUBLABEL;
               // 라벨 색(흐리게 쓸 기본 색)과 좌측 스트립 색·배경 틴트·흐림은 데스크탑과 같은 계산(ghostStyleOf)을 쓴다
               // — 두 화면이 같은 규칙으로 보이도록. 테두리(fill.bd)는 고스트가 건드리지 않는다.
               let ghostLabelColor: string | undefined;
@@ -478,8 +444,7 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
                   borderWidth: SEAT_BORDER_W, borderStyle: "solid", borderColor: fill.bd, borderRadius: SEAT_RADIUS,
                   display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
                   opacity: dim,
-                }}
-                title={upcomingText && !showUpcomingLabel ? upcomingText : undefined}>
+                }}>
                   {/* 번호는 상단 띠에 고정 — 이름과 겹치지 않게 영역을 분리한다 */}
                   <span style={{ position: "absolute", top: 2, left: 0, right: 0, textAlign: "center", fontSize: 10, fontWeight: 700, color: "var(--faint)", letterSpacing: ".02em" }}>{s.number ?? s.label}</span>
                   {sid ? (
@@ -496,19 +461,6 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
                           <span style={{ width: 7, height: 7, borderRadius: "50%", background: ghostLabelColor }} />{ghost.label}
                         </span>
                       ) : null}
-                      {/* 임박 일정 보조 라벨 — 현재 상태 고스트보다 한 단계 더 작고 흐리게, 10분 이하면 warn 강조 */}
-                      {showUpcomingLabel && upcoming && (
-                        <span
-                          title={upcomingText}
-                          style={{
-                            fontSize: 10, fontWeight: upcoming.inMin <= UPCOMING_SOON_MIN ? 700 : 400,
-                            color: upcoming.inMin <= UPCOMING_SOON_MIN ? "var(--warn)" : "var(--dim)",
-                            lineHeight: 1.1, maxWidth: SW - 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                          }}
-                        >
-                          {upcoming.inMin}분 뒤 {upcoming.slot.reason}
-                        </span>
-                      )}
                     </div>
                   ) : <span style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 10 }}>공석</span>}
                   {queued && <span title="전송 대기" style={{ position: "absolute", bottom: 4, right: 5, width: 7, height: 7, borderRadius: "50%", background: "var(--warn)" }} />}
@@ -527,7 +479,6 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
                   {" · "}예상 재실 {roomExpected.present}명
                   {roomExpected.away > 0 && <span style={{ color: "var(--faint)", fontWeight: 700 }}> · 등원전 {roomExpected.away}명</span>}
                   {roomExpected.unset > 0 && <span style={{ color: "var(--faint)", fontWeight: 700 }}> · 미설정 {roomExpected.unset}명</span>}
-                  {roomSoon > 0 && <span style={{ color: "var(--warn)", fontWeight: 700 }}> · 곧 이동 {roomSoon}명</span>}
                 </>
               )}
             </div>
