@@ -272,11 +272,11 @@ function PenaltyReasonCard({ bars, total30 }: { bars: PenaltyReasonBar[]; total3
           {bars.map((r, i) => {
             const pct = Math.round((r.points / totalPts) * 100);
             return (
-              <div key={r.label} title={`${r.label} ${r.points}점 (${pct}%)`}>
+              <div key={r.label} title={`${r.label} ${r.points}점 · ${r.count}회 (${pct}%)`}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
                   <span style={{ width: 7, height: 7, borderRadius: "50%", background: reasonColor(r.label, i), display: "inline-block", flexShrink: 0 }} />
-                  <span style={{ fontSize: 11.5, color: "var(--dim)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</span>
-                  <span style={{ fontSize: 11, color: "var(--faint)", fontWeight: 700, flexShrink: 0 }}>{r.points}점</span>
+                  <span style={{ fontSize: 12, color: "var(--dim)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</span>
+                  <span style={{ fontSize: 12, color: "var(--faint)", fontWeight: 700, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{r.points}점 · {r.count}회</span>
                 </div>
                 <div style={{ height: 6, borderRadius: 3, background: "var(--panel2)", overflow: "hidden" }}>
                   <div style={{ width: `${pct}%`, height: "100%", background: reasonColor(r.label, i) }} />

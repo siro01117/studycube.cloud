@@ -20,7 +20,7 @@ export default function MobileRecords({
   sessions, rooms, seats, canManage, date, dateLabel, prevDate, nextDate, hasRecord,
 }: {
   sessions: Session[]; rooms: RRoom[]; seats: RSeat[]; canManage: boolean;
-  date: string; dateLabel: string; prevDate: string; nextDate: string | null; hasRecord: boolean;
+  date: string; dateLabel: string; prevDate: string | null; nextDate: string | null; hasRecord: boolean;
 }) {
   const [selId, setSelId] = useState<string | null>(sessions[0]?.id ?? null);
   // 날짜 이동(‹ ›)으로 sessions 가 통째로 바뀌면 선택을 그 날의 첫 세션으로 되돌린다.
@@ -102,13 +102,17 @@ export default function MobileRecords({
 
       {/* 날짜 이동 — 서버가 내려준 날짜/라벨만 사용(클라 new Date()/toLocale* 금지) */}
       <div style={{ flex: "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "6px 12px", background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
-        <Link href={`/records?date=${prevDate}`} aria-label="이전 날짜" style={{ width: 34, height: 34, display: "grid", placeItems: "center", color: "var(--sub)", fontSize: 18, textDecoration: "none" }}>‹</Link>
+        {prevDate ? (
+          <Link href={`/records?date=${prevDate}`} aria-label="이전 기록 날짜" style={{ width: 34, height: 34, display: "grid", placeItems: "center", color: "var(--sub)", fontSize: 18, textDecoration: "none" }}>‹</Link>
+        ) : (
+          <span aria-hidden style={{ width: 34, height: 34, display: "grid", placeItems: "center", color: "var(--faint)", fontSize: 18 }}>‹</span>
+        )}
         <span style={{ fontSize: 14, fontWeight: 800, display: "inline-flex", alignItems: "center", gap: 6 }}>
           {dateLabel}
           {hasRecord && <span aria-hidden style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--accent)" }} />}
         </span>
         {nextDate ? (
-          <Link href={`/records?date=${nextDate}`} aria-label="다음 날짜" style={{ width: 34, height: 34, display: "grid", placeItems: "center", color: "var(--sub)", fontSize: 18, textDecoration: "none" }}>›</Link>
+          <Link href={`/records?date=${nextDate}`} aria-label="다음 기록 날짜" style={{ width: 34, height: 34, display: "grid", placeItems: "center", color: "var(--sub)", fontSize: 18, textDecoration: "none" }}>›</Link>
         ) : (
           <span aria-hidden style={{ width: 34, height: 34, display: "grid", placeItems: "center", color: "var(--faint)", fontSize: 18 }}>›</span>
         )}

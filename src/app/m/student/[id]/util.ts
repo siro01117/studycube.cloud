@@ -470,11 +470,19 @@ export function buildPenaltyHourly(events: PointEvent[], today: string): Penalty
 }
 
 // ---- C-3. 사유별 집계(그래프 아래 가로 막대 목록) ----
-export type PenaltyReasonBar = { label: string; points: number; pct: number };
+// count = 그 사유로 찍힌 이벤트 건수(순찰+수동 벌점 합산) — "20점 · 10회"처럼 점수 옆에 병기하기 위함.
+// 새 쿼리 없이 이미 combinePointEvents 가 만든 events 를 그대로 다시 훑어서 집계한다.
+export type PenaltyReasonBar = { label: string; points: number; count: number; pct: number };
 export function buildPenaltyReasonBars(events: PointEvent[]): PenaltyReasonBar[] {
   const sums = new Map<string, number>();
-  for (const e of events) sums.set(e.label, (sums.get(e.label) ?? 0) + e.points);
-  const list = Array.from(sums, ([label, points]) => ({ label, points })).filter((r) => r.points > 0).sort((a, b) => b.points - a.points);
+  const counts = new Map<string, number>();
+  for (const e of events) {
+    sums.set(e.label, (sums.get(e.label) ?? 0) + e.points);
+    counts.set(e.label, (counts.get(e.label) ?? 0) + 1);
+  }
+  const list = Array.from(sums, ([label, points]) => ({ label, points, count: counts.get(label) ?? 0 }))
+    .filter((r) => r.points > 0)
+    .sort((a, b) => b.points - a.points);
   const max = list.length ? list[0].points : 1;
   return list.map((r) => ({ ...r, pct: Math.round((r.points / max) * 100) }));
 }

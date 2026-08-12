@@ -3,7 +3,7 @@ import type { Viewport } from "next";
 import { getMe, can } from "@/lib/auth";
 import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
-import { todayKey, addDays, dayLabel } from "@/lib/date";
+import { todayKey, dayLabel } from "@/lib/date";
 import { getPatrolSessions, getPatrolDates } from "../m/seat/patrolActions";
 import MobileRecords, { type RRoom, type RSeat } from "./MobileRecords";
 
@@ -60,8 +60,8 @@ export default async function MobileRecordsPage({ searchParams }: { searchParams
       canManage={can(me, "patrol.manage")}
       date={date}
       dateLabel={dayLabel(date, today)}
-      prevDate={addDays(date, -1)}
-      nextDate={date < today ? addDays(date, 1) : null}
+      prevDate={prevRecordDate(dates, date)}
+      nextDate={nextRecordDate(dates, date)}
       hasRecord={dates.includes(date)}
     />
   );
@@ -72,4 +72,23 @@ function durOf(a: string, b: string | null): string {
   const sec = Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / 1000));
   const m = Math.floor(sec / 60);
   return m > 0 ? `${m}분` : `${sec}초`;
+}
+
+// 이전/다음 이동이 빈 날을 건너뛰고 "기록 있는 날"로만 점프하도록 — getPatrolDates() 가 이미 내려준
+// 목록(dates)만 쓴다(추가 쿼리 없음). dates 는 최근 180일 내 기록 있는 날짜(문자열 정렬 가능한
+// "YYYY-MM-DD")이므로 문자열 비교만으로 순서를 매길 수 있다.
+function prevRecordDate(dates: string[], date: string): string | null {
+  let result: string | null = null;
+  for (const d of dates) {
+    if (d < date && (result === null || d > result)) result = d;
+  }
+  return result;
+}
+
+function nextRecordDate(dates: string[], date: string): string | null {
+  let result: string | null = null;
+  for (const d of dates) {
+    if (d > date && (result === null || d < result)) result = d;
+  }
+  return result;
 }

@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { CSSProperties } from "react";
 import { PATROL_STATES, PATROL_BY_KEY } from "@/lib/patrol";
+import { weekdayOf } from "@/lib/date";
 import ContextMenu, { type MenuItem } from "../_shared/ContextMenu";
 import FitBox from "../_shared/FitBox";
 import { getPatrolSessions, getPatrolSessionDetail, setPatrolMark, clearPatrolMark, deletePatrolSession } from "../seat/patrolActions";
@@ -34,6 +35,92 @@ const fmtDur = (a: string, b: string | null) => {
   const m = Math.floor(sec / 60), ss = sec % 60;
   return m > 0 ? `${m}분 ${ss}초` : `${ss}초`;
 };
+
+// ================= 순찰 날짜 선택 — 자체 월 달력 =================
+// 기록 있는 날짜 목록(dates, 최근 180일치 — 서버가 이미 내려준 값)만으로 판정한다. 월 이동은
+// month(달력이 보여줄 "YYYY-MM") state만 바꾸는 순수 클라 동작이라 추가 조회가 없다.
+const WD_MON_SUN = ["월", "화", "수", "목", "금", "토", "일"];
+
+/** "YYYY-MM" 에 개월수를 더/빼기(음수 가능). */
+function addMonths(monthKey: string, delta: number): string {
+  const [y, m] = monthKey.split("-").map(Number);
+  const total = y * 12 + (m - 1) + delta;
+  const ny = Math.floor(total / 12);
+  const nm = total - ny * 12 + 1;
+  return `${ny}-${String(nm).padStart(2, "0")}`;
+}
+
+/** 그 달의 마지막 날짜(일수). 인자를 명시한 Date(UTC)라 서버 TZ와 무관하다. */
+function daysInMonth(monthKey: string): number {
+  const [y, m] = monthKey.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+function MonthCalendar({
+  value, onChange, dates, today,
+}: {
+  value: string; onChange: (date: string) => void; dates: string[]; today: string;
+}) {
+  const [month, setMonth] = useState(() => value.slice(0, 7));
+  const dateSet = useMemo(() => new Set(dates), [dates]);
+  const [y, m] = month.split("-").map(Number);
+  const first = `${month}-01`;
+  const wd = weekdayOf(first); // 0=일..6=토
+  const leading = wd === 0 ? 6 : wd - 1; // 월요일 시작 정렬용 빈 칸 수
+  const total = daysInMonth(month);
+  const cells: (string | null)[] = [
+    ...Array.from({ length: leading }, () => null),
+    ...Array.from({ length: total }, (_, i) => `${month}-${String(i + 1).padStart(2, "0")}`),
+  ];
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <button type="button" onClick={() => setMonth((mm) => addMonths(mm, -1))} aria-label="이전 달"
+          style={{ width: 26, height: 26, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel2)", color: "var(--dim)", cursor: "pointer", display: "grid", placeItems: "center", fontSize: 13 }}>‹</button>
+        <span style={{ fontSize: 13, fontWeight: 800 }}>{y}년 {m}월</span>
+        <button type="button" onClick={() => setMonth((mm) => addMonths(mm, 1))} aria-label="다음 달"
+          style={{ width: 26, height: 26, border: "1px solid var(--line)", borderRadius: 7, background: "var(--panel2)", color: "var(--dim)", cursor: "pointer", display: "grid", placeItems: "center", fontSize: 13 }}>›</button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, marginBottom: 3 }}>
+        {WD_MON_SUN.map((wdLabel) => (
+          <div key={wdLabel} style={{ fontSize: 10.5, fontWeight: 700, color: "var(--faint)", textAlign: "center" }}>{wdLabel}</div>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
+        {cells.map((d, i) => {
+          if (d == null) return <div key={`blank-${i}`} />;
+          const has = dateSet.has(d);
+          const isSel = d === value;
+          const isToday = d === today;
+          const dayNum = Number(d.slice(8, 10));
+          return (
+            <button
+              key={d}
+              type="button"
+              disabled={!has}
+              onClick={has ? () => onChange(d) : undefined}
+              style={{
+                position: "relative", width: "100%", aspectRatio: "1 / 1", minWidth: 32, maxWidth: 36,
+                borderRadius: 9, fontSize: 12, fontWeight: 700, fontVariantNumeric: "tabular-nums",
+                display: "grid", placeItems: "center",
+                cursor: has ? "pointer" : "not-allowed",
+                border: isToday ? "1.5px solid var(--accent)" : "1px solid transparent",
+                background: isSel ? "var(--accent)" : has ? "var(--accent-soft)" : "transparent",
+                color: isSel ? "#fff" : has ? "var(--ink)" : "var(--faint)",
+              }}
+            >
+              {dayNum}
+              {has && !isSel && (
+                <span aria-hidden style={{ position: "absolute", bottom: 3, width: 4, height: 4, borderRadius: "50%", background: "var(--accent)" }} />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function PatrolBoard({
   rooms, seats, students, sessions: initialSessions, dates, today, canManage,
@@ -144,13 +231,9 @@ export default function PatrolBoard({
     <div className="split" style={{ flex: 1, display: "flex", minHeight: 0 }}>
       {/* 왼쪽: 날짜 선택 + 그 날 순찰 목록 (폰에선 위쪽 스택) */}
       <div className="split-side" style={{ flex: "none", width: 300, borderRight: "1px solid var(--line)", background: "var(--card)", overflowY: "auto", padding: 12 }}>
-        <div style={{ marginBottom: 10 }}>
-          {/* list=datalist 로 기록 있는 날짜를 브라우저 날짜 선택기에 표시(빈 날 헛클릭 줄이기) */}
-          <input type="date" list="patrol-dates" className="input" value={selDate} max={today} onChange={(e) => setSelDate(e.target.value || today)} aria-label="순찰 날짜" style={{ height: 40, fontSize: 14 }} />
-          <datalist id="patrol-dates">
-            {dates.map((d) => <option key={d} value={d} />)}
-          </datalist>
-          <div style={{ fontSize: 11.5, color: "var(--faint)", margin: "6px 2px 0" }}>{labelDate(selDate, today)} · 순찰 {visible.length}회</div>
+        <div style={{ marginBottom: 10, padding: 10, border: "1px solid var(--line)", borderRadius: 12, background: "var(--panel2)" }}>
+          <MonthCalendar value={selDate} onChange={setSelDate} dates={dates} today={today} />
+          <div style={{ fontSize: 11.5, color: "var(--faint)", margin: "8px 2px 0" }}>{labelDate(selDate, today)} · 순찰 {visible.length}회</div>
         </div>
         {visible.length === 0 ? (
           <div style={{ padding: 20, textAlign: "center", color: "var(--faint)", fontSize: 13 }}>이 날은 순찰 기록이 없습니다.</div>
