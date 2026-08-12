@@ -4,7 +4,7 @@ import { getMe, can } from "@/lib/auth";
 import PhoneRedirect from "../_shared/PhoneRedirect";
 import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
-import { getPatrolSessions } from "../seat/patrolActions";
+import { getPatrolSessions, getPatrolDates } from "../seat/patrolActions";
 import { todayKey } from "@/lib/date";
 import PatrolBoard, { type PSeat, type PRoom, type PStudent } from "./PatrolBoard";
 
@@ -18,14 +18,15 @@ export default async function PatrolPage() {
   const canManage = can(me, "patrol.manage");
   const branch = me.activeBranchId;
 
-  const [rooms, seats, students, sessions] = await Promise.all([
+  const [rooms, seats, students, sessions, dates] = await Promise.all([
     db.query<PRoom>(`select id, name, floor from room where branch_id=$1 order by floor, name`, [branch]),
     db.query<PSeat>(
       `select id, room_id, grid_x, grid_y, number, label, current_student_id from seat where branch_id=$1`,
       [branch],
     ),
     db.query<PStudent>(`select id, name from student where branch_id=$1`, [branch]),
-    getPatrolSessions(),
+    getPatrolSessions(), // 날짜 미지정 = 오늘(KST)
+    getPatrolDates(),
   ]);
 
   return (
@@ -39,7 +40,7 @@ export default async function PatrolPage() {
           </div>
           <div className="flex items-center gap-3">
             <Link href="/patrol" className="chip mobile-only" style={{ textDecoration: "none", color: "var(--accent)", fontWeight: 700 }}>순찰 시작 →</Link>
-            <span className="hide-mobile" style={{ fontSize: 12.5, color: "var(--dim)" }}>순찰 {sessions.length}회</span>
+            <span className="hide-mobile" style={{ fontSize: 12.5, color: "var(--dim)" }}>오늘 순찰 {sessions.length}회</span>
           </div>
         </div>
       </header>
@@ -49,6 +50,7 @@ export default async function PatrolPage() {
         seats={seats.rows}
         students={students.rows}
         sessions={sessions}
+        dates={dates}
         today={todayKey()}
         canManage={canManage}
       />

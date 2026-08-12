@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { CSSProperties } from "react";
 import { PATROL_STATES, PATROL_BY_KEY } from "@/lib/patrol";
 import ContextMenu, { type MenuItem } from "../_shared/ContextMenu";
+import FitBox from "../_shared/FitBox";
 import { getPatrolSessions, getPatrolSessionDetail, setPatrolMark, clearPatrolMark, deletePatrolSession } from "../seat/patrolActions";
 
 export type PRoom = { id: string; name: string; floor: number };
@@ -26,8 +27,6 @@ const boundsOf = (pts: { x: number; y: number }[]) => {
 
 const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" });
-const keyOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const dateKey = (iso: string) => keyOf(new Date(iso));
 const labelDate = (key: string, today: string) => { const [y, m, d] = key.split("-").map(Number); return today === key ? "오늘" : new Date(y, m - 1, d).toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" }); };
 const fmtDur = (a: string, b: string | null) => {
   if (!b) return "진행 중";
@@ -37,12 +36,14 @@ const fmtDur = (a: string, b: string | null) => {
 };
 
 export default function PatrolBoard({
-  rooms, seats, students, sessions: initialSessions, today, canManage,
+  rooms, seats, students, sessions: initialSessions, dates, today, canManage,
 }: {
-  rooms: PRoom[]; seats: PSeat[]; students: PStudent[]; sessions: Session[]; today: string; canManage: boolean;
+  rooms: PRoom[]; seats: PSeat[]; students: PStudent[]; sessions: Session[]; dates: string[]; today: string; canManage: boolean;
 }) {
+  // sessions = 현재 selDate 하루치(서버에서 그 날짜로 걸러 옴 — 60개 제한이던 예전 방식과 달리
+  // 날짜 내에서는 잘리지 않는다). initialSessions 는 페이지 진입 시(=오늘) 서버가 이미 조회해 온 것.
   const [sessions, setSessions] = useState<Session[]>(initialSessions);
-  const [selDate, setSelDate] = useState<string>(initialSessions[0] ? dateKey(initialSessions[0].started_at) : today);
+  const [selDate, setSelDate] = useState<string>(today);
   const [selId, setSelId] = useState<string | null>(initialSessions[0]?.id ?? null);
   const [marks, setMarks] = useState<Record<string, SeatMark>>({}); // seat_id → 마크
   const selRef = useRef<string | null>(selId);
@@ -59,9 +60,19 @@ export default function PatrolBoard({
   }, [seats]);
   const floors = useMemo(() => Array.from(new Set(rooms.map((r) => r.floor))).sort((a, b) => a - b), [rooms]);
   const sel = sessions.find((s) => s.id === selId) ?? null;
-  // 선택 날짜의 순찰만
-  const visible = useMemo(() => sessions.filter((s) => dateKey(s.started_at) === selDate), [sessions, selDate]);
-  // 날짜 바뀌면(또는 목록 변화) 선택 세션이 그 날짜에 없으면 그 날 첫 순찰로
+  const visible = sessions; // 서버가 이미 selDate 하루치만 내려줌
+
+  // 날짜 선택이 바뀌면 그 날짜 세션을 서버에서 새로 불러온다(마운트 시=오늘은 이미 서버에서 받아왔으니 건너뜀).
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) { mounted.current = true; return; }
+    start(async () => {
+      const rows = await getPatrolSessions(selDate).catch(() => []);
+      setSessions(rows);
+    });
+  }, [selDate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 세션 목록이 바뀌면(날짜 이동·삭제 등) 선택 세션이 그 목록에 없을 때만 첫 순찰로 다시 선택
   useEffect(() => {
     if (selId && visible.some((s) => s.id === selId)) return;
     setSelId(visible[0]?.id ?? null);
@@ -83,7 +94,7 @@ export default function PatrolBoard({
   }, [selId]);
 
   const reload = () => {
-    getPatrolSessions().then(setSessions).catch(() => {});
+    getPatrolSessions(selDate).then(setSessions).catch(() => {});
     if (selId) loadMarks(selId);
   };
 
@@ -101,7 +112,7 @@ export default function PatrolBoard({
     const fd = new FormData(); fd.set("sessionId", id);
     start(async () => {
       await deletePatrolSession(fd);
-      const rows = await getPatrolSessions().catch(() => sessions.filter((s) => s.id !== id));
+      const rows = await getPatrolSessions(selDate).catch(() => sessions.filter((s) => s.id !== id));
       setSessions(rows); setConfirmDel(null);
       if (selId === id) setSelId(rows[0]?.id ?? null);
     });
@@ -130,15 +141,19 @@ export default function PatrolBoard({
   };
 
   return (
-    <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-      {/* 왼쪽: 날짜 선택 + 그 날 순찰 목록 */}
-      <div style={{ flex: "none", width: 300, borderRight: "1px solid var(--line)", background: "var(--card)", overflowY: "auto", padding: 12 }}>
+    <div className="split" style={{ flex: 1, display: "flex", minHeight: 0 }}>
+      {/* 왼쪽: 날짜 선택 + 그 날 순찰 목록 (폰에선 위쪽 스택) */}
+      <div className="split-side" style={{ flex: "none", width: 300, borderRight: "1px solid var(--line)", background: "var(--card)", overflowY: "auto", padding: 12 }}>
         <div style={{ marginBottom: 10 }}>
-          <input type="date" className="input" value={selDate} max={today} onChange={(e) => setSelDate(e.target.value || today)} aria-label="순찰 날짜" style={{ height: 40, fontSize: 14 }} />
+          {/* list=datalist 로 기록 있는 날짜를 브라우저 날짜 선택기에 표시(빈 날 헛클릭 줄이기) */}
+          <input type="date" list="patrol-dates" className="input" value={selDate} max={today} onChange={(e) => setSelDate(e.target.value || today)} aria-label="순찰 날짜" style={{ height: 40, fontSize: 14 }} />
+          <datalist id="patrol-dates">
+            {dates.map((d) => <option key={d} value={d} />)}
+          </datalist>
           <div style={{ fontSize: 11.5, color: "var(--faint)", margin: "6px 2px 0" }}>{labelDate(selDate, today)} · 순찰 {visible.length}회</div>
         </div>
         {visible.length === 0 ? (
-          <div style={{ padding: 20, textAlign: "center", color: "var(--faint)", fontSize: 13 }}>{sessions.length === 0 ? "순찰 기록이 없습니다." : "이 날짜엔 순찰 기록이 없습니다."}</div>
+          <div style={{ padding: 20, textAlign: "center", color: "var(--faint)", fontSize: 13 }}>이 날은 순찰 기록이 없습니다.</div>
         ) : visible.map((ps) => {
           const on = ps.id === selId;
           return (
@@ -168,9 +183,9 @@ export default function PatrolBoard({
       </div>
 
       {/* 오른쪽: 선택한 순찰의 좌석 표시 재현 */}
-      <div style={{ flex: 1, minWidth: 0, overflow: "auto", padding: 20 }}>
+      <div className="pad-mobile" style={{ flex: 1, minWidth: 0, overflow: "auto", padding: 20 }}>
         {!sel ? (
-          <div style={{ color: "var(--faint)", fontSize: 14, paddingTop: 40, textAlign: "center" }}>왼쪽에서 순찰을 선택하세요.</div>
+          <div style={{ color: "var(--faint)", fontSize: 14, paddingTop: 40, textAlign: "center" }}>목록에서 순찰을 선택하세요.</div>
         ) : (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6, flexWrap: "wrap" }}>
@@ -198,8 +213,9 @@ export default function PatrolBoard({
                       const pos = rs.map((s, i) => ({ s, ...xyOf(s, i) }));
                       const { w, h } = boundsOf(pos);
                       return (
-                        <div key={room.id} style={{ border: "1px solid var(--line)", borderRadius: 14, padding: 12, background: "var(--card)" }}>
+                        <div key={room.id} style={{ border: "1px solid var(--line)", borderRadius: 14, padding: 12, background: "var(--card)", minWidth: 0, flex: "1 1 auto" }}>
                           <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>{room.name}</div>
+                          <FitBox w={w} h={h}>
                           <div style={{ position: "relative", width: w, height: h }}>
                             {pos.map(({ s, x, y }) => {
                               const mark = marks[s.id];                                   // 그 세션에 이 자리에 찍힌 기록(당시 학생)
@@ -237,6 +253,7 @@ export default function PatrolBoard({
                               );
                             })}
                           </div>
+                          </FitBox>
                         </div>
                       );
                     })}
