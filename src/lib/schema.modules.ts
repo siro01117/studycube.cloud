@@ -23,6 +23,9 @@ create table if not exists student(
 );
 create index if not exists idx_student_branch on student(branch_id);
 create index if not exists idx_student_status on student(branch_id, status);
+-- 학생 본인 확인용 코드(이름+코드). 지점 안에서만 유일. 발급 UI 는 학생 관리에 있다.
+alter table student add column if not exists access_code text;
+create unique index if not exists uq_student_access_code on student(branch_id, access_code) where access_code is not null;
 
 -- ================= 좌석 배치도 (방 도면 + 좌석) =================
 create table if not exists room(

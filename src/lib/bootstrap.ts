@@ -117,7 +117,7 @@ const BOOT_LOCK =
 
 // 스키마·시드 내용이 바뀌면 이 값을 올린다. 그때만 DDL 이 다시 돈다.
 // (schema.modules.ts / CORE_SQL / PERMISSIONS / MODULES 를 수정하면 반드시 갱신)
-const SCHEMA_VERSION = "2026-08-12.1"; // attendance_event.note 컬럼 추가(퇴실 확인창 사유 저장용)
+const SCHEMA_VERSION = "2026-08-12.2"; // attendance_event.note + student.access_code 컬럼 추가
 
 /** 이미 이 버전으로 부팅된 DB인지 한 번의 쿼리로 판정 */
 async function alreadyBooted(): Promise<boolean> {
