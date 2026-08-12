@@ -231,12 +231,13 @@ export async function endPatrol(formData: FormData) {
       if (lastKind.get(r.student_id) === kind) continue; // 이미 같은 상태 — 중복 방지
       const i = params.length;
       params.push(r.student_id, kind, r.at);
-      values.push(`($1,$${i + 1},$${i + 2},true,$2,$3,$${i + 3})`);
+      values.push(`($1,$${i + 1},$${i + 2},true,$2,$3,$${i + 3},'순찰 자동 처리')`);
     }
     if (values.length > 0) {
       // at 은 그 학생의 마지막 마크 시각을 그대로 쓴다(종료 시각 대신 — 실제 상태가 확정된 시점).
+      // note = '순찰 자동 처리' — 순찰이 자동으로 확정한 퇴실을 수동 퇴실과 구분해 좌석 tooltip 에 남긴다.
       await db.query(
-        `insert into attendance_event(branch_id, student_id, kind, auto, date, created_by, at)
+        `insert into attendance_event(branch_id, student_id, kind, auto, date, created_by, at, note)
          values ${values.join(",")}`,
         params,
       );
@@ -258,21 +259,41 @@ export async function deletePatrolSession(formData: FormData) {
   revalidatePath("/seat");
 }
 
-// 순찰 이력 — 세션별 시각 + 점검 인원 + 벌점 합계
-export async function getPatrolSessions() {
+// 순찰 이력 — 세션별 시각 + 점검 인원 + 벌점 합계. date(KST, "YYYY-MM-DD") 미지정이면 오늘.
+// started_at 은 timestamptz(서버는 UTC로 돎) → ::text 슬라이싱이 아니라
+// at time zone 'Asia/Seoul' 로 변환한 날짜로 비교해야 자정 근처 세션이 올바른 날짜로 묶인다.
+// limit 은 하루 안에서만 걸리므로 넉넉히 200(순찰 20회/일 기준으로도 충분한 여유).
+export async function getPatrolSessions(date?: string) {
   const me = await guard("patrol.view");
+  const d = date ?? todayStr();
   const r = await db.query<{ id: string; started_at: string; ended_at: string | null; marked: number; penalty: number }>(
     `select ps.id, ps.started_at::text as started_at, ps.ended_at::text as ended_at,
             count(pe.id)::int as marked, coalesce(sum(pe.points),0)::int as penalty
        from patrol_session ps
        left join patrol_event pe on pe.session_id = ps.id
       where ps.branch_id=$1
+        and (ps.started_at at time zone 'Asia/Seoul')::date = $2::date
       group by ps.id
       order by ps.started_at desc
-      limit 60`,
-    [me.activeBranchId],
+      limit 200`,
+    [me.activeBranchId, d],
   );
   return r.rows;
+}
+
+// 순찰 기록이 있는 날짜 목록(최근 180일, KST 기준) — 날짜 선택기에서 빈 날을 표시해 헛클릭을 줄이는 용도.
+// started_at >= now() - 180일 은 대략적인 사전 필터일 뿐(경계값이 하루 어긋나도 무해) — 정확한 날짜
+// 판정은 항상 at time zone 'Asia/Seoul' 쪽에서 이뤄진다.
+export async function getPatrolDates(): Promise<string[]> {
+  const me = await guard("patrol.view");
+  const r = await db.query<{ d: string }>(
+    `select distinct (started_at at time zone 'Asia/Seoul')::date::text as d
+       from patrol_session
+      where branch_id=$1 and started_at >= now() - interval '180 days'
+      order by d desc`,
+    [me.activeBranchId],
+  );
+  return r.rows.map((row) => row.d);
 }
 
 // 한 순찰 세션의 학생별 기록 (student_id 포함 → 좌석 매핑·수정용)

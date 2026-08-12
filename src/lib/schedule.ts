@@ -6,28 +6,54 @@
 export type DaySlot = { start: number; end: number; reason: string; kind: string };
 export type Period = { start: number; end: number };
 
+/** 그날 학생의 실제 출결(입실/퇴실) 요약 — statusAt 이 스케쥴만 보고 오판(예: 스케쥴보다 일찍 입실했는데
+ * 계속 "등원전"으로 표시)하지 않도록 넘겨준다. 호출부가 KST 분(minute-of-day) 좌표계로 변환해서 넘긴다.
+ * - firstInMin: 오늘 첫 "입실" 이벤트 시각(분). 없으면 null/undefined.
+ * - lastOutMin: 오늘 "마지막 이벤트"가 "퇴실"일 때만 그 시각(분) — 그 뒤 다시 입실했으면 null 이어야 한다
+ *   (즉 "지금 원 밖에 있다"가 확정된 경우만 채운다. 호출부가 이 불변식을 지켜서 넘겨야 한다).
+ */
+export type ActualAttendance = { firstInMin?: number | null; lastOutMin?: number | null };
+
 /**
  * 특정 요일·시각에 학생이 무엇을 하고 있어야 하는지 판정한다.
  * 우선순위: 일정 블록(scheduled) > 자습(study) > 쉬는시간(break) > 등원전/하원(away).
- * - slots 중 minute 을 포함하는 블록이 있으면 scheduled + 그 사유 라벨.
- * - 없고 hours 가 있고 arrive_min <= minute < leave_min 이면:
+ * - slots 중 minute 을 포함하는 블록이 있으면 scheduled + 그 사유 라벨(실제 출결과 무관하게 최우선).
+ * - actual.lastOutMin 이 있고 minute 이 그 이후면(그 뒤 재입실 없음이 이미 lastOutMin 산정 규칙으로
+ *   보장됨) 스케쥴 하원 시각과 무관하게 즉시 away + "하원"(스케쥴보다 일찍 나갔어도 나간 건 나간 것).
+ * - 유효 등원 시각(effectiveArrive) = 스케쥴 등원(hours.arrive_min)과 실제 첫 입실(actual.firstInMin)
+ *   중 이른 쪽. 스케쥴이 아예 없어도 firstInMin 만 있으면 그 시각부터 유효 등원으로 본다.
+ * - effectiveArrive 부터(스케쥴 하원이 있다면 그 전까지, 없으면 무제한) 구간이면:
  *   - periods 가 비어 있으면(운영 시간표 미설정) study + "자습"(회귀 방지 폴백).
  *   - periods 중 minute 을 포함하는 교시가 있으면 study + "자습".
  *   - 아니면(교시 사이 쉬는시간·1교시 전·마지막 교시 후) break + "쉬는시간".
  * - 그 외 state 는 "away" 로 유지(호출부 호환)하되 label 은 시각에 따라 세분화:
- *   등하원 정보가 있고 minute < arrive_min → "등원전", minute >= leave_min → "하원".
- *   등하원 정보 자체가 없으면 "등원전".
- * 자정 넘김(1440 초과) 좌표계를 그대로 쓴다(호출부가 minute 을 그 좌표계로 넘겨야 함).
+ *   스케쥴 하원 정보가 있고 minute >= leave_min → "하원". 그 외엔 "등원전".
+ * 자정 넘김(1440 초과) 좌표계를 그대로 쓴다(호출부가 minute·actual 모두 그 좌표계로 넘겨야 함).
  */
 export function statusAt(
   minute: number,
   hours: { arrive_min: number; leave_min: number } | null,
   slots: DaySlot[],
   periods: Period[] = [],
+  actual: ActualAttendance | null = null,
 ): { state: "scheduled" | "study" | "break" | "away"; label: string; slot?: DaySlot } {
   const hit = slots.find((s) => minute >= s.start && minute < s.end);
   if (hit) return { state: "scheduled", label: hit.reason, slot: hit };
-  if (hours && minute >= hours.arrive_min && minute < hours.leave_min) {
+
+  const firstIn = actual?.firstInMin ?? null;
+  const lastOut = actual?.lastOutMin ?? null;
+
+  // 실제 마지막 퇴실이 확정돼 있고(그 뒤 재입실 없음) 지금이 그 이후면 스케쥴 하원 시각보다 일러도 하원.
+  if (lastOut != null && minute >= lastOut) {
+    return { state: "away", label: "하원" };
+  }
+
+  const effectiveArrive = hours
+    ? (firstIn != null ? Math.min(hours.arrive_min, firstIn) : hours.arrive_min)
+    : firstIn;
+  const leave = hours ? hours.leave_min : null;
+
+  if (effectiveArrive != null && minute >= effectiveArrive && (leave == null || minute < leave)) {
     if (periods.length === 0) return { state: "study", label: "자습" };
     const inPeriod = periods.some((p) => minute >= p.start && minute < p.end);
     return inPeriod ? { state: "study", label: "자습" } : { state: "break", label: "쉬는시간" };
@@ -110,6 +136,53 @@ export function ghostStyleOf(state: 'scheduled' | 'study' | 'break' | 'away' | '
  */
 export function isPatrolExempt(state: "scheduled" | "study" | "break" | "away" | "none" | undefined): boolean {
   return state === undefined || state === "none" || state === "away" || state === "break";
+}
+
+// ---------------- 퇴실 처리 확인창 분기 ----------------
+// 좌석 배치도(FloorEditor.tsx/MobileSeat.tsx)에서 관리자가 학생을 퇴실 처리할 때, statusAt() 결과(고스트)
+// 를 보고 "지금 원 안에 있어야 하는지" vs "원 밖에 있어야 하는지" vs "스케쥴 정보가 아예 없는지"로
+// 갈라서 다른 확인 문구·사유 기본값을 보여주기 위한 순수 분류 함수. 두 화면이 판정 기준을 공유해야
+// 갈리지 않는다.
+export type CheckoutBranch =
+  | { kind: "inside"; label: string }               // (가) 자습/쉬는시간/원내 수업/주간 상담 — 사유 선택 필수
+  | { kind: "outside"; label: string; slot?: DaySlot } // (나) 외부 학원/외부 일정/기타/등원전/하원 — 사유 기본값 = label
+  | { kind: "none" };                                // (다) 스케쥴 정보 자체가 없음
+
+export function checkoutBranchOf(
+  ghost: { state: "scheduled" | "study" | "break" | "away" | "none"; label: string; slot?: DaySlot } | undefined,
+): CheckoutBranch {
+  if (!ghost || ghost.state === "none") return { kind: "none" };
+  if (ghost.state === "study" || ghost.state === "break") return { kind: "inside", label: ghost.label };
+  if (ghost.state === "scheduled") {
+    const isInside = ghost.label === "원내 수업" || ghost.label === "주간 상담";
+    return isInside ? { kind: "inside", label: ghost.label } : { kind: "outside", label: ghost.label, slot: ghost.slot };
+  }
+  return { kind: "outside", label: ghost.label }; // away(등원전/하원)
+}
+
+/** statusAt() + checkoutBranchOf() 를 한 번에 — 퇴실 확인창처럼 "그 순간의 분류"만 필요할 때 쓴다.
+ * ghostOf(FloorEditor.tsx/MobilePatrol.tsx)와 같은 새벽 시간대(0~5시) +1440 재시도 규칙을 그대로
+ * 적용한다(자정 넘김 스케쥴 대비) — actual(firstInMin/lastOutMin)도 재시도 시 함께 +1440 시프트해야
+ * minute 좌표계와 어긋나지 않는다. */
+export function checkoutBranchAt(
+  minute: number,
+  hours: { arrive_min: number; leave_min: number } | null,
+  slots: DaySlot[],
+  periods: Period[],
+  actual: ActualAttendance | null,
+): CheckoutBranch {
+  let result = statusAt(minute, hours, slots, periods, actual);
+  if (result.state === "away" && minute < 300) {
+    const shifted: ActualAttendance | null = actual
+      ? {
+          firstInMin: actual.firstInMin != null ? actual.firstInMin + 1440 : actual.firstInMin,
+          lastOutMin: actual.lastOutMin != null ? actual.lastOutMin + 1440 : actual.lastOutMin,
+        }
+      : null;
+    const alt = statusAt(minute + 1440, hours, slots, periods, shifted);
+    if (alt.state !== "away") result = alt;
+  }
+  return checkoutBranchOf(result);
 }
 
 export type BlockStyle = { bg: string; bd: string; fg: string };

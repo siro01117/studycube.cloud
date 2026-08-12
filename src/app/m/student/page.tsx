@@ -20,7 +20,7 @@ export default async function StudentPage() {
   const { rows } = await db.query<Student>(
     `select s.id, s.name, s.level, s.grade, s.school, s.is_repeat, s.status,
             s.guardian_phone, s.student_phone,
-            s.birthdate::text as birthdate, s.enrolled_at::text as enrolled_at,
+            s.birthdate::text as birthdate, s.enrolled_at::text as enrolled_at, s.access_code,
             seat.number as seat_number, seat.id as seat_id
        from student s
        left join seat on seat.current_student_id = s.id and seat.branch_id = s.branch_id

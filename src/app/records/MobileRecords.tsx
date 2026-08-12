@@ -3,6 +3,7 @@
 // 폰용 순찰 기록 — 세션 목록에서 하나 골라 그때 찍힌 학생 상태를 리스트로 본다.
 // 데스크톱(좌석 배치 재현)과 달리 리스트로: 폰에서는 "누가 뭐였나"만 보면 된다.
 import { useEffect, useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import MobileNav from "../_shared/MobileNav";
 import SeatCanvas from "../_shared/SeatCanvas";
 import { SW, xyOf } from "@/lib/seatmap";
@@ -15,10 +16,15 @@ export type RRoom = { id: string; name: string; floor: number };
 export type RSeat = { id: string; room_id: string | null; grid_x: number | null; grid_y: number | null; number: number | null; label: string };
 type Detail = { student_id: string; seat_id: string | null; name: string; state: string; points: number; at: string };
 
-export default function MobileRecords({ sessions, rooms, seats, canManage }: {
+export default function MobileRecords({
+  sessions, rooms, seats, canManage, date, dateLabel, prevDate, nextDate, hasRecord,
+}: {
   sessions: Session[]; rooms: RRoom[]; seats: RSeat[]; canManage: boolean;
+  date: string; dateLabel: string; prevDate: string; nextDate: string | null; hasRecord: boolean;
 }) {
   const [selId, setSelId] = useState<string | null>(sessions[0]?.id ?? null);
+  // 날짜 이동(‹ ›)으로 sessions 가 통째로 바뀌면 선택을 그 날의 첫 세션으로 되돌린다.
+  useEffect(() => { setSelId(sessions[0]?.id ?? null); }, [date]); // eslint-disable-line react-hooks/exhaustive-deps
   const [detail, setDetail] = useState<Detail[] | null>(null);
   const [edit, setEdit] = useState<Detail | null>(null);
   const [view, setView] = useState<"map" | "list">("map");   // 순찰할 때처럼 좌석 배치도로 보기가 기본
@@ -79,7 +85,7 @@ export default function MobileRecords({ sessions, rooms, seats, canManage }: {
         <div style={{ flex: 1, minWidth: 0, textAlign: "center", lineHeight: 1.25 }}>
           <div style={{ fontSize: 16, fontWeight: 800 }}>순찰 기록</div>
           <div style={{ fontSize: 11, color: "var(--faint)" }}>
-            {view === "map" && room ? `${room.floor}층 ${room.name} · 방 ${roomIdx + 1}/${rooms.length}` : `최근 ${sessions.length}회`}
+            {view === "map" && room ? `${room.floor}층 ${room.name} · 방 ${roomIdx + 1}/${rooms.length}` : `${dateLabel} · ${sessions.length}회`}
           </div>
         </div>
         {/* 좌석 배치도 ↔ 목록 */}
@@ -94,9 +100,23 @@ export default function MobileRecords({ sessions, rooms, seats, canManage }: {
         </button>
       </div>
 
+      {/* 날짜 이동 — 서버가 내려준 날짜/라벨만 사용(클라 new Date()/toLocale* 금지) */}
+      <div style={{ flex: "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "6px 12px", background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
+        <Link href={`/records?date=${prevDate}`} aria-label="이전 날짜" style={{ width: 34, height: 34, display: "grid", placeItems: "center", color: "var(--sub)", fontSize: 18, textDecoration: "none" }}>‹</Link>
+        <span style={{ fontSize: 14, fontWeight: 800, display: "inline-flex", alignItems: "center", gap: 6 }}>
+          {dateLabel}
+          {hasRecord && <span aria-hidden style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--accent)" }} />}
+        </span>
+        {nextDate ? (
+          <Link href={`/records?date=${nextDate}`} aria-label="다음 날짜" style={{ width: 34, height: 34, display: "grid", placeItems: "center", color: "var(--sub)", fontSize: 18, textDecoration: "none" }}>›</Link>
+        ) : (
+          <span aria-hidden style={{ width: 34, height: 34, display: "grid", placeItems: "center", color: "var(--faint)", fontSize: 18 }}>›</span>
+        )}
+      </div>
+
       {/* 세션 선택 — 가로 스크롤 칩 */}
       <div style={{ flex: "none", display: "flex", gap: 6, overflowX: "auto", padding: "10px 12px", background: "var(--card)", borderBottom: "1px solid var(--line)", touchAction: "pan-x" }}>
-        {sessions.length === 0 && <span style={{ fontSize: 13, color: "var(--faint)" }}>순찰 기록이 없습니다.</span>}
+        {sessions.length === 0 && <span style={{ fontSize: 13, color: "var(--faint)" }}>이 날은 순찰 기록이 없습니다.</span>}
         {sessions.map((s) => {
           const on = s.id === selId;
           return (

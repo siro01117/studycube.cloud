@@ -8,14 +8,33 @@ import SeatCanvas from "../_shared/SeatCanvas";
 import MobileNav from "../_shared/MobileNav";
 import { SW, xyOf } from "@/lib/seatmap";
 import { checkIn, checkOut } from "../m/seat/attendanceActions";
-import { tint, line, ink } from "@/lib/semantic-color";
+import { tint, line, ink, solid } from "@/lib/semantic-color";
 import type { OccKind, SeatOcc } from "@/lib/occupancy";
+import {
+  checkoutBranchAt, type DaySlot, type Period, type ActualAttendance, type CheckoutBranch,
+} from "@/lib/schedule";
+import { CHECKOUT_REASON_PRESETS, CHECKOUT_OTHER_REASON, CHECKOUT_REASON_KEY } from "@/lib/attendance";
+import type { CSSProperties } from "react";
 
 export type SRoom = { id: string; name: string; floor: number };
 export type SSeat = { id: string; room_id: string | null; grid_x: number | null; grid_y: number | null; number: number | null; label: string; current_student_id: string | null };
 export type SStudent = { id: string; name: string; grade: string | null; school: string | null; student_phone: string | null; guardian_phone: string | null };
 // 오늘 재실/부재 최종 판정 = 순찰·출결 중 더 최근 기록(src/lib/occupancy.ts, page.tsx 가 서버에서 계산).
 export type Att = OccKind;
+// 오늘 요일 기준 학생별 스케쥴 파생 정보(page.tsx 가 branch 전체를 3개 쿼리로 읽어 memory join —
+// m/seat/FloorEditor.tsx 의 ScheduleInfo/patrol/MobilePatrol.tsx 의 MScheduleInfo 와 동형).
+export type SScheduleInfo = { hours: { arrive_min: number; leave_min: number } | null; slots: DaySlot[] };
+
+// KST 기준 분(minute-of-day) 계산 — FloorEditor.tsx/MobilePatrol.tsx 와 동일(new Date() 는 반드시 이 함수로만).
+function kstNowMin(): number {
+  const d = new Date();
+  return (d.getUTCHours() * 60 + d.getUTCMinutes() + 540) % 1440;
+}
+// nowMin(분) → "HH:MM" — 순수 포맷팅, Date 미사용.
+function fmtHM(min: number): string {
+  const h = Math.floor(min / 60) % 24, m = min % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
 
 // 재실(in) = 순찰 '입석'/스케쥴 '자습'과 같은 의미 → SEMANTIC.present 재사용(FloorEditor.tsx 의
 // ATT_COLOR 와 동일 계산). 하원(out)은 무채색(none).
@@ -24,12 +43,30 @@ const ATT = {
   out: { bg: tint("none", 12), bd: line("none", 40), fg: "var(--faint)", label: "하원" },
 } as const;
 
-export default function MobileSeat({ rooms, seats, students, occupancy, canAttend }: {
+// 퇴실 확인 바텀시트 사유 버튼 색 — 라벨→SemanticKey 매핑은 attendance.ts CHECKOUT_REASON_KEY(단일
+// 정의, 데스크탑 FloorEditor.tsx 와 공유), 색 계산은 semantic-color.ts 함수 그대로(새 헥스 추가 안 함).
+// filled=true 는 확정 선택 상태(예: '기타' 입력칸이 열린 상태)로 채워진 배경.
+function checkoutReasonStyle(label: string, filled: boolean): CSSProperties {
+  const key = CHECKOUT_REASON_KEY[label as keyof typeof CHECKOUT_REASON_KEY] ?? "none";
+  return filled
+    ? { backgroundColor: solid(key), borderColor: solid(key), color: "#fff" }
+    : { backgroundColor: tint(key, 16), borderColor: line(key, 55), color: ink(key) };
+}
+
+export default function MobileSeat({ rooms, seats, students, occupancy, canAttend, scheduleMap, periods, actual }: {
   rooms: SRoom[]; seats: SSeat[]; students: SStudent[];
   occupancy: Record<string, SeatOcc>; canAttend: boolean;
+  scheduleMap: Record<string, SScheduleInfo>;
+  periods: Period[];
+  actual: Record<string, ActualAttendance>;
 }) {
   const [roomIdx, setRoomIdx] = useState(0);
   const [sel, setSel] = useState<SSeat | null>(null);
+  // 퇴실 확인 바텀시트 — checkoutBranchAt() 분류 결과 + 사유 입력 진행 상태(데스크탑 FloorEditor.tsx 와
+  // 같은 분류 로직 공유, UI 만 바텀시트).
+  const [checkoutConfirm, setCheckoutConfirm] = useState<{
+    studentId: string; branch: CheckoutBranch; expanded: boolean; otherOpen: boolean; otherText: string;
+  } | null>(null);
   const [, start] = useTransition();
 
   const stOf = useMemo(() => new Map(students.map((s) => [s.id, s])), [students]);
@@ -54,6 +91,23 @@ export default function MobileSeat({ rooms, seats, students, occupancy, canAtten
   const mark = (studentId: string, kind: Att) => {
     const fd = new FormData(); fd.set("studentId", studentId);
     start(async () => { await (kind === "in" ? checkIn(fd) : checkOut(fd)); });
+    setSel(null);
+  };
+
+  // 퇴실 확인 시트 열기 — 클릭 시점의 신선한 kstNowMin() 으로 지금 이 순간의 분류를 계산한다.
+  const openCheckout = (sid: string) => {
+    const now = kstNowMin();
+    const info = scheduleMap[sid];
+    const branch = checkoutBranchAt(now, info?.hours ?? null, info?.slots ?? [], periods, actual[sid] ?? null);
+    setCheckoutConfirm({ studentId: sid, branch, expanded: false, otherOpen: false, otherText: "" });
+  };
+  const confirmCheckout = (note: string | null) => {
+    if (!checkoutConfirm) return;
+    const fd = new FormData();
+    fd.set("studentId", checkoutConfirm.studentId);
+    fd.set("note", note ?? "");
+    start(async () => { await checkOut(fd); });
+    setCheckoutConfirm(null);
     setSel(null);
   };
 
@@ -141,13 +195,104 @@ export default function MobileSeat({ rooms, seats, students, occupancy, canAtten
             {canAttend && (
               <div style={{ display: "flex", gap: 8 }}>
                 <button className="btn" onClick={() => mark(sel.current_student_id!, "in")} style={{ height: 54, flex: 1, fontSize: 15, fontWeight: 800, color: ink("present"), borderColor: line("present", 50), background: tint("present", 10) }}>입실</button>
-                <button className="btn" onClick={() => mark(sel.current_student_id!, "out")} style={{ height: 54, flex: 1, fontSize: 15, fontWeight: 800 }}>하원</button>
+                <button className="btn" onClick={() => openCheckout(sel.current_student_id!)} style={{ height: 54, flex: 1, fontSize: 15, fontWeight: 800 }}>하원</button>
               </div>
             )}
             <button className="btn" onClick={() => setSel(null)} style={{ height: 46, width: "100%", marginTop: 8 }}>닫기</button>
           </div>
         </>
       )}
+
+      {/* 퇴실 확인 바텀시트 — checkoutBranchAt() 분류(원 안/밖/스케쥴 없음)에 따라 문구·사유 기본값이
+          갈린다(데스크탑 FloorEditor.tsx 와 같은 분류 로직 공유). 학생 시트 위에 겹쳐 뜬다. */}
+      {checkoutConfirm && (() => {
+        const cc = checkoutConfirm;
+        const branch = cc.branch;
+        const name = stOf.get(cc.studentId)?.name ?? "학생";
+        const occ = occupancy[cc.studentId];
+        // 문장마다 줄바꿈 — 한 번에 읽기 쉽게(가독성 요건).
+        let bodyLines: string[] = [];
+        if (branch.kind === "inside") {
+          bodyLines = [`지금은 ${branch.label} 시간입니다.`, "자리에 있어야 하는 시간인데 퇴실 처리할까요?"];
+        } else if (branch.kind === "outside") {
+          bodyLines = branch.slot
+            ? [`지금은 ${branch.label} 일정입니다 (${fmtHM(branch.slot.start)}–${fmtHM(branch.slot.end)}).`, "퇴실 처리할까요?"]
+            : [`지금은 ${branch.label} 상태입니다.`, "퇴실 처리할까요?"];
+        } else {
+          bodyLines = ["이 학생은 시간표가 없습니다.", "퇴실 처리할까요?"];
+        }
+        const presetPicker = (
+          <>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+              {CHECKOUT_REASON_PRESETS.map((p) => (
+                <button
+                  key={p}
+                  className="btn"
+                  onClick={() => (p === CHECKOUT_OTHER_REASON ? setCheckoutConfirm({ ...cc, otherOpen: true }) : confirmCheckout(p))}
+                  style={{ height: 40, padding: "0 14px", fontSize: 13, fontWeight: 700, ...checkoutReasonStyle(p, p === CHECKOUT_OTHER_REASON && cc.otherOpen) }}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+            {cc.otherOpen && (
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <input
+                  className="input"
+                  autoFocus
+                  placeholder="사유 입력"
+                  value={cc.otherText}
+                  onChange={(e) => setCheckoutConfirm({ ...cc, otherText: e.target.value })}
+                  style={{ height: 44, flex: 1 }}
+                />
+                <button
+                  className="btn btn-accent"
+                  disabled={!cc.otherText.trim()}
+                  onClick={() => confirmCheckout(cc.otherText.trim())}
+                  style={{ height: 44, padding: "0 16px" }}
+                >확인</button>
+              </div>
+            )}
+          </>
+        );
+        return (
+          <>
+            <div onClick={() => setCheckoutConfirm(null)} style={{ position: "fixed", inset: 0, background: "rgba(10,12,18,.45)", zIndex: 42 }} />
+            <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 43, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "18px 16px calc(16px + env(safe-area-inset-bottom))" }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+                <span style={{ fontSize: 20, fontWeight: 700 }}>{name}</span>
+                {cc.studentId === sel?.current_student_id && sel && <span style={{ fontSize: 12.5, color: "var(--dim)" }}>{sel.number ?? sel.label}번</span>}
+                {occ && (
+                  <span style={{ fontSize: 11, fontWeight: 800, padding: "2px 9px", borderRadius: 999, backgroundColor: ATT[occ.kind].bg, color: ATT[occ.kind].fg }}>
+                    {ATT[occ.kind].label}
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 16, lineHeight: 1.65 }}>
+                {bodyLines.map((ln, i) => <div key={i}>{ln}</div>)}
+              </div>
+
+              {branch.kind === "inside" && presetPicker}
+              {branch.kind === "none" && (
+                <>
+                  {presetPicker}
+                  <button className="btn btn-accent" onClick={() => confirmCheckout(null)} style={{ height: 48, width: "100%", marginTop: 12 }}>퇴실 처리</button>
+                </>
+              )}
+              {branch.kind === "outside" && (
+                cc.expanded ? presetPicker : (
+                  <>
+                    <button className="btn btn-accent" onClick={() => confirmCheckout(branch.label)} style={{ height: 48, width: "100%" }}>확인</button>
+                    <button className="btn" onClick={() => setCheckoutConfirm({ ...cc, expanded: true })} style={{ height: 40, width: "100%", marginTop: 8, fontSize: 12.5 }}>다른 사유 선택</button>
+                  </>
+                )
+              )}
+
+              <button className="btn" onClick={() => setCheckoutConfirm(null)} style={{ height: 44, width: "100%", marginTop: 12 }}>취소</button>
+            </div>
+          </>
+        );
+      })()}
     </main>
   );
 }

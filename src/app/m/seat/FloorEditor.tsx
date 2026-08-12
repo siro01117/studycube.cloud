@@ -8,14 +8,19 @@ import {
 } from './actions';
 import { checkIn, checkOut } from './attendanceActions';
 import { updateRoom, deleteRoom, saveRoomPositions } from './roomActions';
-import StudentPopup from '../_shared/StudentPopup';
+import StudentPopup, { ReleaseSeatIcon, MoveSeatIcon } from '../_shared/StudentPopup';
 import ContextMenu, { type MenuItem } from '../_shared/ContextMenu';
 import { useLongPress } from '../_shared/useLongPress';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { recordPatrol, clearPatrolMark, startPatrol, endPatrol, getPatrolSessionDetail, type OpenPatrolSession } from './patrolActions';
 import { PATROL_STATES, PATROL_BY_KEY } from '@/lib/patrol';
-import { statusAt, ghostStyleOf, reasonColor, isPatrolExempt, type DaySlot, type Period } from '@/lib/schedule';
-import { tint, line, ink } from '@/lib/semantic-color';
+import {
+  statusAt, ghostStyleOf, reasonColor, isPatrolExempt, checkoutBranchAt,
+  type DaySlot, type Period, type ActualAttendance, type CheckoutBranch,
+} from '@/lib/schedule';
+import { CHECKOUT_REASON_PRESETS, CHECKOUT_OTHER_REASON, CHECKOUT_REASON_KEY } from '@/lib/attendance';
+import { tint, line, ink, solid } from '@/lib/semantic-color';
 import type { OccKind, SeatOcc } from '@/lib/occupancy';
 
 // ---------------- types ----------------
@@ -99,6 +104,16 @@ const ATT_COLOR: Record<AttInfo, { bg: string; bd: string }> = {
   out: { bg: tint('none', 12), bd: line('none', 40) },
 };
 
+// 퇴실 확인창 사유 버튼 색 — 라벨→SemanticKey 매핑은 attendance.ts CHECKOUT_REASON_KEY(단일 정의),
+// 색 계산은 semantic-color.ts 함수 그대로 사용(화면에 새 헥스 추가 안 함). filled=true 는 확정 선택 상태
+// (예: '기타' 눌러 입력칸이 열린 상태)로 채워진 배경 — 나머지는 옅은 톤.
+function checkoutReasonStyle(label: string, filled: boolean): CSSProperties {
+  const key = CHECKOUT_REASON_KEY[label as keyof typeof CHECKOUT_REASON_KEY] ?? 'none';
+  return filled
+    ? { backgroundColor: solid(key), borderColor: solid(key), color: '#fff' }
+    : { backgroundColor: tint(key, 16), borderColor: line(key, 55), color: ink(key) };
+}
+
 // 대시보드 통계 타일 — 순수 프레젠테이션. 모듈 스코프에 두어 리렌더마다 재마운트 방지.
 function Tile({ label, value, color, span = 1, sub }: { label: string; value: string | number; color?: string; span?: number; sub?: string }) {
   return (
@@ -164,6 +179,7 @@ const I_TRASH = 'M4 7h16M6 7l1 13h10l1-13M9 7V4h6v3M10 11v6M14 11v6';
 const I_GEAR = 'M4 8h10M18 8h2M4 16h2M10 16h10M14 6v4M8 14v4'; // 슬라이더형 설정 아이콘
 const I_PATROL = 'M12 3l7 3v5c0 4-3 7-7 8-4-1-7-4-7-8V6z'; // 방패(순찰)
 const I_CLOCK = 'M12 21a9 9 0 110-18 9 9 0 010 18M12 8v4l3 2'; // 시계(순찰 기록)
+const I_LOGOUT = 'M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9'; // 퇴실(문 밖으로 화살표)
 
 // ---------------- 좌석 프레젠테이션 헬퍼 (state 미사용 → 모듈 스코프) ----------------
 // 조건부로 바뀌는 색은 항상 개별 속성(borderColor/backgroundColor/opacity)으로 통일한다 — border/background
@@ -403,7 +419,7 @@ const OvRoom = memo(function OvRoom({
 
 export default function FloorEditor({
   rooms, seats, students, canManage, canEditStudent, initialRoomId, occupancy, canAttend, canPatrol, lastPatrolAt,
-  openSession, scheduleMap, periods,
+  openSession, scheduleMap, periods, actual,
 }: {
   rooms: Room[]; seats: Seat[]; students: Student[];
   canManage: boolean; canEditStudent: boolean; initialRoomId: string | null;
@@ -411,7 +427,9 @@ export default function FloorEditor({
   canPatrol: boolean; lastPatrolAt: string | null;
   openSession: OpenPatrolSession | null; scheduleMap: Record<string, ScheduleInfo>;
   periods: Period[];
+  actual: Record<string, ActualAttendance>; // 학생별 오늘 실제 출결 요약(statusAt 5번째 인자)
 }) {
+  const router = useRouter();
   const floors = useMemo(
     () => Array.from(new Set(rooms.map((r) => r.floor))).sort((a, b) => a - b),
     [rooms],
@@ -455,6 +473,10 @@ export default function FloorEditor({
   const [patrolStartedAt, setPatrolStartedAt] = useState<number | null>(null); // 시작 시각(ms)
   const [patrolMenu, setPatrolMenu] = useState<{ x: number; y: number; seat: Seat } | null>(null); // 순찰 상태 선택
   const [patrolConfirm, setPatrolConfirm] = useState<null | 'start' | 'end' | 'resume'>(null); // 시작/종료/이어하기 확인창
+  // 퇴실 확인창 — checkoutBranchAt() 분류 결과 + 사유 입력 진행 상태(공용 프리셋 펼침/기타 입력).
+  const [checkoutConfirm, setCheckoutConfirm] = useState<{
+    studentId: string; branch: CheckoutBranch; expanded: boolean; otherOpen: boolean; otherText: string;
+  } | null>(null);
   const [patrolMarks, setPatrolMarks] = useState<Record<string, { state: string; points: number }>>({}); // 이번 세션에 찍은 것(시작 시 리셋)
   const [patrolToast, setPatrolToast] = useState<string | null>(null); // 종료 알림
   // 서버가 감지한 미종료 세션("이어하기" 대상). 이어하기/새로시작을 거치면 비운다.
@@ -550,16 +572,24 @@ export default function FloorEditor({
     if (nowMin == null) return m;
     for (const [sid, info] of Object.entries(scheduleMap)) {
       // 등하원·오늘 일정 둘 다 없으면 "모르는 것"(none/미설정) — away(등원전/하원)와 구분해 회색으로 표시한다.
-      if (!info.hours && info.slots.length === 0) { m.set(sid, { state: 'none', label: '미설정' }); continue; }
-      let result = statusAt(nowMin, info.hours, info.slots, periods);
+      // 단, 실제 출결(첫 입실)이 있으면 스케쥴이 없어도 "모르는 것"이 아니라 실제 상태로 판정해야 한다.
+      const act = actual[sid] ?? null;
+      if (!info.hours && info.slots.length === 0 && act?.firstInMin == null) { m.set(sid, { state: 'none', label: '미설정' }); continue; }
+      let result = statusAt(nowMin, info.hours, info.slots, periods, act);
       if (result.state === 'away' && nowMin < 300) {
-        const alt = statusAt(nowMin + 1440, info.hours, info.slots, periods);
+        const shifted: ActualAttendance | null = act
+          ? {
+              firstInMin: act.firstInMin != null ? act.firstInMin + 1440 : act.firstInMin,
+              lastOutMin: act.lastOutMin != null ? act.lastOutMin + 1440 : act.lastOutMin,
+            }
+          : null;
+        const alt = statusAt(nowMin + 1440, info.hours, info.slots, periods, shifted);
         if (alt.state !== 'away') result = alt;
       }
       m.set(sid, result);
     }
     return m;
-  }, [scheduleMap, nowMin, periods]);
+  }, [scheduleMap, nowMin, periods, actual]);
 
   // 순찰 종료 시 미점검 경고 — 현재 층에 배정된 학생이 있는데 이번 세션에 마크가 없는 좌석.
   // 오프라인 큐 대기분도 patrolMarks 에 즉시 반영되므로(patrolMenuItems) 별도 처리 불필요.
@@ -617,6 +647,14 @@ export default function FloorEditor({
     if (!movingStudentId || seat.current_student_id) return;
     call(assignSeat, { seatId: seat.id, studentId: movingStudentId }, () => setMovingStudentId(null));
   }, [call, movingStudentId]);
+  // 퇴실 확인창 열기 — 클릭 시점의 신선한 kstNowMin() 으로 지금 이 순간의 분류를 계산한다(캐시된 nowMin
+  // state 를 쓰지 않음 — 순찰 고스트 기준 시각과 달리 이건 그때그때 정확해야 한다).
+  const openCheckoutConfirm = useCallback((sid: string) => {
+    const now = kstNowMin();
+    const info = scheduleMap[sid];
+    const branch = checkoutBranchAt(now, info?.hours ?? null, info?.slots ?? [], periods, actual[sid] ?? null);
+    setCheckoutConfirm({ studentId: sid, branch, expanded: false, otherOpen: false, otherText: '' });
+  }, [scheduleMap, periods, actual]);
   const ctx = useMemo<SeatCtx>(() => ({
     moveTo, openSeat, setPatrolMenu, setSeatMenu, call,
   }), [moveTo, openSeat, setPatrolMenu, setSeatMenu, call]);
@@ -867,9 +905,10 @@ export default function FloorEditor({
     if (sid) {
       return [
         { label: '입실 기록', onClick: () => call(checkIn, { studentId: sid }), disabled: !canAttend },
-        { label: '퇴실 기록', onClick: () => call(checkOut, { studentId: sid }), disabled: !canAttend },
+        { label: '퇴실 기록', onClick: () => openCheckoutConfirm(sid), disabled: !canAttend },
         { separator: true },
         { label: '학생 정보', onClick: () => openSeat(s.id) },
+        { label: '스케쥴 보기', onClick: () => router.push(`/m/schedule?student=${sid}`) },
         ...(canManage ? [
           { label: '자리 이동', onClick: () => setMovingStudentId(sid) },
           { label: '자리 비우기', onClick: () => call(releaseSeat, { seatId: s.id }), danger: true },
@@ -1450,10 +1489,10 @@ export default function FloorEditor({
                 canManage={canManage}
                 canAttend={canAttend}
                 onClose={closeDrawer}
+                onCheckOutRequest={(sid) => { closeDrawer(); openCheckoutConfirm(sid); }}
                 actions={<>
-                  {canManage && <button className="btn" onClick={() => call(releaseSeat, { seatId: selSeat.id }, closeDrawer)} style={{ height: 40, fontSize: 13 }}>자리 비우기</button>}
-                  {canManage && <button className="btn" onClick={() => { setMovingStudentId(openStudent.id); closeDrawer(); }} style={{ height: 40, fontSize: 13 }}>자리 이동</button>}
-                  <button className="btn" disabled title="스케쥴러 모듈 준비중" style={{ height: 40, fontSize: 13, gridColumn: '1 / -1' }}>학생 스케줄러 (준비중)</button>
+                  {canManage && <button className="btn" onClick={() => call(releaseSeat, { seatId: selSeat.id }, closeDrawer)} style={{ height: 40, fontSize: 13, gap: 6 }}><ReleaseSeatIcon /> 자리 비우기</button>}
+                  {canManage && <button className="btn" onClick={() => { setMovingStudentId(openStudent.id); closeDrawer(); }} style={{ height: 40, fontSize: 13, gap: 6 }}><MoveSeatIcon /> 자리 이동</button>}
                 </>}
               />
             ) : (
@@ -1583,6 +1622,109 @@ export default function FloorEditor({
                   {isStart ? '시작' : hasWarn ? `미점검 ${uncheckedPatrol.length}명 · 그대로 종료` : '종료'}
                 </button>
               </div>
+            </div>
+          </>
+        );
+      })()}
+
+      {/* 퇴실 확인창 — checkoutBranchAt() 분류(원 안/밖/스케쥴 없음)에 따라 문구·사유 기본값이 갈린다. */}
+      {checkoutConfirm && (() => {
+        const cc = checkoutConfirm;
+        const branch = cc.branch;
+        const name = stuById.get(cc.studentId)?.name ?? '학생';
+        const seat = seats.find((s) => s.current_student_id === cc.studentId);
+        const occ = occupancy[cc.studentId];
+        const close = () => setCheckoutConfirm(null);
+        const confirmWith = (note: string | null) => {
+          call(checkOut, { studentId: cc.studentId, note: note ?? '' }, close);
+        };
+        const presetPicker = (
+          <>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+              {CHECKOUT_REASON_PRESETS.map((p) => (
+                <button
+                  key={p}
+                  className="btn"
+                  onClick={() => (p === CHECKOUT_OTHER_REASON
+                    ? setCheckoutConfirm({ ...cc, otherOpen: true })
+                    : confirmWith(p))}
+                  style={{ height: 40, padding: '0 14px', fontSize: 13, fontWeight: 700, ...checkoutReasonStyle(p, p === CHECKOUT_OTHER_REASON && cc.otherOpen) }}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+            {cc.otherOpen && (
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <input
+                  className="input"
+                  autoFocus
+                  placeholder="사유 입력"
+                  value={cc.otherText}
+                  onChange={(e) => setCheckoutConfirm({ ...cc, otherText: e.target.value })}
+                  style={{ height: 40, flex: 1 }}
+                />
+                <button
+                  className="btn btn-accent"
+                  disabled={!cc.otherText.trim()}
+                  onClick={() => confirmWith(cc.otherText.trim())}
+                  style={{ height: 40, padding: '0 16px' }}
+                >확인</button>
+              </div>
+            )}
+          </>
+        );
+        // 문장마다 줄바꿈 — 한 번에 읽기 쉽게(가독성 요건).
+        let bodyLines: string[] = [];
+        if (branch.kind === 'inside') {
+          bodyLines = [`지금은 ${branch.label} 시간입니다.`, '자리에 있어야 하는 시간인데 퇴실 처리할까요?'];
+        } else if (branch.kind === 'outside') {
+          bodyLines = branch.slot
+            ? [`지금은 ${branch.label} 일정입니다 (${fmtHM(branch.slot.start)}–${fmtHM(branch.slot.end)}).`, '퇴실 처리할까요?']
+            : [`지금은 ${branch.label} 상태입니다.`, '퇴실 처리할까요?'];
+        } else {
+          bodyLines = ['이 학생은 시간표가 없습니다.', '퇴실 처리할까요?'];
+        }
+        return (
+          <>
+            <div onClick={close} style={{ position: 'fixed', inset: 0, background: 'rgba(20,22,30,.45)', zIndex: 70 }} />
+            <div style={{
+              position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 380, maxWidth: 'calc(100vw - 32px)',
+              background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 20, boxShadow: '0 24px 70px rgba(20,22,30,.35)', zIndex: 71, padding: 24,
+            }}>
+              <div style={{ width: 46, height: 46, borderRadius: 14, margin: '0 auto 12px', display: 'grid', placeItems: 'center', background: 'var(--accent-soft)', color: 'var(--accent)' }}>
+                <Ic d={I_LOGOUT} size={22} />
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 700, textAlign: 'center' }}>{name}</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, margin: '5px 0 16px' }}>
+                {seat && <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>{seat.number ?? seat.label}번</span>}
+                {occ && (
+                  <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 9px', borderRadius: 999, backgroundColor: ATT_COLOR[occ.kind].bg, color: occ.kind === 'in' ? ink('present') : 'var(--faint)' }}>
+                    {ATT_LABEL[occ.kind]}
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 700, margin: '0 0 18px', textAlign: 'center', lineHeight: 1.65 }}>
+                {bodyLines.map((ln, i) => <div key={i}>{ln}</div>)}
+              </div>
+
+              {branch.kind === 'inside' && presetPicker}
+              {branch.kind === 'none' && (
+                <>
+                  {presetPicker}
+                  <button className="btn btn-accent" onClick={() => confirmWith(null)} style={{ height: 44, width: '100%', marginTop: 12 }}>퇴실 처리</button>
+                </>
+              )}
+              {branch.kind === 'outside' && (
+                cc.expanded ? presetPicker : (
+                  <>
+                    <button className="btn btn-accent" onClick={() => confirmWith(branch.label)} style={{ height: 44, width: '100%' }}>확인</button>
+                    <button className="btn" onClick={() => setCheckoutConfirm({ ...cc, expanded: true })} style={{ height: 34, width: '100%', marginTop: 8, fontSize: 12.5 }}>다른 사유 선택</button>
+                  </>
+                )
+              )}
+
+              <button className="btn" onClick={close} style={{ height: 40, width: '100%', marginTop: 14 }}>취소</button>
             </div>
           </>
         );

@@ -295,11 +295,16 @@ function IconWarn() {
 /** 아이콘 + 라벨 버튼 내부 콘텐츠를 텍스트 중앙 정렬로 배치한다. */
 const iconRow: React.CSSProperties = { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 };
 
-export default function ScheduleDemo({ students, today, initialPeriods }: { students: SStudent[]; today: string; initialPeriods: Period[] }) {
+export default function ScheduleDemo({
+  students, today, initialPeriods, initialStudentId,
+}: {
+  students: SStudent[]; today: string; initialPeriods: Period[];
+  initialStudentId?: string | null; // 좌석 배치도·학생 상세에서 ?student=<id> 로 진입 시 미리 선택
+}) {
   const thisMon = useMemo(() => mondayOf(today), [today]);
   const [weekStart, setWeekStart] = useState(thisMon);
   const [view, setView] = useState<"table" | "sheet">("table");
-  const [dsid, setDsid] = useState(students[0]?.id ?? "");
+  const [dsid, setDsid] = useState(initialStudentId ?? students[0]?.id ?? "");
   const [q, setQ] = useState("");
   const [schedByStudent, setSchedByStudent] = useState<Record<string, Sched>>({});
   const [loading, setLoading] = useState(true); // 학생 전환·주 이동 시 서버에서 로드 중

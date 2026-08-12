@@ -5,8 +5,8 @@ import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
 import FloorEditor, { type Room, type Seat, type Student, type ScheduleInfo } from "./FloorEditor";
 import PhoneRedirect from "../_shared/PhoneRedirect";
-import { todayKey as todayStr, weekdayOf } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
-import type { DaySlot, Period } from "@/lib/schedule";
+import { todayKey as todayStr, weekdayOf, minuteOfKST } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
+import type { DaySlot, Period, ActualAttendance } from "@/lib/schedule";
 import { getOpenPatrolSession } from "./patrolActions";
 import { buildOccupancy, type SeatOcc } from "@/lib/occupancy";
 
@@ -48,9 +48,12 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
       [branch],
     ),
     db.query<{ name: string }>(`select name from branch where id=$1`, [branch]),
-    // 오늘 학생별 마지막 출결 이벤트 — at/auto 도 함께 가져온다(순찰 기록과 시각 비교 + title 표시용).
-    db.query<{ student_id: string; kind: string; at: string; auto: boolean }>(
-      `select distinct on (student_id) student_id, kind, at::text as at, auto
+    // 오늘 학생별 마지막 출결 이벤트 — at/auto/note 도 함께 가져온다(순찰 기록과 시각 비교 + title 표시용).
+    // first_in_at: 오늘 그 학생의 첫 "입실" 이벤트 시각 — window 함수라 distinct on 이 마지막 행을 고르기
+    // 전에 계산되므로(윈도우 함수는 distinct on 보다 먼저 실행) 1회 왕복으로 같이 얻을 수 있다.
+    db.query<{ student_id: string; kind: string; at: string; auto: boolean; note: string | null; first_in_at: string | null }>(
+      `select distinct on (student_id) student_id, kind, at::text as at, auto, note,
+              (min(at) filter (where kind='in') over (partition by student_id))::text as first_in_at
          from attendance_event where branch_id=$1 and date=$2
          order by student_id, at desc`,
       [branch, todayStr()],
@@ -105,6 +108,15 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
   // 오늘 재실/부재 최종 판정 — 학생별 마지막 순찰 기록과 마지막 출결 기록 중 시각이 더 늦은 쪽(동시각이면
   // 출결)을 따른다(src/lib/occupancy.ts, /seat 화면과 동일 규칙 공유).
   const occupancy: Record<string, SeatOcc> = buildOccupancy(att.rows, pat.rows);
+  // 학생별 오늘 실제 출결 요약(statusAt 의 5번째 인자) — 스케쥴보다 일찍 입실했는데 계속 "등원전"으로
+  // 뜨는 오판을 막는다. att.rows 를 재사용(별도 쿼리 없음).
+  const actual: Record<string, ActualAttendance> = {};
+  for (const r of att.rows) {
+    actual[r.student_id] = {
+      firstInMin: r.first_in_at ? minuteOfKST(r.first_in_at) : null,
+      lastOutMin: r.kind === "out" ? minuteOfKST(r.at) : null,
+    };
+  }
   const initialRoomId =
     (sp.room && rooms.rows.some((r) => r.id === sp.room) ? sp.room : rooms.rows[0]?.id) ?? null;
 
@@ -156,6 +168,7 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
         openSession={openSession}
         scheduleMap={scheduleMap}
         periods={periods}
+        actual={actual}
       />
     </main>
   );

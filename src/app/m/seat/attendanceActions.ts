@@ -10,11 +10,11 @@ const s = (v: FormDataEntryValue | null): string | null => {
   return t.length ? t : null;
 };
 
-async function record(branchId: string | null, studentId: string, kind: "in" | "out", auto: boolean, by: string) {
+async function record(branchId: string | null, studentId: string, kind: "in" | "out", auto: boolean, by: string, note: string | null = null) {
   await db.query(
-    `insert into attendance_event(branch_id, student_id, kind, auto, date, created_by)
-     values ($1,$2,$3,$4,$5,$6)`,
-    [branchId, studentId, kind, auto, todayStr(), by],
+    `insert into attendance_event(branch_id, student_id, kind, auto, date, created_by, note)
+     values ($1,$2,$3,$4,$5,$6,$7)`,
+    [branchId, studentId, kind, auto, todayStr(), by, note],
   );
 }
 
@@ -35,7 +35,8 @@ export async function checkOut(formData: FormData) {
   const me = await guard("attendance.edit");
   const id = s(formData.get("studentId"));
   if (!id) return;
-  await record(me.activeBranchId, id, "out", false, me.id);
+  const note = s(formData.get("note"));
+  await record(me.activeBranchId, id, "out", false, me.id, note);
   revalidatePath("/m/seat");
   revalidatePath("/seat");
 }

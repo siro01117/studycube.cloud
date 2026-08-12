@@ -90,6 +90,7 @@ create table if not exists attendance_event(
 );
 create index if not exists idx_att_event_sd on attendance_event(student_id, date);
 create index if not exists idx_att_event_bd on attendance_event(branch_id, date);
+alter table attendance_event add column if not exists note text;
 
 -- ================= 순찰 이벤트 로그 (불변 기록) — 순찰 중 좌석 원탭 상태 =================
 -- state = 프리셋 키(seated|away|academy|counsel|sleep|distract). points = 그 상태 벌점(프리셋 스냅샷).

@@ -13,6 +13,7 @@ export type Student = {
   enrolled_at: string | null;
   seat_number: number | null;
   seat_id: string | null;
+  access_code: string | null; // 공개 폼 로그인 코드
 };
 
 export const STU_STATUS: Record<string, string> = { enrolled: "재원", leave: "휴원" };

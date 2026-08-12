@@ -51,6 +51,30 @@ export function timeLabel(at: string): string {
   return `${h}:${m}`;
 }
 
+/** timestamptz 문자열 → KST 기준 자정부터의 경과분(0..1439). schedule.ts statusAt() 에 실제 출결
+ * (firstInMin/lastOutMin)을 넘기기 전 서버에서 변환하는 용도(클라 렌더에서 new Date() 호출 금지 원칙 —
+ * 이 값은 반드시 서버 컴포넌트/서버 액션에서만 계산해 내려준다). */
+export function minuteOfKST(at: string): number {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: KST, hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(at));
+  const h = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+  const m = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  return h * 60 + m;
+}
+
+/** "YYYY-MM-DD" 에 일수를 더/빼기(음수 가능). 날짜 문자열만 다루므로 TZ 무관. */
+export function addDays(key: string, delta: number): string {
+  const [y, m, d] = key.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + delta));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+}
+
+/** 날짜 이동 UI용 짧은 라벨 — 오늘이면 "오늘", 아니면 "8월 11일". */
+export function dayLabel(key: string, today: string): string {
+  if (key === today) return "오늘";
+  const [, m, d] = key.split("-").map(Number);
+  return `${m}월 ${d}일`;
+}
+
 /** 주 시작 라벨 "7월 20일 (월)" — KST 날짜 문자열 기준. */
 export function weekStartLabel(key: string): string {
   const [y, m, d] = key.split("-").map(Number);

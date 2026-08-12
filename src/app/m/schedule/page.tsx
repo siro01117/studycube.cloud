@@ -11,7 +11,12 @@ export const runtime = "nodejs";
 
 // 학생 스케쥴러 — 학생 명단 + 지점 운영 시간표(교시)를 DB 에서 읽어 넘긴다.
 // 정기·예외 일정 자체는 학생 선택 시 클라이언트가 listSchedule 서버액션으로 불러온다.
-export default async function SchedulePage() {
+// ?student=<id> 로 진입하면(좌석 배치도·학생 상세에서) 그 학생을 미리 선택한 채로 연다.
+export default async function SchedulePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ student?: string }>;
+}) {
   const me = await getMe();
   if (!me) redirect("/login");
   if (!can(me, "schedule.view")) redirect("/home");
@@ -40,6 +45,10 @@ export default async function SchedulePage() {
   const students: SStudent[] = studentRows.rows.map((r) => ({ ...r, hoursCount: hoursCountOf.get(r.id) ?? 0 }));
   const initialPeriods: Period[] = periodRows.rows.map((r) => ({ id: r.id, label: r.label, start: r.start_min, end: r.end_min }));
 
+  // ?student=<id> 가 이 지점의 재원생이면 그 학생으로 시작 — 아니면(없음·잘못된 id) 기존 동작(첫 학생).
+  const wantedId = (await searchParams).student;
+  const initialStudentId = wantedId && students.some((s) => s.id === wantedId) ? wantedId : null;
+
   return (
     <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <header style={{ borderBottom: "1px solid var(--line)", background: "var(--card)", flex: "none" }}>
@@ -56,7 +65,7 @@ export default async function SchedulePage() {
         </div>
       </header>
 
-      <ScheduleDemo students={students} today={todayKey()} initialPeriods={initialPeriods} />
+      <ScheduleDemo students={students} today={todayKey()} initialPeriods={initialPeriods} initialStudentId={initialStudentId} />
     </main>
   );
 }

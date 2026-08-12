@@ -8,7 +8,7 @@ import { PATROL_STATES, PATROL_BY_KEY } from "@/lib/patrol";
 import { SW, SH, xyOf, boundsOf } from "@/lib/seatmap";
 import { PatrolQueue, type QueueStatus } from "@/lib/patrol-queue";
 import { startPatrol, endPatrol, recordPatrolBulk, clearPatrolMark, getPatrolSessionDetail } from "../m/seat/patrolActions";
-import { statusAt, ghostStyleOf, reasonColor, isPatrolExempt, type DaySlot, type Period } from "@/lib/schedule";
+import { statusAt, ghostStyleOf, reasonColor, isPatrolExempt, type DaySlot, type Period, type ActualAttendance } from "@/lib/schedule";
 
 export type MRoom = { id: string; name: string; floor: number };
 export type MSeat = { id: string; room_id: string | null; grid_x: number | null; grid_y: number | null; number: number | null; label: string; current_student_id: string | null };
@@ -17,6 +17,8 @@ export type MStudent = { id: string; name: string };
 // hours 도 slots 도 없으면(=이 학생은 스케쥴 정보가 아예 없음) state:"none"("미설정") 회색 고스트를 그린다
 // (모르는 것과 그냥 등원전인 것을 구분하기 위함 — ghostOf 참고).
 export type MScheduleInfo = { hours: { arrive_min: number; leave_min: number } | null; slots: DaySlot[] };
+// 학생별 오늘 실제 출결 요약(statusAt 5번째 인자) — page.tsx 가 att 쿼리를 재사용해 서버에서 계산.
+export type MActual = Record<string, ActualAttendance>;
 export type MOpenSession = {
   sessionId: string;
   startedByName: string;
@@ -58,12 +60,13 @@ function Elapsed({ startedAt }: { startedAt: number }) {
   return <span style={{ fontVariantNumeric: "tabular-nums" }}>{(hh > 0 ? hh + ":" : "") + String(mm).padStart(2, "0") + ":" + String(ss).padStart(2, "0")}</span>;
 }
 
-export default function MobilePatrol({ rooms, seats, students, attendance, canManage, branchKey, openSession, scheduleMap, periods }: {
+export default function MobilePatrol({ rooms, seats, students, attendance, canManage, branchKey, openSession, scheduleMap, periods, actual }: {
   rooms: MRoom[]; seats: MSeat[]; students: MStudent[];
   attendance: Record<string, "in" | "out">; canManage: boolean; branchKey: string;
   openSession: MOpenSession | null;
   scheduleMap: Record<string, MScheduleInfo>;
   periods: Period[];
+  actual: MActual;
 }) {
   const [roomIdx, setRoomIdx] = useState(0);
   const [view, setView] = useState({ tx: 12, ty: 12, s: 1 });
@@ -103,16 +106,24 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
     if (nowMin == null) return m;
     for (const [sid, info] of Object.entries(scheduleMap)) {
       // 등하원·오늘 일정 둘 다 없으면 "모르는 것"(none/미설정) — away(등원전/하원)와 구분해 회색으로 표시한다.
-      if (!info.hours && info.slots.length === 0) { m.set(sid, { state: "none", label: "미설정" }); continue; }
-      let result = statusAt(nowMin, info.hours, info.slots, periods);
+      // 단, 실제 출결(첫 입실)이 있으면 스케쥴이 없어도 "모르는 것"이 아니라 실제 상태로 판정해야 한다.
+      const act = actual[sid] ?? null;
+      if (!info.hours && info.slots.length === 0 && act?.firstInMin == null) { m.set(sid, { state: "none", label: "미설정" }); continue; }
+      let result = statusAt(nowMin, info.hours, info.slots, periods, act);
       if (result.state === "away" && nowMin < 300) {
-        const alt = statusAt(nowMin + 1440, info.hours, info.slots, periods);
+        const shifted: ActualAttendance | null = act
+          ? {
+              firstInMin: act.firstInMin != null ? act.firstInMin + 1440 : act.firstInMin,
+              lastOutMin: act.lastOutMin != null ? act.lastOutMin + 1440 : act.lastOutMin,
+            }
+          : null;
+        const alt = statusAt(nowMin + 1440, info.hours, info.slots, periods, shifted);
         if (alt.state !== "away") result = alt;
       }
       m.set(sid, result);
     }
     return m;
-  }, [scheduleMap, nowMin, periods]);
+  }, [scheduleMap, nowMin, periods, actual]);
 
   const queueRef = useRef<PatrolQueue | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);

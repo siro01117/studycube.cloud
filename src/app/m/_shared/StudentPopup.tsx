@@ -49,15 +49,74 @@ const XIcon = () => (
   </svg>
 );
 
+// 동작 버튼 아이콘 — 인라인 stroke SVG(이모지 금지 원칙). 전부 16x16 / strokeWidth 1.6 로 통일.
+const iconProps = {
+  viewBox: "0 0 16 16", width: 16, height: 16, fill: "none",
+  stroke: "currentColor", strokeWidth: 1.6, strokeLinecap: "round" as const, strokeLinejoin: "round" as const,
+};
+
+const ScheduleIcon = () => (
+  <svg {...iconProps}>
+    <rect x="2" y="3.5" width="12" height="10.5" rx="1.6" />
+    <path d="M2 6.5h12M5.5 2v3M10.5 2v3" />
+  </svg>
+);
+const DetailIcon = () => (
+  <svg {...iconProps}>
+    <rect x="4" y="1.5" width="8" height="13" rx="1.2" />
+    <path d="M6.2 5h3.6M6.2 8h3.6M6.2 11h2" />
+  </svg>
+);
+// 좌석 컨텍스트(자리 비우기·이동) 아이콘 — 호출부(FloorEditor 등)의 actions 슬롯 버튼에서도 쓰도록 export.
+export const ReleaseSeatIcon = () => (
+  <svg {...iconProps}>
+    <rect x="2" y="8.5" width="6" height="5" rx="1" />
+    <path d="M9 8l5-5M10 3h4v4" />
+  </svg>
+);
+export const MoveSeatIcon = () => (
+  <svg {...iconProps}>
+    <path d="M2 8h12M2 8l3-3M2 8l3 3M14 8l-3-3M14 8l-3 3" />
+  </svg>
+);
+const CheckInIcon = () => (
+  <svg {...iconProps}>
+    <path d="M10 2h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-3" />
+    <path d="M2 8h7M6 5l3 3-3 3" />
+  </svg>
+);
+const CheckOutIcon = () => (
+  <svg {...iconProps}>
+    <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" />
+    <path d="M7 8h7M11 5l3 3-3 3" />
+  </svg>
+);
+const AbsentIcon = () => (
+  <svg {...iconProps}>
+    <circle cx="8" cy="8" r="6" />
+    <path d="M4 12l8-8" />
+  </svg>
+);
+const RestoreIcon = () => (
+  <svg {...iconProps}>
+    <path d="M3 8a5 5 0 1 1 1.5 3.6" />
+    <path d="M3 8V4.5M3 8h3.5" />
+  </svg>
+);
+
 export default function StudentPopup({
-  student, seatLabel, canManage, canAttend, onClose, actions,
+  student, seatLabel, accessCode, canManage, canAttend, onClose, actions, onCheckOutRequest,
 }: {
   student: PopupStudent;
   seatLabel: string | null;   // 예: "1번" / null(미배정)
+  accessCode?: string | null; // 공개 폼 로그인 코드(있는 화면에서만 전달 → 좌석맵 팝업은 미표시)
   canManage: boolean;
   canAttend: boolean;
   onClose: () => void;
   actions?: ReactNode;        // 좌·하단 액션 버튼(컨텍스트별)
+  // 퇴실 버튼을 즉시 처리하지 않고 확인창을 띄우고 싶은 화면(좌석 배치도)이 넘긴다 — 있으면 직접
+  // checkOut 대신 이걸 호출한다. 없으면(예: StudentList) 기존처럼 즉시 checkOut.
+  onCheckOutRequest?: (studentId: string) => void;
 }) {
   const [attDate, setAttDate] = useState(todayLocal());
   const [attEvents, setAttEvents] = useState<{ kind: string; auto: boolean; at: string }[]>([]);
@@ -84,16 +143,16 @@ export default function StudentPopup({
 
   return (
     <>
-      {/* 헤더 */}
+      {/* 헤더 — 이름을 크게(20px+/700), 좌석번호·학년은 이름 옆에 작게 */}
       <div className="flex items-center justify-between" style={{ padding: "18px 22px", borderBottom: "1px solid var(--line)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 44, height: 44, borderRadius: 13, background: "var(--accent-soft)", color: "var(--accent)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 18 }}>{student.name[0]}</div>
-          <div>
-            <div style={{ fontSize: 17, fontWeight: 800 }}>{student.name}</div>
-            <div style={{ fontSize: 12.5, color: "var(--dim)" }}>{seatLabel ? `${seatLabel} 좌석` : "미배정"}{lbl(student) ? ` · ${lbl(student)}` : ""}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 13, background: "var(--accent-soft)", color: "var(--accent)", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 18, flexShrink: 0 }}>{student.name[0]}</div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 20, fontWeight: 700, lineHeight: 1.25 }}>{student.name}</span>
+            <span style={{ fontSize: 12.5, color: "var(--dim)" }}>{seatLabel ? `${seatLabel} 좌석` : "미배정"}{lbl(student) ? ` · ${lbl(student)}` : ""}</span>
           </div>
         </div>
-        <button onClick={onClose} aria-label="닫기" className="chip" style={{ height: 30, width: 30, padding: 0, justifyContent: "center", cursor: "pointer" }}><XIcon /></button>
+        <button onClick={onClose} aria-label="닫기" className="chip" style={{ height: 30, width: 30, padding: 0, justifyContent: "center", cursor: "pointer", flexShrink: 0 }}><XIcon /></button>
       </div>
 
       {/* 본문 2단 */}
@@ -111,6 +170,19 @@ export default function StudentPopup({
               <Info k="보호자 연락처" v={student.guardian_phone || "—"} />
             </div>
           </div>
+          {accessCode !== undefined && (
+            <div>
+              <div className="label">공개 폼 로그인 코드</div>
+              {accessCode ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: "0.08em", fontFamily: "ui-monospace, monospace" }}>{accessCode}</span>
+                  <span style={{ fontSize: 11.5, color: "var(--faint)" }}>이름 + 이 코드로 도시락 등 신청</span>
+                </div>
+              ) : (
+                <div style={{ fontSize: 12.5, color: "var(--faint)" }}>미발급 — 목록 상단 ‘코드 발급’ 버튼으로 부여</div>
+              )}
+            </div>
+          )}
           <div>
             <div className="label">결제</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px 12px", fontSize: 13.5 }}>
@@ -120,6 +192,7 @@ export default function StudentPopup({
             </div>
             <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 6 }}>결제 모듈이 붙으면 표시됩니다.</div>
           </div>
+
           {actions && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, borderTop: "1px solid var(--line)", paddingTop: 14, marginTop: "auto" }}>
               {actions}
@@ -160,13 +233,13 @@ export default function StudentPopup({
             <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
               {isToday && !isAbsent && (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                  <button className="btn btn-accent" disabled={pending} onClick={() => call(checkIn, { studentId: student.id })} style={{ height: 36, fontSize: 12.5 }}>입실</button>
-                  <button className="btn" disabled={pending} onClick={() => call(checkOut, { studentId: student.id })} style={{ height: 36, fontSize: 12.5 }}>퇴실</button>
+                  <button className="btn btn-accent" disabled={pending} onClick={() => call(checkIn, { studentId: student.id })} style={{ height: 38, fontSize: 12.5, gap: 6 }}><CheckInIcon /> 입실</button>
+                  <button className="btn" disabled={pending} onClick={() => (onCheckOutRequest ? onCheckOutRequest(student.id) : call(checkOut, { studentId: student.id }))} style={{ height: 38, fontSize: 12.5, gap: 6, border: "1px solid #cdd2dd" }}><CheckOutIcon /> 퇴실</button>
                 </div>
               )}
               {/* 결석 처리 / 취소 (선택한 날짜 기준) */}
               {isAbsent ? (
-                <button className="btn" disabled={pending} onClick={() => call(clearDailyStatus, { studentId: student.id, date: attDate })} style={{ height: 34, fontSize: 12.5 }}>결석 취소</button>
+                <button className="btn" disabled={pending} onClick={() => call(clearDailyStatus, { studentId: student.id, date: attDate })} style={{ height: 38, fontSize: 12.5, gap: 6 }}><RestoreIcon /> 결석 취소</button>
               ) : absentPick ? (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5, padding: "8px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--panel2)" }}>
                   <div style={{ width: "100%", fontSize: 11, color: "var(--faint)", marginBottom: 2 }}>결석 사유 선택</div>
@@ -176,11 +249,29 @@ export default function StudentPopup({
                   <button onClick={() => setAbsentPick(false)} className="chip" style={{ height: 28, fontSize: 12, cursor: "pointer", color: "var(--faint)" }}>닫기</button>
                 </div>
               ) : (
-                <button className="btn" disabled={pending} onClick={() => setAbsentPick(true)} style={{ height: 34, fontSize: 12.5, color: "var(--danger)" }}>결석 처리</button>
+                <button className="btn" disabled={pending} onClick={() => setAbsentPick(true)} style={{ height: 38, fontSize: 12.5, gap: 6, border: "1px solid #cdd2dd", color: "var(--danger)" }}><AbsentIcon /> 결석 처리</button>
               )}
             </div>
           )}
         </div>
+      </div>
+
+      {/* 스케쥴·상세 이동 — 위 동작 버튼들과 구분되는 팝업 맨 아래 줄(이동 성격 = accent 틴트) */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "14px 22px", borderTop: "1px solid var(--line)" }}>
+        <a
+          href={`/m/schedule?student=${student.id}`}
+          className="btn"
+          style={{ height: 40, gap: 6, fontSize: 13.5, fontWeight: 700, textDecoration: "none", background: "var(--accent-soft)", color: "var(--accent)", border: "1px solid rgba(79,70,229,.28)" }}
+        >
+          <ScheduleIcon /> 스케쥴
+        </a>
+        <a
+          href={`/m/student/${student.id}`}
+          className="btn"
+          style={{ height: 40, gap: 6, fontSize: 13.5, fontWeight: 700, textDecoration: "none", background: "var(--accent-soft)", color: "var(--accent)", border: "1px solid rgba(79,70,229,.28)" }}
+        >
+          <DetailIcon /> 상세 보기
+        </a>
       </div>
     </>
   );

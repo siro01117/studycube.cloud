@@ -3,34 +3,41 @@ import type { Viewport } from "next";
 import { getMe, can } from "@/lib/auth";
 import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
-import { todayKey } from "@/lib/date";
-import { getPatrolSessions } from "../m/seat/patrolActions";
+import { todayKey, addDays, dayLabel } from "@/lib/date";
+import { getPatrolSessions, getPatrolDates } from "../m/seat/patrolActions";
 import MobileRecords, { type RRoom, type RSeat } from "./MobileRecords";
 
 export const runtime = "nodejs";
 export const viewport: Viewport = { width: "device-width", initialScale: 1 };
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 // 폰용 순찰 기록 — 세션별 학생 상태를 리스트로. 데스크톱(/m/patrol)은 그대로.
-export default async function MobileRecordsPage() {
+export default async function MobileRecordsPage({ searchParams }: { searchParams: Promise<{ date?: string }> }) {
   const me = await getMe();
   if (!me) redirect("/login");
   if (!can(me, "patrol.view")) redirect("/home");
   await ready();
 
   const branch = me.activeBranchId;
-  const [raw, rooms, seats] = await Promise.all([
-    getPatrolSessions(),
+  const today = todayKey();
+  const sp = await searchParams;
+  // 미래 날짜·잘못된 형식은 오늘로 되돌림(주소창 조작 대비)
+  const date = sp.date && DATE_RE.test(sp.date) && sp.date <= today ? sp.date : today;
+
+  const [raw, rooms, seats, dates] = await Promise.all([
+    getPatrolSessions(date),
     db.query<RRoom>(`select id, name, floor from room where branch_id=$1 order by floor, name`, [branch]),
     db.query<RSeat>(
       `select id, room_id, grid_x, grid_y, number, label from seat where branch_id=$1`,
       [branch],
     ),
+    getPatrolDates(),
   ]);
 
   // 표시 문자열은 서버에서 만든다. 클라에서 toLocale*/new Date 를 쓰면
   // 서버(UTC·en 로케일)와 브라우저(KST·ko)가 달라 하이드레이션이 깨진다.
   // started_at 은 '2026-08-04 07:49:28.559+09' 형태(이미 KST) → 문자열에서 직접 자른다.
-  const today = todayKey();
   const sessions = raw.map((s) => {
     const day = s.started_at.slice(0, 10);
     const time = s.started_at.slice(11, 16);
@@ -51,6 +58,11 @@ export default async function MobileRecordsPage() {
       rooms={rooms.rows}
       seats={seats.rows}
       canManage={can(me, "patrol.manage")}
+      date={date}
+      dateLabel={dayLabel(date, today)}
+      prevDate={addDays(date, -1)}
+      nextDate={date < today ? addDays(date, 1) : null}
+      hasRecord={dates.includes(date)}
     />
   );
 }

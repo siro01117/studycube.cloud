@@ -10,7 +10,7 @@ import { timeLabel } from "./date";
 export type OccKind = "in" | "out";
 export type SeatOcc = { kind: OccKind; title: string };
 
-export type LastAttRow = { student_id: string; kind: string; at: string; auto: boolean };
+export type LastAttRow = { student_id: string; kind: string; at: string; auto: boolean; note?: string | null };
 export type LastPatrolRow = { student_id: string; state: string | null; at: string | null };
 
 export function buildOccupancy(attRows: LastAttRow[], patrolRows: LastPatrolRow[]): Record<string, SeatOcc> {
@@ -36,7 +36,7 @@ export function buildOccupancy(attRows: LastAttRow[], patrolRows: LastPatrolRow[
       const kind: OccKind = a.kind === "in" ? "in" : "out";
       occ[sid] = {
         kind,
-        title: `${a.auto ? "자동" : "수동"} ${timeLabel(a.at)} · ${kind === "in" ? "입실" : "퇴실"}`,
+        title: `${a.auto ? "자동" : "수동"} ${timeLabel(a.at)} · ${kind === "in" ? "입실" : "퇴실"}${a.note ? ` · ${a.note}` : ""}`,
       };
     }
   }

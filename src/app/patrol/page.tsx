@@ -3,10 +3,10 @@ import type { Viewport } from "next";
 import { getMe, can } from "@/lib/auth";
 import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
-import { todayKey, weekdayOf } from "@/lib/date";
+import { todayKey, weekdayOf, minuteOfKST } from "@/lib/date";
 import type { DaySlot, Period } from "@/lib/schedule";
 import { getOpenPatrolSession } from "../m/seat/patrolActions";
-import MobilePatrol, { type MRoom, type MSeat, type MStudent, type MScheduleInfo } from "./MobilePatrol";
+import MobilePatrol, { type MRoom, type MSeat, type MStudent, type MScheduleInfo, type MActual } from "./MobilePatrol";
 
 export const runtime = "nodejs";
 
@@ -40,9 +40,11 @@ export default async function MobilePatrolPage() {
       [branch],
     ),
     db.query<MStudent>(`select id, name from student where branch_id=$1`, [branch]),
-    // 오늘 출결(학생별 마지막 이벤트) — 하원 학생 좌석 구분용
-    db.query<{ student_id: string; kind: string }>(
-      `select distinct on (student_id) student_id, kind
+    // 오늘 출결(학생별 마지막 이벤트) — 하원 학생 좌석 구분용. first_in_at 도 함께(actual 계산용,
+    // window 함수라 distinct on 이 마지막 행을 고르기 전에 계산되므로 1회 왕복으로 얻을 수 있다).
+    db.query<{ student_id: string; kind: string; at: string; first_in_at: string | null }>(
+      `select distinct on (student_id) student_id, kind, at::text as at,
+              (min(at) filter (where kind='in') over (partition by student_id))::text as first_in_at
          from attendance_event where branch_id=$1 and date=$2
          order by student_id, at desc`,
       [branch, today],
@@ -79,6 +81,16 @@ export default async function MobilePatrolPage() {
   const attendance: Record<string, "in" | "out"> = {};
   for (const r of att.rows) attendance[r.student_id] = r.kind === "in" ? "in" : "out";
 
+  // 학생별 오늘 실제 출결 요약(statusAt 의 5번째 인자) — 스케쥴보다 일찍 입실했는데 계속 "등원전"으로
+  // 뜨는 오판을 막는다. att.rows 를 재사용(별도 쿼리 없음).
+  const actual: MActual = {};
+  for (const r of att.rows) {
+    actual[r.student_id] = {
+      firstInMin: r.first_in_at ? minuteOfKST(r.first_in_at) : null,
+      lastOutMin: r.kind === "out" ? minuteOfKST(r.at) : null,
+    };
+  }
+
   // studentId → { hours, slots[] } — 오늘 예외가 skip_rule_id 로 대체를 지시한 정기 일정은 제외 처리한다.
   const skippedRuleIds = new Set(excRows.rows.filter((e) => e.skip_rule_id).map((e) => e.skip_rule_id as string));
   const scheduleMap: Record<string, MScheduleInfo> = {};
@@ -106,6 +118,7 @@ export default async function MobilePatrolPage() {
       openSession={openSession}
       scheduleMap={scheduleMap}
       periods={periods}
+      actual={actual}
     />
   );
 }

@@ -3,12 +3,20 @@
 // 학생 목록 + 즉시 검색. 재원/휴원 탭. 행 클릭 → 상세 팝업, 우클릭 → 컨텍스트 메뉴(휴원/복귀).
 // 추가 = 팝업 폼. 상태 드롭다운은 우클릭 메뉴로 대체(자주 안 쓰는 걸 메인에서 뺌).
 import { useMemo, useState, useTransition } from "react";
-import { addStudent, setStudentStatus, deleteStudent } from "./actions";
+import Link from "next/link";
+import { addStudent, setStudentStatus, deleteStudent, issueAccessCodes } from "./actions";
 import { releaseSeat } from "../seat/actions";
 import { levelLabel, type Student } from "./util";
-import StudentPopup from "../_shared/StudentPopup";
+import StudentPopup, { ReleaseSeatIcon } from "../_shared/StudentPopup";
 import ContextMenu, { type MenuItem } from "../_shared/ContextMenu";
 import { useLongPress } from "../_shared/useLongPress";
+
+// 행 끝 '상세 보기' 화살표 — 인라인 stroke SVG(이모지 금지 원칙).
+const ChevronIcon = () => (
+  <svg viewBox="0 0 16 16" style={{ width: 14, height: 14, fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" }}>
+    <path d="M6 3.5l5 4.5-5 4.5" />
+  </svg>
+);
 
 export default function StudentList({
   students, canEdit, canAttend, canManageSeat,
@@ -24,7 +32,8 @@ export default function StudentList({
   const [addOpen, setAddOpen] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [rowMenu, setRowMenu] = useState<{ x: number; y: number; s: Student } | null>(null);
-  const [, start] = useTransition();
+  const [codeMsg, setCodeMsg] = useState<string | null>(null);
+  const [pending, start] = useTransition();
 
   const openStudent = (id: string | null) => { setConfirmDel(false); setOpenId(id); };
   // 터치 꾹누르기 = 행 컨텍스트 메뉴(우클릭 대체)
@@ -81,10 +90,25 @@ export default function StudentList({
           aria-label="학생 검색"
           style={{ height: 40, fontSize: 14 }}
         />
-        {canEdit && (
-          <button className="btn btn-accent" onClick={() => setAddOpen(true)} style={{ height: 40, padding: "0 16px", whiteSpace: "nowrap", flexShrink: 0 }}>학생 추가</button>
-        )}
+        {canEdit && (() => {
+          const noCode = students.filter((s) => s.status === "enrolled" && !s.access_code).length;
+          return (
+            <>
+              <button
+                className="btn"
+                disabled={pending || noCode === 0}
+                onClick={() => start(async () => { const r = await issueAccessCodes(); setCodeMsg(`${r.issued}명 코드 발급`); })}
+                title="공개 폼(도시락 등) 로그인용 코드를 미발급 재원생에게 부여"
+                style={{ height: 40, padding: "0 14px", whiteSpace: "nowrap", flexShrink: 0, fontSize: 13 }}
+              >
+                {noCode > 0 ? `코드 발급 (${noCode})` : "코드 발급됨"}
+              </button>
+              <button className="btn btn-accent" onClick={() => setAddOpen(true)} style={{ height: 40, padding: "0 16px", whiteSpace: "nowrap", flexShrink: 0 }}>학생 추가</button>
+            </>
+          );
+        })()}
       </div>
+      {codeMsg && <div style={{ fontSize: 12, color: "var(--accent)", marginBottom: 8 }}>{codeMsg}</div>}
 
       {/* 재원 / 휴원 탭 */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
@@ -143,7 +167,7 @@ export default function StudentList({
                 onKeyDown={(e) => { if (e.key === "Enter") openStudent(s.id); }}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "56px 1fr",
+                  gridTemplateColumns: "56px 1fr 26px",
                   alignItems: "center",
                   gap: 10,
                   padding: "10px 6px",
@@ -171,6 +195,19 @@ export default function StudentList({
                     </div>
                   )}
                 </div>
+
+                {/* 상세 화면 진입 — 팝업 열기와 별개 동작이라 클릭 전파 차단 */}
+                <Link
+                  href={`/m/student/${s.id}`}
+                  onClick={(e) => e.stopPropagation()}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  aria-label={`${s.name} 상세 보기`}
+                  title="상세 보기"
+                  className="chip"
+                  style={{ width: 26, height: 26, padding: 0, justifyContent: "center", color: "var(--faint)" }}
+                >
+                  <ChevronIcon />
+                </Link>
               </div>
             );
           })}
@@ -208,11 +245,12 @@ export default function StudentList({
             <StudentPopup
               student={open}
               seatLabel={open.seat_number != null ? `${open.seat_number}번` : null}
+              accessCode={open.access_code}
               canManage={canManageSeat}
               canAttend={canAttend}
               onClose={() => openStudent(null)}
               actions={<>
-                {canManageSeat && open.seat_id && <button className="btn" onClick={() => doRelease(open.seat_id!)} style={{ height: 40, fontSize: 13 }}>자리 비우기</button>}
+                {canManageSeat && open.seat_id && <button className="btn" onClick={() => doRelease(open.seat_id!)} style={{ height: 40, fontSize: 13, gap: 6 }}><ReleaseSeatIcon /> 자리 비우기</button>}
                 <a href="/m/seat" className="btn" style={{ height: 40, fontSize: 13, display: "grid", placeItems: "center", textDecoration: "none", gridColumn: canManageSeat && open.seat_id ? "auto" : "1 / -1" }}>
                   {open.seat_number != null ? "좌석 배치도" : "좌석 배치도에서 배정"}
                 </a>
@@ -236,7 +274,6 @@ export default function StudentList({
                     </button>
                   )
                 )}
-                <button className="btn" disabled title="스케쥴러 모듈 준비중" style={{ height: 40, fontSize: 13, gridColumn: "1 / -1" }}>학생 스케줄러 (준비중)</button>
                 {canEdit && (
                   confirmDel ? (
                     <>

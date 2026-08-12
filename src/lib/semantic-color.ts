@@ -1,7 +1,8 @@
 // 의미색 단일 출처 — "예정된 행위"(스케쥴 고스트·블록)와 "실제 찍은 상태"(순찰 마크)가
 // 같은 의미면 같은 hue 를 쓰도록 여기서만 기준색을 정의한다. 순찰(src/lib/patrol.ts)과
-// 스케쥴(src/lib/schedule.ts) 양쪽이 이 파일의 SEMANTIC 만 참조하고, 화면(FloorEditor 등)은
-// 그 두 lib 가 계산해 내려주는 값을 그대로 쓴다 — 화면에 새 헥스 색을 추가하지 않는다.
+// 스케쥴(src/lib/schedule.ts), 퇴실 사유(src/lib/attendance.ts CHECKOUT_REASON_KEY) 양쪽이
+// 이 파일의 SEMANTIC 만 참조하고, 화면(FloorEditor 등)은 그 lib 들이 계산해 내려주는 값을
+// 그대로 쓴다 — 화면에 새 헥스 색을 추가하지 않는다.
 //
 // 농도 규칙(모든 화면 공통, README 삼아 여기 적어둔다):
 //   solid(key)     실제로 확정된 값(순찰 마크 dot·글자) — 기준색 그대로, 가장 진함.
@@ -21,6 +22,7 @@ export const SEMANTIC = {
   sleep:    "#e1474e", // 수면 — 빨강
   distract: "#f1481e", // 딴짓 — 빨강주황(sleep 과는 톤을 다르게 눌러 구분)
   none:     "var(--faint)", // 등원전 / 하원 / 기타 — 무채색(디자인 토큰 그대로 사용)
+  leaveHome: "#5c6f8e", // 정상 귀가 — 위 색들과 겹치지 않는 슬레이트 블루그레이(퇴실 사유 버튼 전용, 차분한 톤)
 } as const;
 
 export type SemanticKey = keyof typeof SEMANTIC;

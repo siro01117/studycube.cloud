@@ -9,6 +9,34 @@ const s = (v: FormDataEntryValue | null): string | null => {
   return t.length ? t : null;
 };
 
+// ---------------- 공개 폼 로그인 코드 일괄 발급 ----------------
+// 재원생 중 코드 없는 학생에게 지점 내 유일한 5자리 코드 부여. 이미 있으면 유지.
+// 5자리: 4자리(생일 MMDD 연상·9천 공간)보다 추측 어렵고 날짜 포맷과 안 겹침.
+export async function issueAccessCodes(): Promise<{ issued: number }> {
+  const me = await guard("student.edit");
+  const branch = me.activeBranchId;
+  const taken = new Set(
+    (await db.query<{ access_code: string }>(
+      `select access_code from student where branch_id=$1 and access_code is not null`,
+      [branch],
+    )).rows.map((r) => r.access_code),
+  );
+  const targets = (await db.query<{ id: string }>(
+    `select id from student where branch_id=$1 and status='enrolled' and access_code is null order by name`,
+    [branch],
+  )).rows;
+  let issued = 0;
+  for (const t of targets) {
+    let code = "";
+    do { code = String(Math.floor(10000 + Math.random() * 90000)); } while (taken.has(code));
+    taken.add(code);
+    await db.query(`update student set access_code=$1 where id=$2 and branch_id=$3`, [code, t.id, branch]);
+    issued++;
+  }
+  revalidatePath("/m/student");
+  return { issued };
+}
+
 // ---------------- 학생 추가 ----------------
 export async function addStudent(formData: FormData) {
   const me = await guard("student.edit");
