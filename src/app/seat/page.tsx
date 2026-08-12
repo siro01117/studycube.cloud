@@ -82,20 +82,8 @@ export default async function MobileSeatPage() {
   ]);
   const periods: Period[] = periodRows.rows.map((r) => ({ start: r.start_min, end: r.end_min }));
 
-  // 오늘 재실/부재 최종 판정 — 학생별 마지막 순찰 기록과 마지막 출결 기록 중 시각이 더 늦은 쪽(동시각이면
-  // 출결)을 따른다(src/lib/occupancy.ts, /m/seat 화면과 동일 규칙 공유).
-  const occupancy: Record<string, SeatOcc> = buildOccupancy(att.rows, pat.rows);
-
-  // 학생별 오늘 실제 출결 요약(statusAt 5번째 인자) — att.rows 를 재사용(별도 쿼리 없음).
-  const actual: Record<string, ActualAttendance> = {};
-  for (const r of att.rows) {
-    actual[r.student_id] = {
-      firstInMin: r.first_in_at ? minuteOfKST(r.first_in_at) : null,
-      lastOutMin: r.kind === "out" ? minuteOfKST(r.at) : null,
-    };
-  }
-
   // studentId → { hours, slots[] } — 오늘 예외가 skip_rule_id 로 대체를 지시한 정기 일정은 제외 처리한다.
+  // buildOccupancy(퇴실 사유의 스케쥴 추정)가 이 scheduleMap 을 그대로 재사용하므로 occupancy 계산보다 먼저 만든다.
   const skippedRuleIds = new Set(excRows.rows.filter((e) => e.skip_rule_id).map((e) => e.skip_rule_id as string));
   const scheduleMap: Record<string, SScheduleInfo> = {};
   const ensureSchedule = (sid: string): SScheduleInfo =>
@@ -111,6 +99,24 @@ export default async function MobileSeatPage() {
     ensureSchedule(e.student_id).slots.push(slot);
   }
 
+  // 오늘 재실/부재 최종 판정 — 학생별 마지막 순찰 기록과 마지막 출결 기록 중 시각이 더 늦은 쪽(동시각이면
+  // 출결)을 따른다(src/lib/occupancy.ts, /m/seat 화면과 동일 규칙 공유). 퇴실 사유 스케쥴 추정도 scheduleMap
+  // 을 그대로 넘겨 계산한다(새 쿼리 없음).
+  const occupancy: Record<string, SeatOcc> = buildOccupancy(att.rows, pat.rows, scheduleMap);
+
+  // 학생별 오늘 실제 출결 요약(statusAt 5번째 인자) — att.rows 를 재사용(별도 쿼리 없음).
+  const actual: Record<string, ActualAttendance> = {};
+  for (const r of att.rows) {
+    actual[r.student_id] = {
+      firstInMin: r.first_in_at ? minuteOfKST(r.first_in_at) : null,
+      lastOutMin: r.kind === "out" ? minuteOfKST(r.at) : null,
+    };
+  }
+
+  // 지금 KST 분(자정부터 경과) — 좌석 배치도 "확인 필요" 판정(occupancy.needsAttentionCheck)에 쓴다.
+  // 서버에서만 계산해 내려준다(클라 렌더에서 new Date() 호출 금지 원칙).
+  const nowMin = minuteOfKST(new Date().toISOString());
+
   return (
     <MobileSeat
       rooms={rooms.rows}
@@ -121,6 +127,7 @@ export default async function MobileSeatPage() {
       scheduleMap={scheduleMap}
       periods={periods}
       actual={actual}
+      nowMin={nowMin}
     />
   );
 }

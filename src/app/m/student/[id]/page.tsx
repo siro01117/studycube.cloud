@@ -8,7 +8,7 @@ import {
   RECENT_DAYS, hoursByDayOf, buildAttendanceDays, summarizeAttendance, buildAttendanceCalendar,
   patrolStateCounts, buildPatrolCalendar,
   summarizePenalty, combinePointEvents, buildPenaltyWeekSummary, buildPenaltyHourly,
-  buildPenaltyReasonBars, buildScheduleMiniature,
+  buildPenaltyReasonBars, buildScheduleMiniature, buildReliabilityFlags, reliabilityTooltip,
   type PatrolRow, type PenaltyRow, type RuleRow, type ExceptionRow, type AttendanceEventRow,
 } from "./util";
 import StudentDetail from "./StudentDetail";
@@ -118,6 +118,16 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
 
   const scheduleMiniature = buildScheduleMiniature(ruleRows.rows, exceptionRows.rows, hoursByDay, today);
 
+  // 통계 신뢰도 배지 — attendanceDays(이미 계산됨)·patrolRows.rows(이미 쿼리됨)만 재사용, 새 쿼리 없음.
+  // title 툴팁 문자열까지 여기서 완성해 내려준다(StudentDetail.tsx 는 표현만 — 이 화면의 다른 값들과
+  // 같은 원칙). null 이면 그 카드는 깨끗함(배지 자체를 그리지 않음).
+  const reliabilityFlags = buildReliabilityFlags(attendanceDays, patrolRows.rows, hasSchedule);
+  const reliability = {
+    attendance: reliabilityTooltip(reliabilityFlags.attendance),
+    late: reliabilityTooltip(reliabilityFlags.late),
+    patrol: reliabilityTooltip(reliabilityFlags.patrol),
+  };
+
   const seatLabel = student.seat_number != null ? `${student.seat_number}번` : "미배정";
   const statusLabel = STU_STATUS[student.status] ?? student.status;
   const canEditSchedule = can(me, "schedule.view");
@@ -141,6 +151,7 @@ export default async function StudentDetailPage({ params }: { params: Promise<{ 
           ruleCount={ruleRows.rows.length}
           hasSchedule={hasSchedule}
           canEditSchedule={canEditSchedule}
+          reliability={reliability}
         />
       </div>
     </main>

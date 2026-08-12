@@ -9,7 +9,7 @@ import MobileNav from "../_shared/MobileNav";
 import { SW, xyOf } from "@/lib/seatmap";
 import { checkIn, checkOut } from "../m/seat/attendanceActions";
 import { tint, line, ink, solid } from "@/lib/semantic-color";
-import type { OccKind, SeatOcc } from "@/lib/occupancy";
+import { needsAttentionCheck, type OccKind, type SeatOcc } from "@/lib/occupancy";
 import {
   checkoutBranchAt, type DaySlot, type Period, type ActualAttendance, type CheckoutBranch,
 } from "@/lib/schedule";
@@ -53,12 +53,13 @@ function checkoutReasonStyle(label: string, filled: boolean): CSSProperties {
     : { backgroundColor: tint(key, 16), borderColor: line(key, 55), color: ink(key) };
 }
 
-export default function MobileSeat({ rooms, seats, students, occupancy, canAttend, scheduleMap, periods, actual }: {
+export default function MobileSeat({ rooms, seats, students, occupancy, canAttend, scheduleMap, periods, actual, nowMin }: {
   rooms: SRoom[]; seats: SSeat[]; students: SStudent[];
   occupancy: Record<string, SeatOcc>; canAttend: boolean;
   scheduleMap: Record<string, SScheduleInfo>;
   periods: Period[];
   actual: Record<string, ActualAttendance>;
+  nowMin: number; // 서버가 계산해 내려준 지금 KST 분(자정부터 경과) — "확인 필요" 판정 전용(클라 new Date() 금지 원칙)
 }) {
   const [roomIdx, setRoomIdx] = useState(0);
   const [sel, setSel] = useState<SSeat | null>(null);
@@ -84,6 +85,20 @@ export default function MobileSeat({ rooms, seats, students, occupancy, canAtten
 
   const inCount = roomSeats.filter((s) => s.current_student_id && occupancy[s.current_student_id]?.kind === "in").length;
   const assigned = roomSeats.filter((s) => s.current_student_id).length;
+
+  // 확인 필요 — 스케쥴상 지금 원 안에 있어야 하는데(자습/원내 사유, 쉬는시간 제외) 오늘 출결·순찰 기록이
+  // 전혀 없는 학생. checkoutBranchAt() 이 이미 스케쥴·자정 넘김 판정을 끝낸 CheckoutBranch 를
+  // needsAttentionCheck() 에 그대로 넘긴다(새 판정 로직 없음). scheduleMap/periods/actual/occupancy 모두
+  // page.tsx 가 이미 내려준 값 재사용 — 추가 쿼리 없음. nowMin 은 서버가 계산해 내려준 값(클라 new Date() 금지).
+  const attentionIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const [sid, info] of Object.entries(scheduleMap)) {
+      const branch = checkoutBranchAt(nowMin, info.hours, info.slots, periods, actual[sid] ?? null);
+      if (needsAttentionCheck(branch, occupancy[sid])) set.add(sid);
+    }
+    return set;
+  }, [scheduleMap, nowMin, periods, actual, occupancy]);
+  const attentionCount = roomSeats.filter((s) => s.current_student_id && attentionIds.has(s.current_student_id)).length;
 
   // 수동 입/퇴실 버튼 — 로컬에 낙관적 상태를 두지 않고 서버 액션의 revalidatePath("/m/seat") 로 이
   // 페이지가 다시 렌더될 때 새로 내려오는 occupancy 를 그대로 반영한다(FloorEditor.tsx 와 동일 방식).
@@ -121,7 +136,10 @@ export default function MobileSeat({ rooms, seats, students, occupancy, canAtten
         <MobileNav current="/seat" />
         <div style={{ flex: 1, minWidth: 0, textAlign: "center", lineHeight: 1.25 }}>
           <div style={{ fontSize: 16, fontWeight: 800 }}>{room ? `${room.floor}층 ${room.name}` : "방 없음"}</div>
-          <div style={{ fontSize: 11, color: "var(--faint)", fontVariantNumeric: "tabular-nums" }}>방 {roomIdx + 1}/{rooms.length} · 재실 {inCount}/{assigned}</div>
+          <div style={{ fontSize: 11, color: "var(--faint)", fontVariantNumeric: "tabular-nums" }}>
+            방 {roomIdx + 1}/{rooms.length} · 재실 {inCount}/{assigned}
+            {attentionCount > 0 && <span style={{ color: "var(--warn)", fontWeight: 700 }}> · 확인 필요 {attentionCount}명</span>}
+          </div>
         </div>
         <Link href="/patrol" className="chip" style={{ textDecoration: "none", height: 36, flex: "none", color: "var(--accent)", fontWeight: 700 }}>순찰</Link>
       </div>
@@ -136,8 +154,10 @@ export default function MobileSeat({ rooms, seats, students, occupancy, canAtten
           const o = sid ? occupancy[sid] : undefined;
           const a = o?.kind;
           const c = a ? ATT[a] : null;
+          // 확인 필요 — occ 가 없을 때만(c 도 자동으로 null) 해당될 수 있다(needsAttentionCheck 규칙 그대로).
+          const needsCheck = !!sid && attentionIds.has(sid);
           return (
-            <div title={o?.title || undefined} style={{
+            <div title={o?.title || (needsCheck ? "확인 필요 — 지금 자리에 있어야 하는데 오늘 출결·순찰 기록이 없습니다" : undefined)} style={{
               width: "100%", height: "100%", borderRadius: 10,
               background: c ? c.bg : sid ? "var(--card)" : "var(--panel2)",
               border: `1.5px solid ${c ? c.bd : "var(--line)"}`,
@@ -148,7 +168,24 @@ export default function MobileSeat({ rooms, seats, students, occupancy, canAtten
               {sid ? (
                 <div style={{ marginTop: 11, display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
                   <span style={{ fontSize: 13.5, fontWeight: 600, maxWidth: SW - 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{stOf.get(sid)?.name ?? "?"}</span>
-                  {c && <span style={{ fontSize: 11, fontWeight: 800, color: c.fg, lineHeight: 1.1 }}>{c.label}</span>}
+                  {c ? (
+                    <span style={{ fontSize: 11, fontWeight: 800, color: c.fg, lineHeight: 1.1 }}>{c.label}</span>
+                  ) : needsCheck ? (
+                    <span style={{ fontSize: 10.5, fontWeight: 800, color: "var(--warn)", lineHeight: 1.1 }}>확인 필요</span>
+                  ) : null}
+                  {/* 하원 사유 — 수동 퇴실 사유(attendance_event.note) 또는 없으면 스케쥴 추정(옅게).
+                      o.reason 은 occupancy.ts buildOccupancy() 가 이미 우선순위를 적용해 내려준다. */}
+                  {a === "out" && o?.reason && (
+                    <span
+                      style={{
+                        fontSize: 10, fontWeight: 700, color: "var(--dim)", lineHeight: 1.1,
+                        opacity: o.reasonEstimated ? 0.7 : 1,
+                        maxWidth: SW - 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                      }}
+                    >
+                      {o.reason}
+                    </span>
+                  )}
                 </div>
               ) : <span style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 10 }}>공석</span>}
             </div>

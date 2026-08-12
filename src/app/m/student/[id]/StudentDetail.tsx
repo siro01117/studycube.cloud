@@ -39,6 +39,9 @@ const BENTO_CSS = `
 
 const CARD: React.CSSProperties = { background: "var(--card)", border: "1px solid var(--line)", borderRadius: 14, padding: "12px 14px", minWidth: 0, display: "flex", flexDirection: "column" };
 const CARD_TITLE: React.CSSProperties = { fontSize: 11.5, color: "var(--dim)", fontWeight: 700, marginBottom: 8, lineHeight: 1, cursor: "default" };
+// 카드 제목 옆 집계 기간 라벨(예: "30일" · "4주 누적" · "이번 주") — 서술형 문장 없이 짧게.
+const CARD_TITLE_ROW: React.CSSProperties = { ...CARD_TITLE, display: "flex", alignItems: "baseline", gap: 5 };
+const PERIOD_LABEL: React.CSSProperties = { fontSize: 11, color: "var(--faint)", fontWeight: 500 };
 const STAT_LABEL: React.CSSProperties = { fontSize: 10.5, color: "var(--faint)", fontWeight: 700 };
 const STAT_VALUE: React.CSSProperties = { fontSize: 23, fontWeight: 800, marginTop: 4, fontVariantNumeric: "tabular-nums" };
 const STAT_SUB: React.CSSProperties = { fontSize: 10.5, color: "var(--dim)", marginTop: 2, fontVariantNumeric: "tabular-nums" };
@@ -46,11 +49,15 @@ const EMPTY: React.CSSProperties = { color: "var(--faint)", fontSize: 12.5, padd
 
 type StudentHead = { id: string; name: string; seatLabel: string; statusLabel: string; isLeave: boolean };
 
+// 통계 신뢰도 배지 — page.tsx(buildReliabilityFlags + reliabilityTooltip)가 이미 완성한 title 문자열을
+// 그대로 받는다(계산 없음, 이 파일은 표현만). null 이면 그 카드는 깨끗함(문제 없음).
+export type ReliabilityInfo = { attendance: string | null; late: string | null; patrol: string | null };
+
 export default function StudentDetail({
   student, attendanceDays, attendanceSummary, attendanceHeatmap,
   patrolCounts, patrolHeatmap, patrolTotal,
   penaltyWeek, penaltyHourly, penaltyReasonBars, penaltyTotal30,
-  scheduleMiniature, ruleCount, hasSchedule, canEditSchedule,
+  scheduleMiniature, ruleCount, hasSchedule, canEditSchedule, reliability,
 }: {
   student: StudentHead;
   attendanceDays: AttendanceDay[];
@@ -67,6 +74,7 @@ export default function StudentDetail({
   ruleCount: number;
   hasSchedule: boolean;
   canEditSchedule: boolean;
+  reliability: ReliabilityInfo;
 }) {
   return (
     <div>
@@ -74,29 +82,47 @@ export default function StudentDetail({
       <div className="sd-bento">
         <HeaderCard student={student} canEditSchedule={canEditSchedule} />
 
-        <StatCard label="등원일" value={`${attendanceSummary.attendedDays}일`} />
-        <StatCard label="평균 등원 시각" value={attendanceSummary.avgIn ?? "—"} />
+        <StatCard label="등원일" value={`${attendanceSummary.attendedDays}일`} reliabilityTip={reliability.attendance} />
+        <StatCard label="평균 등원 시각" value={attendanceSummary.avgIn ?? "—"} reliabilityTip={reliability.attendance} />
         <StatCard
           label="지각"
           value={attendanceSummary.hasSchedule ? `${attendanceSummary.lateCount}회` : "미설정"}
           dim={!attendanceSummary.hasSchedule}
+          reliabilityTip={reliability.late}
         />
         <StatCard
           label="이번 주 위반"
+          period="이번 주"
           value={`${penaltyWeek.thisWeekCount}건`}
           color={penaltyWeek.thisWeekCount > 0 ? "var(--danger)" : undefined}
           title={`${penaltyWeek.diffLabel} · 벌점 ${penaltyWeek.thisWeekPoints}점`}
           sub={`벌점 ${penaltyWeek.thisWeekPoints}점`}
+          reliabilityTip={reliability.patrol}
         />
 
-        <AttendanceCard days={attendanceDays} summary={attendanceSummary} heatmap={attendanceHeatmap} />
-        <PatrolCard counts={patrolCounts} heatmap={patrolHeatmap} total={patrolTotal} />
+        <AttendanceCard days={attendanceDays} summary={attendanceSummary} heatmap={attendanceHeatmap} reliabilityTip={reliability.attendance} />
+        <PatrolCard counts={patrolCounts} heatmap={patrolHeatmap} total={patrolTotal} reliabilityTip={reliability.patrol} />
         <ScheduleCard studentId={student.id} miniature={scheduleMiniature} ruleCount={ruleCount} hasSchedule={hasSchedule} canEditSchedule={canEditSchedule} />
 
-        <PenaltyReasonCard bars={penaltyReasonBars} total30={penaltyTotal30} />
-        <PenaltyHourlyCard hourly={penaltyHourly} />
+        <PenaltyReasonCard bars={penaltyReasonBars} total30={penaltyTotal30} reliabilityTip={reliability.patrol} />
+        <PenaltyHourlyCard hourly={penaltyHourly} reliabilityTip={reliability.patrol} />
       </div>
     </div>
+  );
+}
+
+// 카드 제목 옆 물음표 배지 — 문제 있을 때만(tip!=null) 그린다(깨끗한 카드엔 아무것도 안 그림).
+// title 툴팁에 이미 줄바꿈 포함 항목 목록 + 안내 문구가 들어있다(page.tsx 가 완성해 내려준 문자열).
+function ReliabilityBadge({ tip }: { tip: string | null }) {
+  if (!tip) return null;
+  return (
+    <span title={tip} style={{ display: "inline-flex", color: "var(--warn)", cursor: "help", flexShrink: 0 }}>
+      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M9.3 9.6a2.7 2.7 0 1 1 4.3 2.2c-.8.55-1.6 1.1-1.6 2.3" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none" />
+      </svg>
+    </span>
   );
 }
 
@@ -132,10 +158,14 @@ function HeaderCard({ student, canEditSchedule }: { student: StudentHead; canEdi
 }
 
 // ================= 지표 4개 =================
-function StatCard({ label, value, color, dim, title, sub }: { label: string; value: string; color?: string; dim?: boolean; title?: string; sub?: string }) {
+function StatCard({ label, value, color, dim, title, sub, period, reliabilityTip }: { label: string; value: string; color?: string; dim?: boolean; title?: string; sub?: string; period?: string; reliabilityTip?: string | null }) {
   return (
     <div className="sd-stat" style={CARD} title={title}>
-      <span style={STAT_LABEL}>{label}</span>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+        <span style={STAT_LABEL}>{label}</span>
+        {period && <span style={PERIOD_LABEL}>{period}</span>}
+        <ReliabilityBadge tip={reliabilityTip ?? null} />
+      </div>
       <span style={{ ...STAT_VALUE, color: dim ? "var(--faint)" : color ?? "var(--ink)" }}>{value}</span>
       {sub && <span style={STAT_SUB}>{sub}</span>}
     </div>
@@ -220,27 +250,35 @@ function CalendarHeatmapGrid({ heatmap, leftLabel, rightLabel }: { heatmap: Cale
 }
 
 // ================= 출결 달력 =================
-function AttendanceCard({ days, summary, heatmap }: { days: AttendanceDay[]; summary: AttendanceSummary; heatmap: CalendarHeatmap }) {
+function AttendanceCard({ days, summary, heatmap, reliabilityTip }: { days: AttendanceDay[]; summary: AttendanceSummary; heatmap: CalendarHeatmap; reliabilityTip: string | null }) {
   const attended = days.filter((d) => d.firstIn);
   const tip = attended.length === 0
     ? "최근 30일간 등원 기록 없음"
     : `등원 ${summary.attendedDays}일 · 평균 등원 ${summary.avgIn ?? "—"} · 평균 하원 ${summary.avgOut ?? "—"} · ${summary.hasSchedule ? `지각 ${summary.lateCount}회` : "지각 비교 미설정"} · 진하기=그날 재실 시간(많을수록 진함), 점=지각`;
   return (
     <section className="sd-att" style={CARD}>
-      <div style={CARD_TITLE} title={tip}>출결</div>
+      <div style={CARD_TITLE_ROW} title={tip}>
+        <span>출결</span>
+        <span style={PERIOD_LABEL}>30일</span>
+        <ReliabilityBadge tip={reliabilityTip} />
+      </div>
       {attended.length === 0 ? <div style={EMPTY}>기록 없음</div> : <CalendarHeatmapGrid heatmap={heatmap} leftLabel="자습 시간 적음" rightLabel="자습 시간 많음" />}
     </section>
   );
 }
 
 // ================= 순찰 달력 =================
-function PatrolCard({ counts, heatmap, total }: { counts: PatrolStateCount[]; heatmap: CalendarHeatmap; total: number }) {
+function PatrolCard({ counts, heatmap, total, reliabilityTip }: { counts: PatrolStateCount[]; heatmap: CalendarHeatmap; total: number; reliabilityTip: string | null }) {
   const tip = total === 0
     ? "최근 30일간 순찰 기록 없음"
     : `순찰 ${total}회 · ${counts.map((c) => `${c.label} ${c.count}`).join(" · ")} · 진하기=그날 위반 횟수`;
   return (
     <section className="sd-patrol" style={CARD}>
-      <div style={CARD_TITLE} title={tip}>순찰</div>
+      <div style={CARD_TITLE_ROW} title={tip}>
+        <span>순찰</span>
+        <span style={PERIOD_LABEL}>30일</span>
+        <ReliabilityBadge tip={reliabilityTip} />
+      </div>
       {total === 0 ? <div style={EMPTY}>기록 없음</div> : <CalendarHeatmapGrid heatmap={heatmap} leftLabel="양호" rightLabel="주의" />}
     </section>
   );
@@ -262,12 +300,16 @@ function reasonColor(label: string, idx: number): string {
 // ================= 사유(벌점 사유별 구성 — 세로 목록형) =================
 // 벌점 시간대 카드와 나란히 두는 좁은 카드라서, 100% 가로 스택 바 대신 사유마다 한 줄(점+라벨+점수+
 // 비율 바)로 세로 나열한다 — 좁은 폭에서 더 읽기 쉽다.
-function PenaltyReasonCard({ bars, total30 }: { bars: PenaltyReasonBar[]; total30: number }) {
+function PenaltyReasonCard({ bars, total30, reliabilityTip }: { bars: PenaltyReasonBar[]; total30: number; reliabilityTip: string | null }) {
   const totalCount = bars.reduce((a, r) => a + r.count, 0);
   const tip = totalCount > 0 ? `최근 30일 위반 ${totalCount}건 · 벌점 ${total30}점 · 사유별 구성` : "최근 30일간 위반 기록 없음";
   return (
     <section className="sd-reason" style={CARD}>
-      <div style={CARD_TITLE} title={tip}>사유</div>
+      <div style={CARD_TITLE_ROW} title={tip}>
+        <span>사유</span>
+        <span style={PERIOD_LABEL}>30일</span>
+        <ReliabilityBadge tip={reliabilityTip} />
+      </div>
       {totalCount === 0 ? (
         <div style={EMPTY}>기록 없음</div>
       ) : (
@@ -329,7 +371,7 @@ const PEN_PAD_X = 6;
 const PEN_AXIS_Y = 96; // 기준선(바닥) y좌표
 const PEN_TOP_Y = 20;  // 최고점이 닿을 수 있는 최상단 y좌표
 
-function PenaltyHourlyCard({ hourly }: { hourly: PenaltyHourly }) {
+function PenaltyHourlyCard({ hourly, reliabilityTip }: { hourly: PenaltyHourly; reliabilityTip: string | null }) {
   const buckets = hourly.buckets;
   const maxCount = Math.max(1, ...buckets.map((b) => b.count));
   const tip = hourly.hasData ? `${hourly.peakLabel ?? ""} · 시간대별 위반(최근 4주, 07~23시)`.replace(/^ · /, "") : "최근 4주간 시간대별 위반 기록 없음";
@@ -356,7 +398,11 @@ function PenaltyHourlyCard({ hourly }: { hourly: PenaltyHourly }) {
   return (
     <section className="sd-pen" style={CARD}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-        <div style={CARD_TITLE} title={tip}>위반 집중 시간대</div>
+        <div style={CARD_TITLE_ROW} title={tip}>
+          <span>위반 집중 시간대</span>
+          <span style={PERIOD_LABEL}>4주 누적</span>
+          <ReliabilityBadge tip={reliabilityTip} />
+        </div>
         {hourly.hasData && <span style={{ fontSize: 10, color: "var(--faint)", fontWeight: 700, marginBottom: 8 }}>최고 {maxCount}건</span>}
       </div>
       {!hourly.hasData ? (

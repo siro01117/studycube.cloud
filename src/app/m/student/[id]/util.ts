@@ -518,7 +518,63 @@ export function buildPenaltyRecent(events: PointEvent[]): PenaltyRecentItem[] {
     .map((e) => ({ date: shortDateLabel(e.date), time: timeLabel(e.at), label: e.label, points: e.points, note: e.note, dot: e.dot }));
 }
 
-// ================= D. 스케쥴 요약(미니어처) =================
+// ================= D. 통계 신뢰도(카드 제목 옆 물음표 배지) =================
+// 집계 원자료(attendanceDays·patrolRows)에 결손·이상치가 있으면 그 카드의 숫자를 곧이곧대로 읽으면 안
+// 된다 — 새 쿼리 없이 이미 계산된 attendanceDays(A절)와 이미 쿼리된 patrolRows(B절)만 다시 훑어서
+// 판정한다. 카드별로 원인이 다르므로 세 그룹으로 나눈다(StudentDetail.tsx 가 그룹별로 관련 카드에만
+// 붙인다): 출결(하원 미기록·비정상 재실·비정상 입실) / 지각(스케쥴 미설정) / 순찰(순찰 공백).
+// 각 배열은 "문제 있는 항목 문구" 리스트 — 비어 있으면 그 카드는 깨끗하다(물음표 자체를 그리지 않음).
+export type ReliabilityFlags = {
+  attendance: string[]; // 출결 카드 · 평균 등원 · 등원일 지표
+  late: string[];       // 지각 지표
+  patrol: string[];     // 순찰 카드 · 이번 주 위반 지표 · 위반 집중 시간대 · 사유 카드
+};
+
+const STAY_MAX_MIN = 16 * 60; // 재실 16시간 초과
+const STAY_MIN_MIN = 10;      // 재실 10분 미만
+const PATROL_MIN_DAYS = 3;    // 순찰 기록이 이 일수 미만이면 근거 빈약
+
+export function buildReliabilityFlags(
+  attendanceDays: AttendanceDay[],
+  patrolRows: PatrolRow[],
+  hasSchedule: boolean,
+): ReliabilityFlags {
+  let noOutDays = 0, longStayDays = 0, shortStayDays = 0, earlyInDays = 0;
+  for (const d of attendanceDays) {
+    if (!d.firstIn) continue; // 그날 등원 자체가 없으면 결손 판정 대상이 아님
+    if (d.firstIn < "05:00") earlyInDays += 1;
+    if (!d.lastOut) { noOutDays += 1; continue; } // 하원 미기록인 날은 재실시간 판정 대상 밖(totalMin=null)
+    if (d.totalMin != null) {
+      if (d.totalMin > STAY_MAX_MIN) longStayDays += 1;
+      else if (d.totalMin < STAY_MIN_MIN) shortStayDays += 1;
+    }
+  }
+  const attendance: string[] = [];
+  if (noOutDays > 0) attendance.push(`하원 미기록 ${noOutDays}일`);
+  if (longStayDays > 0) attendance.push(`재실 16시간 초과 ${longStayDays}일`);
+  if (shortStayDays > 0) attendance.push(`재실 10분 미만 ${shortStayDays}일`);
+  if (earlyInDays > 0) attendance.push(`입실 05시 이전 ${earlyInDays}일`);
+
+  const late: string[] = [];
+  if (!hasSchedule) late.push("등하원 스케쥴 미설정");
+
+  const patrolDayCount = new Set(patrolRows.map((r) => r.date)).size;
+  const patrol: string[] = [];
+  if (patrolDayCount < PATROL_MIN_DAYS) {
+    patrol.push(patrolDayCount === 0 ? "순찰 기록 없음" : `순찰 기록 ${patrolDayCount}일뿐`);
+  }
+
+  return { attendance, late, patrol };
+}
+
+/** 물음표 배지 title 툴팁 — 항목을 줄바꿈으로 나열하고 마지막 줄에 안내 문구를 덧붙인다.
+ * issues 가 비어 있으면 null(호출부가 배지 자체를 그리지 않아야 함을 알리는 신호). */
+export function reliabilityTooltip(issues: string[]): string | null {
+  if (issues.length === 0) return null;
+  return [...issues, "일부 통계가 실제와 다를 수 있습니다"].join("\n");
+}
+
+// ================= E. 스케쥴 요약(미니어처) =================
 export type RuleRow = { id: string; reason: string; kind: string; title: string; start_min: number; end_min: number; days: string };
 export type ExceptionRow = { id: string; reason: string; title: string; start_min: number; end_min: number; date: string; skip_rule_id: string | null };
 

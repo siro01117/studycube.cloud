@@ -21,7 +21,7 @@ import {
 } from '@/lib/schedule';
 import { CHECKOUT_REASON_PRESETS, CHECKOUT_OTHER_REASON, CHECKOUT_REASON_KEY } from '@/lib/attendance';
 import { tint, line, ink, solid } from '@/lib/semantic-color';
-import type { OccKind, SeatOcc } from '@/lib/occupancy';
+import { needsAttentionCheck, type OccKind, type SeatOcc } from '@/lib/occupancy';
 
 // ---------------- types ----------------
 export type Room = { id: string; name: string; floor: number; cols: number; rows: number; pos_x: number; pos_y: number; door_side: string | null };
@@ -98,6 +98,8 @@ function PatrolElapsed({ startedAt }: { startedAt: number | null }) {
 // 입/퇴실을 눌러도 화면이 안 바뀌는 버그가 있었다).
 export type AttInfo = OccKind;
 const ATT_LABEL: Record<AttInfo, string> = { in: '재실', out: '하원' };
+// "확인 필요" 배지의 title — occ 가 없어(attTitle=undefined) 다른 title 이 안 잡힌 좌석에만 대신 채운다.
+const ATTENTION_TITLE = '확인 필요 — 지금 자리에 있어야 하는데 오늘 출결·순찰 기록이 없습니다';
 // 재실(in) = 순찰 '입석'/스케쥴 '자습'과 같은 의미 → SEMANTIC.present 재사용. 하원(out)은 무채색(none).
 const ATT_COLOR: Record<AttInfo, { bg: string; bd: string }> = {
   in: { bg: tint('present', 15), bd: line('present', 55) },
@@ -255,11 +257,12 @@ type StaticSeatProps = {
   patrolMode: boolean;
   patrolMark: PatrolMark | undefined;
   ghost: Ghost | undefined;
+  needsAttention: boolean; // "확인 필요" — 순찰 모드 중엔 항상 false 로 넘어온다(호출부에서 게이트)
   movingStudentId: string | null;
   ctx: SeatCtx;
 };
 const StaticSeat = memo(function StaticSeat({
-  s, i, clickable, numberEditMode, stuById, occ, patrolMode, patrolMark, ghost, movingStudentId, ctx,
+  s, i, clickable, numberEditMode, stuById, occ, patrolMode, patrolMark, ghost, needsAttention, movingStudentId, ctx,
 }: StaticSeatProps) {
   const { moveTo, openSeat, setPatrolMenu, setSeatMenu, call } = ctx;
   // 터치 꾹누르기 = 좌석 컨텍스트 메뉴(데스크톱 우클릭 대체). 순찰/이동 중엔 비활성.
@@ -333,7 +336,7 @@ const StaticSeat = memo(function StaticSeat({
       }}
       onContextMenu={(e) => { e.preventDefault(); if (!movingStudentId && !patrolMode) setSeatMenu({ x: e.clientX, y: e.clientY, seat: s }); }}
       style={style}
-      title={!patrolMode ? attTitle : undefined}
+      title={!patrolMode ? (attTitle ?? (needsAttention ? ATTENTION_TITLE : undefined)) : undefined}
     >
       {seatInner(s.number, s.label, who)}
       {patSt ? (
@@ -344,9 +347,26 @@ const StaticSeat = memo(function StaticSeat({
         <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: ghostLabelColor, opacity: 0.48 }}>
           {ghost.label}
         </span>
-      ) : !patrolMode && attKind && (
+      ) : !patrolMode && attKind ? (
         <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: attKind === 'in' ? ink('present') : 'var(--faint)' }}>
           {ATT_LABEL[attKind]}
+        </span>
+      ) : needsAttention ? (
+        <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 10.5, fontWeight: 800, color: 'var(--warn)' }}>
+          확인 필요
+        </span>
+      ) : null}
+      {/* 하원 사유 — 수동 퇴실 사유(attendance_event.note) 또는 없으면 스케쥴 추정(옅게). occ.reason 은
+          occupancy.ts buildOccupancy() 가 이미 우선순위를 적용해 계산해 내려준다(여기선 표시만). */}
+      {!patrolMode && attKind === 'out' && occ?.reason && (
+        <span
+          style={{
+            position: 'absolute', bottom: 3, left: 4, right: 4, textAlign: 'center',
+            fontSize: 10, fontWeight: 700, color: 'var(--dim)', opacity: occ.reasonEstimated ? 0.7 : 1,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none',
+          }}
+        >
+          {occ.reason}
         </span>
       )}
       {patrolMode && pts > 0 && (
@@ -369,11 +389,12 @@ type OvRoomProps = {
   patrolMode: boolean;
   patrolMarks: Record<string, PatrolMark>;
   ghostOf: Map<string, Ghost>;
+  attentionIds: Set<string>; // "확인 필요" 학생 id(전체 지점) — 순찰 모드 중엔 호출부가 게이트
   movingStudentId: string | null;
   ctx: SeatCtx;
 };
 const OvRoom = memo(function OvRoom({
-  r, seats, numberEditMode, stuById, occupancy, patrolMode, patrolMarks, ghostOf, movingStudentId, ctx,
+  r, seats, numberEditMode, stuById, occupancy, patrolMode, patrolMarks, ghostOf, attentionIds, movingStudentId, ctx,
 }: OvRoomProps) {
   const rs = seats;
   const list = rs.map((s, i) => seatXY(s, i));
@@ -406,6 +427,7 @@ const OvRoom = memo(function OvRoom({
               patrolMode={patrolMode}
               patrolMark={mark}
               ghost={unmarked ? ghostOf.get(sid!) : undefined}
+              needsAttention={!patrolMode && !!sid && attentionIds.has(sid)}
               movingStudentId={movingStudentId}
               ctx={ctx}
             />
@@ -419,7 +441,7 @@ const OvRoom = memo(function OvRoom({
 
 export default function FloorEditor({
   rooms, seats, students, canManage, canEditStudent, initialRoomId, occupancy, canAttend, canPatrol, lastPatrolAt,
-  openSession, scheduleMap, periods, actual,
+  openSession, scheduleMap, periods, actual, serverNowMin,
 }: {
   rooms: Room[]; seats: Seat[]; students: Student[];
   canManage: boolean; canEditStudent: boolean; initialRoomId: string | null;
@@ -428,6 +450,7 @@ export default function FloorEditor({
   openSession: OpenPatrolSession | null; scheduleMap: Record<string, ScheduleInfo>;
   periods: Period[];
   actual: Record<string, ActualAttendance>; // 학생별 오늘 실제 출결 요약(statusAt 5번째 인자)
+  serverNowMin: number; // 서버가 계산해 내려준 지금 KST 분 — "확인 필요" 판정 전용(클라 new Date() 금지 원칙)
 }) {
   const router = useRouter();
   const floors = useMemo(
@@ -591,6 +614,37 @@ export default function FloorEditor({
     return m;
   }, [scheduleMap, nowMin, periods, actual]);
 
+  // 확인 필요 — 스케쥴상 지금 원 안에 있어야 하는데(자습/원내 사유, 쉬는시간 제외) 오늘 출결·순찰 기록이
+  // 전혀 없는 학생. checkoutBranchAt() 이 이미 스케쥴·자정 넘김 판정을 끝낸 CheckoutBranch 를
+  // needsAttentionCheck() 에 그대로 넘긴다(새 판정 로직 없음). scheduleMap/periods/actual/occupancy 모두
+  // 이미 있는 값 재사용(추가 쿼리 없음). ghostOf 와 달리 순찰 화면 전용 클라 nowMin(state) 이 아니라
+  // 서버가 내려준 serverNowMin 을 쓴다(클라 new Date() 금지 원칙 — 이 판정은 "지금 이 순간"이 아니라
+  // 페이지 로드 시점 기준이면 충분하다).
+  const attentionIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const [sid, info] of Object.entries(scheduleMap)) {
+      const branch = checkoutBranchAt(serverNowMin, info.hours, info.slots, periods, actual[sid] ?? null);
+      if (needsAttentionCheck(branch, occupancy[sid])) set.add(sid);
+    }
+    return set;
+  }, [scheduleMap, serverNowMin, periods, actual, occupancy]);
+
+  // 툴바 요약 — 현재 보고 있는 층(전체보기면 전 층) 기준 확인 필요 인원 수. 순찰 모드 중엔 0(호출부가
+  // 이미 그 상황에선 patrolSummary 를 쓰므로 겹치지 않게 감춘다).
+  const attentionSummary = useMemo(() => {
+    if (patrolMode) return 0;
+    const roomIds = typeof floorSel === 'number'
+      ? new Set(rooms.filter((r) => r.floor === floorSel).map((r) => r.id))
+      : null; // null = 전체 층(대시보드)
+    let n = 0;
+    for (const s of seats) {
+      if (!s.room_id || !s.current_student_id) continue;
+      if (roomIds && !roomIds.has(s.room_id)) continue;
+      if (attentionIds.has(s.current_student_id)) n += 1;
+    }
+    return n;
+  }, [patrolMode, floorSel, rooms, seats, attentionIds]);
+
   // 순찰 종료 시 미점검 경고 — 현재 층에 배정된 학생이 있는데 이번 세션에 마크가 없는 좌석.
   // 오프라인 큐 대기분도 patrolMarks 에 즉시 반영되므로(patrolMenuItems) 별도 처리 불필요.
   // 고스트 none(미설정)/away(등원전·하원)인 학생은 확인이 필요 없으니 경고에서 제외한다(탭 자체는 막지 않음).
@@ -675,6 +729,7 @@ export default function FloorEditor({
         patrolMode={patrolMode}
         patrolMark={mark}
         ghost={unmarked ? ghostOf.get(sid!) : undefined}
+        needsAttention={!patrolMode && !!sid && attentionIds.has(sid)}
         movingStudentId={movingStudentId}
         ctx={ctx}
       />
@@ -691,6 +746,7 @@ export default function FloorEditor({
       patrolMode={patrolMode}
       patrolMarks={patrolMarks}
       ghostOf={ghostOf}
+      attentionIds={attentionIds}
       movingStudentId={movingStudentId}
       ctx={ctx}
     />
@@ -1321,10 +1377,18 @@ export default function FloorEditor({
       {/* 툴바 */}
       <div className="flex items-center gap-3 px-5" style={{ height: 56, borderBottom: '1px solid var(--line)', flex: 'none' }}>
         {/* 층 선택은 왼쪽 세로 레일로 이동. 편집 중엔 방 이름 표시 */}
-        <div className="flex items-center" style={{ flex: 1, minWidth: 0, paddingLeft: 6 }}>
+        <div className="flex items-center" style={{ flex: 1, minWidth: 0, paddingLeft: 6, gap: 10 }}>
           {mode === 'edit' && selRoom && (
             <span style={{ fontSize: 13.5, fontWeight: 700 }}>
               {selRoom.name} <span style={{ color: 'var(--dim)', fontWeight: 500 }}>· 좌석 편집 중</span>
+            </span>
+          )}
+          {mode === 'view' && attentionSummary > 0 && (
+            <span
+              title="스케쥴상 지금 원 안에 있어야 하는데 오늘 출결·순찰 기록이 없는 학생"
+              style={{ fontSize: 12, fontWeight: 700, color: 'var(--warn)' }}
+            >
+              확인 필요 {attentionSummary}명
             </span>
           )}
         </div>
