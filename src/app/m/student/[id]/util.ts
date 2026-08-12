@@ -273,6 +273,13 @@ export function summarizeAttendance(days: AttendanceDay[], hasSchedule: boolean)
 export type PatrolRow = { date: string; at: string; state: string; points: number; note: string | null; hour: number };
 export type PatrolListItem = { date: string; time: string; label: string; dot: string; points: number; note: string | null };
 
+// 이 화면(학생 인사이트)의 "위반" 판정 단일 기준 — 점수(points)가 0보다 큰 순찰 기록만 위반으로 센다.
+// 입석·학원·원내 수업·주간 상담(points=0)은 위반이 아니다(lib/patrol.ts PATROL_STATES 정의 그대로).
+// 순찰 히트맵(buildPatrolCalendar)·시간대 이벤트 합산(combinePointEvents) 양쪽이 이 함수 하나만 참조한다.
+export function isPatrolViolation(row: Pick<PatrolRow, "points">): boolean {
+  return row.points > 0;
+}
+
 export function buildPatrolList(rows: PatrolRow[]): PatrolListItem[] {
   return rows.map((r) => {
     const cfg = PATROL_BY_KEY[r.state];
@@ -309,28 +316,30 @@ export function problemHourHistogram(rows: PatrolRow[]): HourBucket[] {
   return buckets;
 }
 
-// ================= B-2. 순찰 히트맵(달력, 학습 태도/벌점) =================
-// 그 날 순찰에서 받은 벌점 합계 → 진하기 5단계. 0점(순찰은 있었지만 벌점 없음)만 무채색(panel2),
-// 나머지는 distract 기준색(danger 계열)을 tint() 로 섞어 진하기를 낸다.
-const PATROL_POINT_TIERS: { max: number; pct: number; label: string }[] = [
-  { max: 0, pct: 0, label: "0점" },
-  { max: 2, pct: 32, label: "1~2점" },
-  { max: 4, pct: 56, label: "3~4점" },
-  { max: 7, pct: 80, label: "5~7점" },
-  { max: Infinity, pct: 100, label: "8점~" },
+// ================= B-2. 순찰 히트맵(달력, 학습 태도) =================
+// 그 날 위반 횟수(isPatrolViolation 기준) → 진하기 5단계. 0건(순찰은 있었지만 위반 없음 — 예: 입석만
+// 찍힌 날)만 무채색(panel2), 나머지는 distract 기준색(danger 계열)을 tint() 로 섞어 진하기를 낸다.
+// 점수는 보조 정보로 title 에만 남긴다.
+const PATROL_VIOLATION_TIERS: { max: number; pct: number; label: string }[] = [
+  { max: 0, pct: 0, label: "0건" },
+  { max: 1, pct: 32, label: "1건" },
+  { max: 2, pct: 56, label: "2건" },
+  { max: 4, pct: 80, label: "3~4건" },
+  { max: Infinity, pct: 100, label: "5건~" },
 ];
-function patrolTierOf(points: number) {
-  if (points <= 0) return PATROL_POINT_TIERS[0];
-  return PATROL_POINT_TIERS.find((t) => points <= t.max) ?? PATROL_POINT_TIERS[PATROL_POINT_TIERS.length - 1];
+function patrolViolationTierOf(count: number) {
+  if (count <= 0) return PATROL_VIOLATION_TIERS[0];
+  return PATROL_VIOLATION_TIERS.find((t) => count <= t.max) ?? PATROL_VIOLATION_TIERS[PATROL_VIOLATION_TIERS.length - 1];
 }
-function patrolTierColor(points: number): string {
-  const tier = patrolTierOf(points);
+function patrolViolationTierColor(count: number): string {
+  const tier = patrolViolationTierOf(count);
   return tier.pct === 0 ? "var(--panel2)" : tint("distract", tier.pct);
 }
 
-/** 최근 30일 벌점 달력 히트맵. patrolRows(page.tsx 가 이미 쿼리해 온 원본, RECENT_DAYS 만큼)를
+/** 최근 30일 순찰 달력 히트맵. patrolRows(page.tsx 가 이미 쿼리해 온 원본, RECENT_DAYS 만큼)를
  * 재사용한다 — 추가 쿼리 없음. 순찰 기록 자체가 없는 날은 hasData=false(빈 셀), 순찰은 있었으나
- * 벌점 0점인 날은 hasData=true·무채색으로 서로 구분한다. */
+ * 위반이 0건인 날(입석·학원·원내 수업·주간 상담만)은 hasData=true·무채색으로 서로 구분한다.
+ * 셀 진하기는 위반 횟수 기준 — 벌점 합계는 title 에만 보조로 남긴다. */
 export function buildPatrolCalendar(rows: PatrolRow[], today: string): CalendarHeatmap {
   const skeleton = calendarSkeleton(today, RECENT_DAYS);
   const byDate = new Map<string, PatrolRow[]>();
@@ -343,6 +352,7 @@ export function buildPatrolCalendar(rows: PatrolRow[], today: string): CalendarH
     if (!list || list.length === 0) {
       return { ...sk, hasData: false, color: null, dot: null, title: null };
     }
+    const violationCount = list.filter(isPatrolViolation).length;
     const points = list.reduce((a, r) => a + r.points, 0);
     const counts = new Map<string, number>();
     for (const r of list) counts.set(r.state, (counts.get(r.state) ?? 0) + 1);
@@ -351,11 +361,11 @@ export function buildPatrolCalendar(rows: PatrolRow[], today: string): CalendarH
       .map((st) => `${st.label} ${counts.get(st.key)}`)
       .join(" · ");
     return {
-      ...sk, hasData: true, color: patrolTierColor(points), dot: null,
-      title: `${monthDayLabel(sk.date)} · 순찰 ${list.length}회${breakdown ? ` · ${breakdown}` : ""} · 벌점 ${points}점`,
+      ...sk, hasData: true, color: patrolViolationTierColor(violationCount), dot: null,
+      title: `${monthDayLabel(sk.date)} · 순찰 ${list.length}회 · 위반 ${violationCount}건${breakdown ? ` · ${breakdown}` : ""} · 벌점 ${points}점`,
     };
   });
-  const legend = PATROL_POINT_TIERS.map((t) => ({ color: t.pct === 0 ? "var(--panel2)" : tint("distract", t.pct), label: t.label }));
+  const legend = PATROL_VIOLATION_TIERS.map((t) => ({ color: t.pct === 0 ? "var(--panel2)" : tint("distract", t.pct), label: t.label }));
   return { leading: skeleton.leading, cells, legend };
 }
 
@@ -398,7 +408,7 @@ export type PointEvent = { date: string; at: string; hour: number; points: numbe
 export function combinePointEvents(patrolRows: PatrolRow[], penaltyRows: PenaltyRow[]): PointEvent[] {
   const events: PointEvent[] = [];
   for (const r of patrolRows) {
-    if (r.points <= 0) continue; // 벌점 없는 순찰(입석 등)은 제외
+    if (!isPatrolViolation(r)) continue; // 위반 아닌 순찰(입석 등, points=0)은 제외
     const cfg = PATROL_BY_KEY[r.state];
     events.push({ date: r.date, at: r.at, hour: r.hour, points: r.points, label: cfg?.label ?? r.state, note: r.note, dot: cfg?.dot ?? solid("distract") });
   }
@@ -412,26 +422,30 @@ export function combinePointEvents(patrolRows: PatrolRow[], penaltyRows: Penalty
 }
 
 // ---- C-1. 주간 헤더: 이번 주 누적 + 지난주 대비 ----
-export type PenaltyWeekSummary = { thisWeek: number; diffLabel: string };
+// 주 지표는 위반 "건수"(thisWeekCount) — 점수(thisWeekPoints)는 보조로만 남긴다. diffLabel 도
+// 건수 기준으로 문구를 만든다.
+export type PenaltyWeekSummary = { thisWeekCount: number; thisWeekPoints: number; diffLabel: string };
 
 /** weekStartKey 는 Date 를 받으므로 항상 "정오 UTC"로 만든 날짜만 넘긴다(무인자 new Date() 금지 원칙 —
  * 서버 UTC 와 KST 날짜가 어긋나는 걸 방지). events 는 이미 30일 컷오프가 걸린 쿼리 결과라 이번 주·
- * 지난주(최대 14일) 를 덮기에 충분하다 — 추가 쿼리 없음. */
+ * 지난주(최대 14일) 를 덮기에 충분하다 — 추가 쿼리 없음. events 자체가 combinePointEvents 에서 이미
+ * isPatrolViolation(points>0) 기준으로 걸러진 위반만이라 여기선 개수만 세면 된다. */
 export function buildPenaltyWeekSummary(events: PointEvent[], today: string): PenaltyWeekSummary {
   const noon = (dateKey: string) => new Date(`${dateKey}T12:00:00Z`);
   const thisWeekStart = weekStartKey(noon(today));
   const thisWeekEnd = addDays(thisWeekStart, 6);
   const lastWeekStart = addDays(thisWeekStart, -7);
   const lastWeekEnd = addDays(thisWeekStart, -1);
-  let thisWeek = 0;
-  let lastWeek = 0;
+  let thisWeekCount = 0;
+  let thisWeekPoints = 0;
+  let lastWeekCount = 0;
   for (const e of events) {
-    if (e.date >= thisWeekStart && e.date <= thisWeekEnd) thisWeek += e.points;
-    else if (e.date >= lastWeekStart && e.date <= lastWeekEnd) lastWeek += e.points;
+    if (e.date >= thisWeekStart && e.date <= thisWeekEnd) { thisWeekCount += 1; thisWeekPoints += e.points; }
+    else if (e.date >= lastWeekStart && e.date <= lastWeekEnd) { lastWeekCount += 1; }
   }
-  const diff = thisWeek - lastWeek;
-  const diffLabel = diff === 0 ? "지난주와 동일" : diff > 0 ? `지난주보다 ${diff}점 많음` : `지난주보다 ${-diff}점 적음`;
-  return { thisWeek, diffLabel };
+  const diff = thisWeekCount - lastWeekCount;
+  const diffLabel = diff === 0 ? "지난주와 동일" : diff > 0 ? `지난주보다 ${diff}건 많음` : `지난주보다 ${-diff}건 적음`;
+  return { thisWeekCount, thisWeekPoints, diffLabel };
 }
 
 // ---- C-2. 시간대별 누적(최근 4주, 07~24시 1시간 단위) ----
@@ -439,39 +453,46 @@ const PENALTY_HOUR_START = 7;
 const PENALTY_HOUR_END = 23; // 07~24시(반개구간) 요구사항 그대로 — 자정 넘김 새벽 시간대는 이 그래프 범위 밖(운영 시간 위주 판독용)
 const PENALTY_HOUR_WEEKS = 4;
 
-export type PenaltyHourBucket = { hour: number; label: string; points: number; title: string };
+// count = 그 시간대 위반 건수(주 지표) — points 는 벌점 합계(보조). events 는 이미 위반만(points>0) 걸러진
+// 값이라 건수는 그냥 이벤트 수를 세면 된다.
+export type PenaltyHourBucket = { hour: number; label: string; count: number; points: number; title: string };
 export type PenaltyHourly = { buckets: PenaltyHourBucket[]; hasData: boolean; peakLabel: string | null };
 
 export function buildPenaltyHourly(events: PointEvent[], today: string): PenaltyHourly {
   const windowStart = addDays(today, -(PENALTY_HOUR_WEEKS * 7 - 1));
-  const sums = new Map<number, number>();
+  const counts = new Map<number, number>();
+  const points = new Map<number, number>();
   const breakdown = new Map<number, Map<string, number>>();
   for (const e of events) {
     if (e.date < windowStart || e.date > today) continue;
     if (e.hour < PENALTY_HOUR_START || e.hour > PENALTY_HOUR_END) continue;
-    sums.set(e.hour, (sums.get(e.hour) ?? 0) + e.points);
+    counts.set(e.hour, (counts.get(e.hour) ?? 0) + 1);
+    points.set(e.hour, (points.get(e.hour) ?? 0) + e.points);
     const m = breakdown.get(e.hour) ?? new Map<string, number>();
-    m.set(e.label, (m.get(e.label) ?? 0) + e.points);
+    m.set(e.label, (m.get(e.label) ?? 0) + 1);
     breakdown.set(e.hour, m);
   }
   let peakHour: number | null = null;
-  let peakPoints = 0;
+  let peakCount = 0;
   const buckets: PenaltyHourBucket[] = [];
   for (let h = PENALTY_HOUR_START; h <= PENALTY_HOUR_END; h++) {
-    const points = sums.get(h) ?? 0;
-    if (points > peakPoints) { peakPoints = points; peakHour = h; }
+    const count = counts.get(h) ?? 0;
+    const pts = points.get(h) ?? 0;
+    if (count > peakCount) { peakCount = count; peakHour = h; }
     const parts = Array.from(breakdown.get(h) ?? new Map<string, number>())
       .sort((a, b) => b[1] - a[1])
-      .map(([label, pts]) => `${label} ${pts}`);
-    buckets.push({ hour: h, label: `${h}시`, points, title: `${h}시 · 벌점 ${points}점${parts.length ? ` · ${parts.join(" · ")}` : ""}` });
+      .map(([label, cnt]) => `${label} ${cnt}`);
+    const title = `${h}시 · 위반 ${count}건${parts.length ? ` · ${parts.join(" · ")}` : ""}${pts > 0 ? ` · (벌점 ${pts}점)` : ""}`;
+    buckets.push({ hour: h, label: `${h}시`, count, points: pts, title });
   }
-  const hasData = peakPoints > 0;
+  const hasData = peakCount > 0;
   return { buckets, hasData, peakLabel: hasData && peakHour != null ? `${peakHour}시대에 가장 많음` : null };
 }
 
 // ---- C-3. 사유별 집계(그래프 아래 가로 막대 목록) ----
-// count = 그 사유로 찍힌 이벤트 건수(순찰+수동 벌점 합산) — "20점 · 10회"처럼 점수 옆에 병기하기 위함.
-// 새 쿼리 없이 이미 combinePointEvents 가 만든 events 를 그대로 다시 훑어서 집계한다.
+// count = 그 사유로 찍힌 위반 건수(순찰+수동 벌점 합산) — 정렬·비율 바 모두 이 건수 기준.
+// points 는 "10회 · 20점"처럼 건수 뒤에 보조로만 병기한다. 새 쿼리 없이 이미 combinePointEvents 가
+// 만든 events(위반만, points>0)를 그대로 다시 훑어서 집계한다.
 export type PenaltyReasonBar = { label: string; points: number; count: number; pct: number };
 export function buildPenaltyReasonBars(events: PointEvent[]): PenaltyReasonBar[] {
   const sums = new Map<string, number>();
@@ -480,11 +501,11 @@ export function buildPenaltyReasonBars(events: PointEvent[]): PenaltyReasonBar[]
     sums.set(e.label, (sums.get(e.label) ?? 0) + e.points);
     counts.set(e.label, (counts.get(e.label) ?? 0) + 1);
   }
-  const list = Array.from(sums, ([label, points]) => ({ label, points, count: counts.get(label) ?? 0 }))
-    .filter((r) => r.points > 0)
-    .sort((a, b) => b.points - a.points);
-  const max = list.length ? list[0].points : 1;
-  return list.map((r) => ({ ...r, pct: Math.round((r.points / max) * 100) }));
+  const list = Array.from(counts, ([label, count]) => ({ label, count, points: sums.get(label) ?? 0 }))
+    .filter((r) => r.count > 0)
+    .sort((a, b) => b.count - a.count);
+  const max = list.length ? list[0].count : 1;
+  return list.map((r) => ({ ...r, pct: Math.round((r.count / max) * 100) }));
 }
 
 // ---- C-4. 최근 내역(최근 10건만) ----

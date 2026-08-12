@@ -41,6 +41,7 @@ const CARD: React.CSSProperties = { background: "var(--card)", border: "1px soli
 const CARD_TITLE: React.CSSProperties = { fontSize: 11.5, color: "var(--dim)", fontWeight: 700, marginBottom: 8, lineHeight: 1, cursor: "default" };
 const STAT_LABEL: React.CSSProperties = { fontSize: 10.5, color: "var(--faint)", fontWeight: 700 };
 const STAT_VALUE: React.CSSProperties = { fontSize: 23, fontWeight: 800, marginTop: 4, fontVariantNumeric: "tabular-nums" };
+const STAT_SUB: React.CSSProperties = { fontSize: 10.5, color: "var(--dim)", marginTop: 2, fontVariantNumeric: "tabular-nums" };
 const EMPTY: React.CSSProperties = { color: "var(--faint)", fontSize: 12.5, padding: "10px 2px", textAlign: "center", margin: "auto 0" };
 
 type StudentHead = { id: string; name: string; seatLabel: string; statusLabel: string; isLeave: boolean };
@@ -81,10 +82,11 @@ export default function StudentDetail({
           dim={!attendanceSummary.hasSchedule}
         />
         <StatCard
-          label="이번 주 벌점"
-          value={`${penaltyWeek.thisWeek}점`}
-          color={penaltyWeek.thisWeek > 0 ? "var(--danger)" : undefined}
-          title={penaltyWeek.diffLabel}
+          label="이번 주 위반"
+          value={`${penaltyWeek.thisWeekCount}건`}
+          color={penaltyWeek.thisWeekCount > 0 ? "var(--danger)" : undefined}
+          title={`${penaltyWeek.diffLabel} · 벌점 ${penaltyWeek.thisWeekPoints}점`}
+          sub={`벌점 ${penaltyWeek.thisWeekPoints}점`}
         />
 
         <AttendanceCard days={attendanceDays} summary={attendanceSummary} heatmap={attendanceHeatmap} />
@@ -130,11 +132,12 @@ function HeaderCard({ student, canEditSchedule }: { student: StudentHead; canEdi
 }
 
 // ================= 지표 4개 =================
-function StatCard({ label, value, color, dim, title }: { label: string; value: string; color?: string; dim?: boolean; title?: string }) {
+function StatCard({ label, value, color, dim, title, sub }: { label: string; value: string; color?: string; dim?: boolean; title?: string; sub?: string }) {
   return (
     <div className="sd-stat" style={CARD} title={title}>
       <span style={STAT_LABEL}>{label}</span>
       <span style={{ ...STAT_VALUE, color: dim ? "var(--faint)" : color ?? "var(--ink)" }}>{value}</span>
+      {sub && <span style={STAT_SUB}>{sub}</span>}
     </div>
   );
 }
@@ -234,7 +237,7 @@ function AttendanceCard({ days, summary, heatmap }: { days: AttendanceDay[]; sum
 function PatrolCard({ counts, heatmap, total }: { counts: PatrolStateCount[]; heatmap: CalendarHeatmap; total: number }) {
   const tip = total === 0
     ? "최근 30일간 순찰 기록 없음"
-    : `총 ${total}건 · ${counts.map((c) => `${c.label} ${c.count}`).join(" · ")} · 진하기=그날 순찰 벌점 합계`;
+    : `순찰 ${total}회 · ${counts.map((c) => `${c.label} ${c.count}`).join(" · ")} · 진하기=그날 위반 횟수`;
   return (
     <section className="sd-patrol" style={CARD}>
       <div style={CARD_TITLE} title={tip}>순찰</div>
@@ -260,30 +263,28 @@ function reasonColor(label: string, idx: number): string {
 // 벌점 시간대 카드와 나란히 두는 좁은 카드라서, 100% 가로 스택 바 대신 사유마다 한 줄(점+라벨+점수+
 // 비율 바)로 세로 나열한다 — 좁은 폭에서 더 읽기 쉽다.
 function PenaltyReasonCard({ bars, total30 }: { bars: PenaltyReasonBar[]; total30: number }) {
-  const totalPts = bars.reduce((a, r) => a + r.points, 0);
-  const tip = totalPts > 0 ? `최근 30일 총 ${total30}점 · 사유별 구성` : "최근 30일간 벌점 기록 없음";
+  const totalCount = bars.reduce((a, r) => a + r.count, 0);
+  const tip = totalCount > 0 ? `최근 30일 위반 ${totalCount}건 · 벌점 ${total30}점 · 사유별 구성` : "최근 30일간 위반 기록 없음";
   return (
     <section className="sd-reason" style={CARD}>
       <div style={CARD_TITLE} title={tip}>사유</div>
-      {totalPts === 0 ? (
+      {totalCount === 0 ? (
         <div style={EMPTY}>기록 없음</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-          {bars.map((r, i) => {
-            const pct = Math.round((r.points / totalPts) * 100);
-            return (
-              <div key={r.label} title={`${r.label} ${r.points}점 · ${r.count}회 (${pct}%)`}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: reasonColor(r.label, i), display: "inline-block", flexShrink: 0 }} />
-                  <span style={{ fontSize: 12, color: "var(--dim)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</span>
-                  <span style={{ fontSize: 12, color: "var(--faint)", fontWeight: 700, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{r.points}점 · {r.count}회</span>
-                </div>
-                <div style={{ height: 6, borderRadius: 3, background: "var(--panel2)", overflow: "hidden" }}>
-                  <div style={{ width: `${pct}%`, height: "100%", background: reasonColor(r.label, i) }} />
-                </div>
+          {bars.map((r, i) => (
+            <div key={r.label} title={`${r.label} ${r.count}회 · ${r.points}점 (${r.pct}%)`}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: reasonColor(r.label, i), display: "inline-block", flexShrink: 0 }} />
+                <span style={{ fontSize: 12, color: "var(--dim)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</span>
+                <span style={{ fontSize: 12, color: "var(--faint)", fontWeight: 700, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{r.count}회</span>
+                <span style={{ fontSize: 10.5, color: "var(--dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{r.points}점</span>
               </div>
-            );
-          })}
+              <div style={{ height: 6, borderRadius: 3, background: "var(--panel2)", overflow: "hidden" }}>
+                <div style={{ width: `${r.pct}%`, height: "100%", background: reasonColor(r.label, i) }} />
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </section>
@@ -330,16 +331,16 @@ const PEN_TOP_Y = 20;  // 최고점이 닿을 수 있는 최상단 y좌표
 
 function PenaltyHourlyCard({ hourly }: { hourly: PenaltyHourly }) {
   const buckets = hourly.buckets;
-  const maxHour = Math.max(1, ...buckets.map((b) => b.points));
-  const tip = hourly.hasData ? `${hourly.peakLabel ?? ""} · 시간대별 벌점(최근 4주, 07~23시)`.replace(/^ · /, "") : "최근 4주간 시간대별 벌점 기록 없음";
+  const maxCount = Math.max(1, ...buckets.map((b) => b.count));
+  const tip = hourly.hasData ? `${hourly.peakLabel ?? ""} · 시간대별 위반(최근 4주, 07~23시)`.replace(/^ · /, "") : "최근 4주간 시간대별 위반 기록 없음";
 
   const n = buckets.length;
   const innerW = PEN_W - PEN_PAD_X * 2;
   const stepX = n > 1 ? innerW / (n - 1) : 0;
   const xOf = (i: number) => PEN_PAD_X + stepX * i;
-  const yOf = (points: number) => PEN_AXIS_Y - (points / maxHour) * (PEN_AXIS_Y - PEN_TOP_Y);
+  const yOf = (count: number) => PEN_AXIS_Y - (count / maxCount) * (PEN_AXIS_Y - PEN_TOP_Y);
 
-  const nodes = buckets.map((b, i) => ({ x: xOf(i), y: hourly.hasData ? yOf(b.points) : PEN_AXIS_Y, b }));
+  const nodes = buckets.map((b, i) => ({ x: xOf(i), y: hourly.hasData ? yOf(b.count) : PEN_AXIS_Y, b }));
   const linePath = hourly.hasData ? catmullRomToBezierPath(nodes.map((p) => ({ x: p.x, y: p.y }))) : "";
   const areaPath = hourly.hasData && n > 0
     ? `${linePath} L ${nodes[n - 1].x} ${PEN_AXIS_Y} L ${nodes[0].x} ${PEN_AXIS_Y} Z`
@@ -347,7 +348,7 @@ function PenaltyHourlyCard({ hourly }: { hourly: PenaltyHourly }) {
 
   let peakIdx = -1;
   if (hourly.hasData) {
-    for (let i = 0; i < n; i++) if (peakIdx === -1 || nodes[i].b.points > nodes[peakIdx].b.points) peakIdx = i;
+    for (let i = 0; i < n; i++) if (peakIdx === -1 || nodes[i].b.count > nodes[peakIdx].b.count) peakIdx = i;
   }
   const peak = peakIdx >= 0 ? nodes[peakIdx] : null;
   const gradId = "sd-pen-hourly-grad";
@@ -355,8 +356,8 @@ function PenaltyHourlyCard({ hourly }: { hourly: PenaltyHourly }) {
   return (
     <section className="sd-pen" style={CARD}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-        <div style={CARD_TITLE} title={tip}>벌점 집중 시간대</div>
-        {hourly.hasData && <span style={{ fontSize: 10, color: "var(--faint)", fontWeight: 700, marginBottom: 8 }}>최고 {maxHour}점</span>}
+        <div style={CARD_TITLE} title={tip}>위반 집중 시간대</div>
+        {hourly.hasData && <span style={{ fontSize: 10, color: "var(--faint)", fontWeight: 700, marginBottom: 8 }}>최고 {maxCount}건</span>}
       </div>
       {!hourly.hasData ? (
         <div style={{ position: "relative", width: "100%", height: PEN_H }}>
@@ -410,7 +411,7 @@ function PenaltyHourlyCard({ hourly }: { hourly: PenaltyHourly }) {
                   fontSize: 10, fontWeight: 800, color: solid("distract"), whiteSpace: "nowrap", pointerEvents: "none",
                 }}
               >
-                {maxHour}점
+                {maxCount}건
               </span>
             )}
           </div>
