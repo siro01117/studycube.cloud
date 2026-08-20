@@ -58,6 +58,7 @@ export default async function SchedulePage({
             <span style={{ fontWeight: 700 }}>학생 스케쥴러</span>
           </div>
           <div className="flex items-center gap-3">
+            <Link href="/m/schedule/import" className="chip" style={{ textDecoration: "none" }}>JSON 일괄 반영</Link>
             <div className="hide-mobile" style={{ fontSize: 12.5, color: "var(--dim)" }}>
               학생 {students.length}명
             </div>

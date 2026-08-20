@@ -1,0 +1,847 @@
+{
+  "version": 1,
+  "label": "2026-08 개학후",
+  "students": [
+    {
+      "seat": 2,
+      "name": "여우현",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1030,
+          "leave": 1470
+        },
+        {
+          "day": 2,
+          "arrive": 1030,
+          "leave": 1470
+        },
+        {
+          "day": 3,
+          "arrive": 970,
+          "leave": 1470
+        },
+        {
+          "day": 4,
+          "arrive": 970,
+          "leave": 1470
+        },
+        {
+          "day": 5,
+          "arrive": 1030,
+          "leave": 1470
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 6,
+      "name": "조휘서",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1020,
+          "leave": 1500
+        },
+        {
+          "day": 2,
+          "arrive": 1020,
+          "leave": 1500
+        },
+        {
+          "day": 3,
+          "arrive": 1020,
+          "leave": 1500
+        },
+        {
+          "day": 4,
+          "arrive": 1020,
+          "leave": 1260
+        },
+        {
+          "day": 5,
+          "arrive": 1020,
+          "leave": 1380
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 8,
+      "name": "최민기",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1100,
+          "leave": 1370
+        },
+        {
+          "day": 2,
+          "arrive": 1100,
+          "leave": 1370
+        },
+        {
+          "day": 3,
+          "arrive": 1280,
+          "leave": 1370
+        },
+        {
+          "day": 4,
+          "arrive": 1100,
+          "leave": 1370
+        },
+        {
+          "day": 5,
+          "arrive": 1100,
+          "leave": 1370
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 11,
+      "name": "정도원",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 2,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 3,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 4,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 5,
+          "arrive": 1140,
+          "leave": 1380
+        }
+      ],
+      "restDays": [],
+      "academies": [
+        {
+          "name": "외부 학원",
+          "days": [
+            3,
+            5
+          ],
+          "start": 1140,
+          "end": 1260
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "seat": 15,
+      "name": "최우찬",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 490,
+          "leave": 1200
+        },
+        {
+          "day": 2,
+          "arrive": 490,
+          "leave": 1380
+        },
+        {
+          "day": 3,
+          "arrive": 490,
+          "leave": 1380
+        },
+        {
+          "day": 4,
+          "arrive": 490,
+          "leave": 1380
+        },
+        {
+          "day": 5,
+          "arrive": 490,
+          "leave": 1200
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 17,
+      "name": "고유원",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1290,
+          "leave": 1380
+        },
+        {
+          "day": 2,
+          "arrive": 1245,
+          "leave": 1380
+        },
+        {
+          "day": 3,
+          "arrive": 1230,
+          "leave": 1380
+        },
+        {
+          "day": 4,
+          "arrive": 1290,
+          "leave": 1380
+        },
+        {
+          "day": 5,
+          "arrive": 1290,
+          "leave": 1380
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 21,
+      "name": "유정진",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 3,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 4,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 5,
+          "arrive": 1140,
+          "leave": 1380
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 24,
+      "name": "노승윤",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 2,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 3,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 4,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 5,
+          "arrive": 1140,
+          "leave": 1380
+        }
+      ],
+      "restDays": [],
+      "academies": [
+        {
+          "name": "외부 학원",
+          "days": [
+            3
+          ],
+          "start": 1260,
+          "end": 1440
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "seat": 41,
+      "name": "박진우",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 480,
+          "leave": 1380
+        },
+        {
+          "day": 2,
+          "arrive": 480,
+          "leave": 1380
+        },
+        {
+          "day": 3,
+          "arrive": 480,
+          "leave": 1380
+        },
+        {
+          "day": 4,
+          "arrive": 480,
+          "leave": 1380
+        },
+        {
+          "day": 5,
+          "arrive": 480,
+          "leave": 1380
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 32,
+      "name": "홍지승",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1080,
+          "leave": 1440
+        },
+        {
+          "day": 2,
+          "arrive": 1080,
+          "leave": 1440
+        },
+        {
+          "day": 3,
+          "arrive": 1080,
+          "leave": 1440
+        },
+        {
+          "day": 4,
+          "arrive": 1080,
+          "leave": 1440
+        },
+        {
+          "day": 5,
+          "arrive": 1080,
+          "leave": 1440
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 151,
+      "name": "오채원",
+      "hours": [],
+      "restDays": [],
+      "academies": [
+        {
+          "name": "외부 학원",
+          "days": [
+            3,
+            5
+          ],
+          "start": 1140,
+          "end": 1380
+        }
+      ],
+      "warnings": [
+        "월 16쯤-22:30",
+        "화수목금 17쯤-22:30"
+      ]
+    },
+    {
+      "seat": 144,
+      "name": "조채원",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1110,
+          "leave": 1380
+        },
+        {
+          "day": 2,
+          "arrive": 1110,
+          "leave": 1260
+        },
+        {
+          "day": 3,
+          "arrive": 1110,
+          "leave": 1380
+        },
+        {
+          "day": 4,
+          "arrive": 1110,
+          "leave": 1260
+        },
+        {
+          "day": 5,
+          "arrive": 1110,
+          "leave": 1380
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 147,
+      "name": "김지율",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 2,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 3,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 4,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 5,
+          "arrive": 1140,
+          "leave": 1380
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 140,
+      "name": "최윤아",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1100,
+          "leave": 1370
+        },
+        {
+          "day": 2,
+          "arrive": 1100,
+          "leave": 1370
+        },
+        {
+          "day": 3,
+          "arrive": 1280,
+          "leave": 1370
+        },
+        {
+          "day": 4,
+          "arrive": 1100,
+          "leave": 1370
+        },
+        {
+          "day": 5,
+          "arrive": 1100,
+          "leave": 1370
+        }
+      ],
+      "restDays": [],
+      "academies": [
+        {
+          "name": "외부 학원",
+          "days": [
+            1,
+            2
+          ],
+          "start": 1110,
+          "end": 1260
+        },
+        {
+          "name": "외부 학원",
+          "days": [
+            4
+          ],
+          "start": 1110,
+          "end": 1230
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "seat": 119,
+      "name": "문소현",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 510,
+          "leave": 1305
+        },
+        {
+          "day": 2,
+          "arrive": 510,
+          "leave": 1305
+        },
+        {
+          "day": 3,
+          "arrive": 510,
+          "leave": 1305
+        },
+        {
+          "day": 4,
+          "arrive": 510,
+          "leave": 1305
+        },
+        {
+          "day": 5,
+          "arrive": 510,
+          "leave": 1305
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 120,
+      "name": "나한나",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 520,
+          "leave": 1260
+        },
+        {
+          "day": 2,
+          "arrive": 520,
+          "leave": 1260
+        },
+        {
+          "day": 3,
+          "arrive": 520,
+          "leave": 1260
+        },
+        {
+          "day": 4,
+          "arrive": 520,
+          "leave": 1260
+        },
+        {
+          "day": 5,
+          "arrive": 520,
+          "leave": 1260
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 121,
+      "name": "박서연",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1260,
+          "leave": 1380
+        },
+        {
+          "day": 2,
+          "arrive": 1260,
+          "leave": 1380
+        },
+        {
+          "day": 3,
+          "arrive": 1260,
+          "leave": 1380
+        },
+        {
+          "day": 4,
+          "arrive": 1260,
+          "leave": 1380
+        },
+        {
+          "day": 5,
+          "arrive": 1260,
+          "leave": 1380
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 122,
+      "name": "김다영",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1080,
+          "leave": 1350
+        },
+        {
+          "day": 2,
+          "arrive": 1080,
+          "leave": 1350
+        },
+        {
+          "day": 4,
+          "arrive": 1080,
+          "leave": 1350
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 118,
+      "name": "김지후",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 480,
+          "leave": 1350
+        },
+        {
+          "day": 2,
+          "arrive": 480,
+          "leave": 1350
+        },
+        {
+          "day": 3,
+          "arrive": 480,
+          "leave": 1350
+        },
+        {
+          "day": 4,
+          "arrive": 480,
+          "leave": 1350
+        },
+        {
+          "day": 5,
+          "arrive": 480,
+          "leave": 1350
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 117,
+      "name": "김하니",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1170,
+          "leave": 1380
+        },
+        {
+          "day": 2,
+          "arrive": 1170,
+          "leave": 1380
+        },
+        {
+          "day": 4,
+          "arrive": 1170,
+          "leave": 1380
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 113,
+      "name": "박서현",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 480,
+          "leave": 1305
+        },
+        {
+          "day": 2,
+          "arrive": 480,
+          "leave": 1305
+        },
+        {
+          "day": 3,
+          "arrive": 480,
+          "leave": 1305
+        },
+        {
+          "day": 4,
+          "arrive": 480,
+          "leave": 1305
+        },
+        {
+          "day": 5,
+          "arrive": 480,
+          "leave": 1305
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 110,
+      "name": "김다엘",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 2,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 3,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 4,
+          "arrive": 1140,
+          "leave": 1380
+        },
+        {
+          "day": 5,
+          "arrive": 1140,
+          "leave": 1380
+        }
+      ],
+      "restDays": [],
+      "academies": [],
+      "warnings": []
+    },
+    {
+      "seat": 111,
+      "name": "강보민",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1200,
+          "leave": 1380
+        },
+        {
+          "day": 2,
+          "arrive": 1200,
+          "leave": 1380
+        },
+        {
+          "day": 4,
+          "arrive": 1200,
+          "leave": 1380
+        },
+        {
+          "day": 5,
+          "arrive": 1200,
+          "leave": 1380
+        }
+      ],
+      "restDays": [],
+      "academies": [
+        {
+          "name": "외부 학원",
+          "days": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "start": 1080,
+          "end": 1180
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "seat": 102,
+      "name": "심다해",
+      "hours": [
+        {
+          "day": 1,
+          "arrive": 1080,
+          "leave": 1350
+        },
+        {
+          "day": 2,
+          "arrive": 1080,
+          "leave": 1350
+        },
+        {
+          "day": 3,
+          "arrive": 1080,
+          "leave": 1380
+        },
+        {
+          "day": 4,
+          "arrive": 1080,
+          "leave": 1350
+        },
+        {
+          "day": 5,
+          "arrive": 1080,
+          "leave": 1380
+        }
+      ],
+      "restDays": [],
+      "academies": [
+        {
+          "name": "외부 학원",
+          "days": [
+            1
+          ],
+          "start": 1140,
+          "end": 1260
+        },
+        {
+          "name": "외부 학원",
+          "days": [
+            3,
+            5
+          ],
+          "start": 1260,
+          "end": 1380
+        }
+      ],
+      "warnings": []
+    }
+  ]
+}
