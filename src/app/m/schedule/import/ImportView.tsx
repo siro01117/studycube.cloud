@@ -2,7 +2,7 @@
 
 // 스케줄 JSON 업로드 → 미리보기 → 부분 적용. src/lib/schedule-import.ts 의 스펙/검증/비교 함수만 쓰고
 // DB 접근은 ./actions.ts(loadImportBase/applyImportSelection) 를 통해서만 한다.
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   parseScheduleImportText, academyToDbFields,
   type StudentResult, type ImportHours, type DbAcademy,
@@ -36,6 +36,14 @@ function IconAlertCircle() {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="8" cy="8" r="6.3" /><path d="M8 5.2v3.4" /><circle cx="8" cy="10.9" r="0.15" fill="currentColor" />
+    </svg>
+  );
+}
+// 반영 중 스피너 — prefers-reduced-motion 존중(줄어든 모션 설정이면 회전 애니메이션을 끈다).
+function IconSpinner() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" className="sc-import-spin">
+      <path d="M8 2a6 6 0 016 6" />
     </svg>
   );
 }
@@ -140,6 +148,7 @@ const diffChip: Record<DiffStatus | "n/a", { label: string; fg: string; bg: stri
   changed: { label: "수정", fg: "var(--accent)", bg: "var(--accent-soft)" },
   "n/a": { label: "-", fg: "var(--faint)", bg: "transparent" },
 };
+const appliedChip = { label: "반영됨", fg: "var(--ok)", bg: "var(--ok-soft)" };
 
 function Chip({ label, fg, bg }: { label: string; fg: string; bg: string }) {
   return (
@@ -156,10 +165,22 @@ export default function ImportView({ base }: { base: ImportBase }) {
   const [parseError, setParseError] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
   const [applyResult, setApplyResult] = useState<ApplyResult | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
+  // 이번 화면 세션에서 실제로 반영에 성공한 studentId — 표 행 상태를 재조회 없이 "반영됨"으로 덮어쓰는 데 쓴다.
+  const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (applyResult || applyError) {
+      resultRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+  }, [applyResult, applyError]);
 
   const doParse = (text: string) => {
     setApplyResult(null);
+    setApplyError(null);
+    setAppliedIds(new Set());
     const result = parseScheduleImportText(text);
     if (!result.ok) {
       setParseError(result.error);
@@ -206,22 +227,44 @@ export default function ImportView({ base }: { base: ImportBase }) {
   };
 
   const doApply = async () => {
-    if (!rows) return;
+    // applying 가드 — 진행 중 재클릭(더블클릭, 느린 네트워크 중 연타)이 중복 반영을 만들지 않게 막는다.
+    // (서버액션 자체도 대상 학생의 기존 행을 지우고 새로 채우는 방식이라 같은 선택이 두 번 들어와도 멱등하다.)
+    if (!rows || applying) return;
     const items = rows
       .filter((r) => r.parseOk && r.matchStatus === "matched" && r.studentId && selected.has(r.index))
       .map((r) => ({ studentId: r.studentId as string, name: r.name, hours: r.hours, academies: r.academies }));
     if (items.length === 0) return;
     setApplying(true);
     setApplyResult(null);
+    setApplyError(null);
     try {
       const result = await applyImportSelection(JSON.stringify(items));
       setApplyResult(result);
+      if (result.appliedStudentIds.length > 0) {
+        const appliedSet = new Set(result.appliedStudentIds);
+        setAppliedIds((prev) => {
+          const next = new Set(prev);
+          for (const id of result.appliedStudentIds) next.add(id);
+          return next;
+        });
+        // 반영된 학생만 선택 해제 — 실패분은 그대로 선택된 채로 남아 재시도하기 쉽게 한다.
+        setSelected((prev) => {
+          const next = new Set(prev);
+          for (const row of rows) {
+            if (row.studentId && appliedSet.has(row.studentId)) next.delete(row.index);
+          }
+          return next;
+        });
+      }
     } catch (e) {
-      setApplyResult({ applied: 0, skipped: 0, failed: [{ name: "-", error: e instanceof Error ? e.message : "적용에 실패했습니다" }] });
+      // 서버액션이 던진 오류 — 아무것도 반영되지 않은 것으로 간주하고 선택·버튼 상태를 그대로 되돌린다.
+      setApplyError(e instanceof Error ? e.message : "적용에 실패했습니다");
     } finally {
       setApplying(false);
     }
   };
+
+  const fullyApplied = applyResult !== null && applyResult.applied > 0 && applyResult.failed.length === 0;
 
   const errorRows = (rows ?? []).filter((r) => !r.parseOk);
   const okRows = (rows ?? []).filter((r) => r.parseOk);
@@ -229,6 +272,13 @@ export default function ImportView({ base }: { base: ImportBase }) {
 
   return (
     <>
+      <style>{`
+        @keyframes sc-import-spin { to { transform: rotate(360deg); } }
+        .sc-import-spin { animation: sc-import-spin 0.8s linear infinite; transform-origin: 50% 50%; }
+        @media (prefers-reduced-motion: reduce) {
+          .sc-import-spin { animation: none; }
+        }
+      `}</style>
       <div className="card" style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", flexWrap: "wrap" }}>
         <span style={{ fontSize: 20, fontWeight: 700 }}>스케줄 JSON 업로드</span>
         <span style={{ fontSize: 12, color: "var(--faint)" }}>정제된 JSON 을 올리면 학생별로 무엇이 바뀌는지 미리 보고, 선택한 학생만 반영합니다</span>
@@ -237,16 +287,17 @@ export default function ImportView({ base }: { base: ImportBase }) {
       <div className="card" style={{ flex: "none", padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <button type="button" className="btn btn-accent" style={{ height: 36, padding: "0 14px", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 6 }}
-            onClick={() => fileRef.current?.click()}>
+            disabled={applying} onClick={() => fileRef.current?.click()}>
             <IconUpload />파일 선택(.json)
           </button>
-          <input ref={fileRef} type="file" accept="application/json" onChange={onFileChange} style={{ display: "none" }} />
+          <input ref={fileRef} type="file" accept="application/json" disabled={applying} onChange={onFileChange} style={{ display: "none" }} />
           <span style={{ fontSize: 11.5, color: "var(--faint)" }}>또는 아래에 JSON 을 붙여넣고 파싱하세요</span>
         </div>
         <textarea
           value={rawText}
           onChange={(e) => setRawText(e.target.value)}
           placeholder='{"version":1,"students":[...]}'
+          disabled={applying}
           style={{
             width: "100%", minHeight: 120, resize: "vertical", fontFamily: "ui-monospace, monospace", fontSize: 12.5,
             padding: 10, borderRadius: 8, border: "1px solid var(--line)", background: "var(--card)", color: "var(--ink)",
@@ -254,7 +305,7 @@ export default function ImportView({ base }: { base: ImportBase }) {
         />
         <div>
           <button type="button" className="btn" style={{ height: 34, padding: "0 14px", fontSize: 12.5 }}
-            disabled={!rawText.trim()} onClick={() => doParse(rawText)}>
+            disabled={!rawText.trim() || applying} onClick={() => doParse(rawText)}>
             파싱 · 미리보기
           </button>
         </div>
@@ -273,30 +324,59 @@ export default function ImportView({ base }: { base: ImportBase }) {
               동명이인 {okRows.filter((r) => r.matchStatus === "duplicate").length}명 · 형식 오류 {errorRows.length}명 · 선택됨 {selected.size}명
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <button type="button" className="btn" style={{ height: 30, padding: "0 10px", fontSize: 11.5 }} onClick={() => toggleAll(!allSelectableChecked)}>
+              <button type="button" className="btn" style={{ height: 30, padding: "0 10px", fontSize: 11.5 }}
+                disabled={applying} onClick={() => toggleAll(!allSelectableChecked)}>
                 {allSelectableChecked ? "전체 해제" : "전체 선택"}
               </button>
-              <button type="button" className="btn btn-accent" style={{ height: 30, padding: "0 12px", fontSize: 11.5 }}
-                disabled={selected.size === 0 || applying} onClick={doApply}>
-                {applying ? "적용 중…" : `선택 ${selected.size}명 적용`}
-              </button>
+              {applying ? (
+                <button type="button" className="btn btn-accent" disabled
+                  style={{ height: 30, padding: "0 12px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <IconSpinner />반영 중…
+                </button>
+              ) : fullyApplied && selected.size === 0 ? (
+                <button type="button" className="btn" disabled
+                  style={{ height: 30, padding: "0 12px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 6, color: "var(--ok)", background: "var(--ok-soft)" }}>
+                  <IconCheck />반영됨
+                </button>
+              ) : (
+                <button type="button" className="btn btn-accent" style={{ height: 30, padding: "0 12px", fontSize: 11.5 }}
+                  disabled={selected.size === 0} onClick={doApply}>
+                  {`선택 ${selected.size}명 적용`}
+                </button>
+              )}
             </div>
           </div>
 
-          {applyResult && (
-            <div style={{ padding: "10px 12px", borderRadius: 9, border: "1px solid var(--line)", background: "var(--panel2)", fontSize: 12.5 }}>
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                적용 결과 — 반영 {applyResult.applied}명 / 건너뜀 {applyResult.skipped}명 / 실패 {applyResult.failed.length}명
+          <div ref={resultRef}>
+            {applyError && (
+              <div style={{ padding: "10px 12px", borderRadius: 9, border: "1px solid var(--danger)", background: "var(--panel2)", fontSize: 12.5, color: "var(--danger)", display: "flex", alignItems: "center", gap: 6 }}
+                role="alert">
+                <IconAlertCircle />{applyError}
               </div>
-              {applyResult.failed.length > 0 && (
-                <div style={{ color: "var(--danger)" }}>
-                  {applyResult.failed.map((f, i) => (
-                    <div key={i}>{f.name}: {f.error}</div>
-                  ))}
+            )}
+            {!applyError && applyResult && (
+              <div
+                role="status"
+                style={{
+                  padding: "10px 12px", borderRadius: 9, fontSize: 12.5,
+                  border: applyResult.failed.length > 0 ? "1px solid var(--danger)" : "1px solid var(--ok)",
+                  background: applyResult.failed.length > 0 ? "var(--panel2)" : "var(--ok-soft)",
+                }}
+              >
+                <div style={{ fontWeight: 700, marginBottom: applyResult.failed.length > 0 ? 4 : 0, display: "flex", alignItems: "center", gap: 6 }}>
+                  {applyResult.failed.length === 0 ? <IconCheck /> : <IconAlertCircle />}
+                  {applyResult.applied}명 반영 · {applyResult.skipped}명 건너뜀 · {applyResult.failed.length}명 실패
                 </div>
-              )}
-            </div>
-          )}
+                {applyResult.failed.length > 0 && (
+                  <div style={{ color: "var(--danger)" }}>
+                    {applyResult.failed.map((f, i) => (
+                      <div key={i}>{f.name}: {f.error}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           <div style={{ overflow: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -317,7 +397,7 @@ export default function ImportView({ base }: { base: ImportBase }) {
                   return (
                     <tr key={row.index} style={{ opacity: row.parseOk ? 1 : 0.6 }}>
                       <td style={td}>
-                        <input type="checkbox" disabled={!selectable} checked={selected.has(row.index)}
+                        <input type="checkbox" disabled={!selectable || applying} checked={selected.has(row.index)}
                           onChange={(e) => toggleOne(row.index, e.target.checked)} />
                       </td>
                       <td style={{ ...td, fontWeight: 700 }}>{row.name}</td>
@@ -336,7 +416,13 @@ export default function ImportView({ base }: { base: ImportBase }) {
                         )}
                       </td>
                       <td style={td}>{row.parseOk ? summaryOf(row.hours, row.academies, row.restDays) : "-"}</td>
-                      <td style={td}>{row.parseOk && row.matchStatus === "matched" ? <Chip {...diffChip[row.diffStatus]} /> : <Chip {...diffChip["n/a"]} />}</td>
+                      <td style={td}>
+                        {row.parseOk && row.matchStatus === "matched" ? (
+                          row.studentId && appliedIds.has(row.studentId) ? <Chip {...appliedChip} /> : <Chip {...diffChip[row.diffStatus]} />
+                        ) : (
+                          <Chip {...diffChip["n/a"]} />
+                        )}
+                      </td>
                       <td style={td}>
                         {!row.parseOk ? (
                           <span style={{ color: "var(--danger)" }}>{row.parseError}</span>

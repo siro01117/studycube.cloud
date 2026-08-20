@@ -54,10 +54,18 @@ export async function loadImportBase(): Promise<ImportBase> {
 }
 
 export type ApplyItem = { studentId: string; name: string; hours: ImportHours[]; academies: DbAcademy[] };
-export type ApplyResult = { applied: number; skipped: number; failed: { name: string; error: string }[] };
+export type ApplyResult = {
+  applied: number;
+  skipped: number;
+  // 성공적으로 반영된 studentId 목록 — 화면이 재조회 없이 해당 행만 "반영됨"으로 갱신하는 데 쓴다.
+  appliedStudentIds: string[];
+  failed: { studentId: string; name: string; error: string }[];
+};
 
 // 선택된 학생만 반영 — 학생별 schedule_hours 전부 + schedule_rule(kind='academy') 만 지우고 새로 넣는다.
 // (다른 사유·임시 일정·예외는 건드리지 않음). 삭제·삽입 모두 여러 학생을 묶어서 1~2문으로 처리한다.
+// 멱등: 매번 대상 학생의 기존 행을 지우고 넘어온 값으로 새로 채우는 방식이라, 같은 선택으로 다시
+// 호출해도(중복 클릭 등) 최종 상태는 동일하다 — 별도의 dedup 로직이 필요 없다.
 export async function applyImportSelection(itemsJson: string): Promise<ApplyResult> {
   const me = await guard("schedule.manage");
   const branchId = me.activeBranchId;
@@ -69,11 +77,11 @@ export async function applyImportSelection(itemsJson: string): Promise<ApplyResu
   } catch {
     throw new Error("입력값을 확인하세요");
   }
-  if (!Array.isArray(items) || items.length === 0) return { applied: 0, skipped: 0, failed: [] };
+  if (!Array.isArray(items) || items.length === 0) return { applied: 0, skipped: 0, appliedStudentIds: [], failed: [] };
 
   // 클라 조작 방지 — 지금 이 지점의 재원생인지 한 번에 재확인.
   const ids = [...new Set(items.map((i) => i.studentId).filter(Boolean))];
-  if (ids.length === 0) return { applied: 0, skipped: items.length, failed: [] };
+  if (ids.length === 0) return { applied: 0, skipped: items.length, appliedStudentIds: [], failed: [] };
   const rosterParams: string[] = [branchId];
   const rosterPh = ids.map((id) => {
     rosterParams.push(id);
@@ -85,15 +93,15 @@ export async function applyImportSelection(itemsJson: string): Promise<ApplyResu
   );
   const validIds = new Set(roster.rows.map((r) => r.id));
 
-  const failed: { name: string; error: string }[] = [];
+  const failed: { studentId: string; name: string; error: string }[] = [];
   const usable = items.filter((i) => {
     if (!validIds.has(i.studentId)) {
-      failed.push({ name: i.name, error: "재원생이 아닙니다(명단에서 사라졌거나 다른 지점)" });
+      failed.push({ studentId: i.studentId, name: i.name, error: "재원생이 아닙니다(명단에서 사라졌거나 다른 지점)" });
       return false;
     }
     return true;
   });
-  if (usable.length === 0) return { applied: 0, skipped: items.length, failed };
+  if (usable.length === 0) return { applied: 0, skipped: items.length, appliedStudentIds: [], failed };
 
   const targetIds = [...new Set(usable.map((i) => i.studentId))];
 
@@ -145,5 +153,5 @@ export async function applyImportSelection(itemsJson: string): Promise<ApplyResu
   }
 
   revalidatePath("/m/schedule");
-  return { applied: targetIds.length, skipped: items.length - usable.length, failed };
+  return { applied: targetIds.length, skipped: items.length - usable.length, appliedStudentIds: targetIds, failed };
 }
