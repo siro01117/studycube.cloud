@@ -10,6 +10,10 @@ const nextConfig: NextConfig = {
   // 데이터가 바뀌는 조작(입실·순찰·벌점)은 서버액션이 revalidate 하므로 즉시 반영된다.
   experimental: {
     staleTimes: { dynamic: 30, static: 180 },
+    // 공개 폼(/f/**)이 studycube.co.kr → studycube.cloud 로 리라이트 프록시된다.
+    // 서버액션은 기본적으로 Origin 헤더가 요청 호스트와 같아야 통과하는데, 프록시를 거치면
+    // Origin 이 studycube.co.kr 로 들어와 기본 검사에 막힌다 — 허용 오리진에 명시.
+    serverActions: { allowedOrigins: ["studycube.co.kr", "www.studycube.co.kr"] },
   },
 };
 

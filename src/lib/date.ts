@@ -51,6 +51,25 @@ export function timeLabel(at: string): string {
   return `${h}:${m}`;
 }
 
+/** timestamptz 문자열 → KST 기준 "M월 D일 HH:MM"(제출 목록 등에서 날짜+시각을 함께 보일 때).
+ *  클라 렌더에서 new Date()/toLocale* 호출 금지 원칙 — 서버에서 미리 문자열로 내려준다. */
+export function dateTimeLabel(at: string): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: KST, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(new Date(at));
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  return `${get("month")}월 ${get("day")}일 ${get("hour")}:${get("minute")}`;
+}
+
+/** timestamptz 문자열 → KST 기준 "M월 D일"(시각 없이 날짜만). 스케쥴 입력 기간의 "다음 입력 기간:
+ *  8월 20일부터" 처럼 날짜만 필요할 때(src/lib/schedule-window.ts). 클라 렌더에서 new Date() 호출 금지
+ *  원칙 — 반드시 서버에서만 호출. */
+export function dateOnlyLabel(at: string): string {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: KST, month: "numeric", day: "numeric" }).formatToParts(new Date(at));
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  return `${get("month")}월 ${get("day")}일`;
+}
+
 /** timestamptz 문자열 → KST 기준 자정부터의 경과분(0..1439). schedule.ts statusAt() 에 실제 출결
  * (firstInMin/lastOutMin)을 넘기기 전 서버에서 변환하는 용도(클라 렌더에서 new Date() 호출 금지 원칙 —
  * 이 값은 반드시 서버 컴포넌트/서버 액션에서만 계산해 내려준다). */

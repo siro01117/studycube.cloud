@@ -85,10 +85,172 @@ export const REASON_SEMANTIC: Record<string, SemanticKey> = {
 };
 const GHOST_FALLBACK_REASON = '기타';
 
+// ---------------- 일정 사유 체계(자습 제외 고정 5종) ----------------
+// 정기 규칙(schedule_rule)·예외(schedule_exception)·일회성 변경 신청(schedule_request) 이 공유하는
+// "사유 → kind(색 계열)" 매핑의 단일 출처. 자습은 등하원에서 파생되는 상태라 여기 포함하지 않는다
+// (REASON_SEMANTIC 에는 있지만 사람이 직접 고르는 사유 목록에는 없음).
+export type ScheduleKind = 'study' | 'academy' | 'counsel' | 'absent';
+export type ReasonOption = { key: string; kind: ScheduleKind; label: string };
+export const SCHEDULE_REASONS: ReasonOption[] = [
+  { key: 'academy_out', kind: 'academy', label: '외부 학원' },
+  { key: 'academy_in', kind: 'academy', label: '원내 수업' },
+  { key: 'counsel', kind: 'counsel', label: '주간 상담' },
+  { key: 'absent_out', kind: 'absent', label: '외부 일정' },
+  { key: 'etc', kind: 'absent', label: '기타' },
+];
+export const reasonOf = (key: string): ReasonOption => SCHEDULE_REASONS.find((r) => r.key === key) ?? SCHEDULE_REASONS[0];
+
 /** reason 문구(statusAt 이 돌려준 label)의 순색(solid) — 마크되지 않은 고스트의 라벨 글자색 등에 쓴다.
  * 모르는 문구는 "기타"(none, 무채색)로 대체. */
 export function reasonColor(reason: string): string {
   return solid(REASON_SEMANTIC[reason] ?? REASON_SEMANTIC[GHOST_FALLBACK_REASON]);
+}
+
+// ---------------- 일회성 일정 변경 신청 유형(reqType) ----------------
+// 학생 신청 폼(f/[slug]/forms/exr8k3mq.tsx)과 서버 액션(schedule-request-actions.ts), 관리자 목록
+// (m/schedule/RequestsView.tsx·requestActions.ts) 이 공유하는 단일 출처. 순수 함수만 — DB·server-only
+// 의존 없음(클라이언트 컴포넌트에서 그대로 import 해야 하므로).
+export type RequestType = 'absent' | 'late' | 'early' | 'out' | 'custom';
+export type RequestTypeOption = { key: RequestType; label: string; desc: string };
+export const REQUEST_TYPES: RequestTypeOption[] = [
+  { key: 'absent', label: '하루 안 와요', desc: '그날 하루 전체를 결석으로 신청해요.' },
+  { key: 'late', label: '늦게 와요', desc: '평소보다 늦게 등원해요 — 등원 시각만 입력하면 돼요.' },
+  { key: 'early', label: '일찍 가요', desc: '평소보다 일찍 하원해요 — 하원 시각만 입력하면 돼요.' },
+  { key: 'out', label: '나갔다 와요', desc: '학원 등으로 잠깐 나갔다가 다시 돌아와요.' },
+  { key: 'custom', label: '직접 입력', desc: '위 유형에 안 맞으면 시작·종료 시간을 직접 입력해요.' },
+];
+export const requestTypeOf = (key: string): RequestTypeOption =>
+  REQUEST_TYPES.find((t) => t.key === key) ?? REQUEST_TYPES[REQUEST_TYPES.length - 1];
+
+// ---------------- 신청 갈래(reqKind) — 임시 변경 / 정기 일정 수정 / 정기 일정 삭제 ----------------
+// RequestType(위, absent/late/early/out/custom)은 "임시 변경(temp)" 안에서만 쓰이는 하위 구분이다.
+// reqKind 는 그보다 위 레벨의 구분 — schedule_request.req_kind 컬럼의 단일 출처. 학생 신청 폼
+// (exr8k3mq.tsx)·서버 액션(schedule-request-actions.ts)·관리자 화면(RequestsView.tsx·requestActions.ts)
+// 이 공유한다.
+export type RequestKind = 'temp' | 'rule_edit' | 'rule_delete';
+export type RequestKindOption = { key: RequestKind; label: string; desc: string };
+export const REQUEST_KINDS: RequestKindOption[] = [
+  { key: 'temp', label: '임시 변경', desc: '특정 날짜 하루만 바뀌어요(등원/하원/외출 등).' },
+  { key: 'rule_edit', label: '정기 일정 수정', desc: '매주 반복되는 일정 하나의 요일·시간·사유를 바꿔요.' },
+  { key: 'rule_delete', label: '정기 일정 삭제', desc: '매주 반복되는 일정 하나를 완전히 없애요.' },
+];
+export const requestKindOf = (key: string): RequestKindOption =>
+  REQUEST_KINDS.find((k) => k.key === key) ?? REQUEST_KINDS[0];
+
+/** 학생이 실제로 입력하는 원값(raw) — 전부 "그날의 시계 입력"(0~1439, 자정 넘김 계산 전) minute-of-day.
+ * out/custom 의 두 값 사이 자정 넘김, late/early 의 정기 등·하원 기준 자정 넘김은 resolveRequestRange 가
+ * 처리한다(클라는 원값만 만들어 보내고, 최종 start/end 는 서버가 확정한다 — 클라 계산 신뢰 금지). */
+export type RequestTypeRawInput =
+  | { type: 'absent' }
+  | { type: 'late'; arrive: number }
+  | { type: 'early'; leave: number }
+  | { type: 'out'; leaveAt: number; returnAt: number }
+  | { type: 'custom'; start: number; end: number };
+
+export type ResolvedRange = { ok: true; start: number; end: number } | { ok: false; error: string };
+
+const REQ_MIN_MIN = 0;
+const REQ_MAX_MIN = 1560;
+const NO_HOURS_ERROR = '이 날은 정기 등·하원 시각이 없어요(휴무이거나 미제출). 직접 입력을 이용해주세요.';
+
+/**
+ * 신청 유형 + 원값(raw) + 그날(요일)의 정기 등·하원 시각(schedule_hours, 없으면 null) → 예외 블록
+ * 좌표계(start_min~end_min)로 환산. hours 가 없으면 absent/late/early 는 기준이 없어 거부한다
+ * (임의 기본값을 쓰지 않음 — 07:00~23:00 같은 폴백 금지).
+ * 계산 결과가 재실 구간(등원~하원) 밖으로 나가면 "잘라내지 않고 거부"한다 — 학생이 입력하지 않은 값으로
+ * 조용히 시간을 바꿔버리면 신청 의도와 다른 기록이 남을 수 있어서다(사용자가 다시 확인하고 고치게 함).
+ * 자정 넘김(1440 초과) 좌표계를 그대로 쓴다 — hours.leave_min 이 1440 을 넘을 수 있고(익일 하원),
+ * late/early 의 raw 는 0~1439 범위라 필요하면 +1440 해서 그 좌표계에 맞춘다.
+ * 순수 함수 — DOM·DB 의존 없음(클라 미리보기·서버 확정 계산에 공용으로 쓴다).
+ */
+export function resolveRequestRange(
+  input: RequestTypeRawInput,
+  hours: { arrive_min: number; leave_min: number } | null,
+): ResolvedRange {
+  const clampCheck = (start: number, end: number): ResolvedRange => {
+    if (!Number.isInteger(start) || !Number.isInteger(end)) return { ok: false, error: '시간을 확인해주세요.' };
+    if (start < REQ_MIN_MIN || end > REQ_MAX_MIN || end <= start) return { ok: false, error: '시간을 확인해주세요.' };
+    return { ok: true, start, end };
+  };
+
+  switch (input.type) {
+    case 'absent': {
+      if (!hours) return { ok: false, error: NO_HOURS_ERROR };
+      return clampCheck(hours.arrive_min, hours.leave_min);
+    }
+    case 'late': {
+      if (!hours) return { ok: false, error: NO_HOURS_ERROR };
+      const arriveMod = hours.arrive_min % 1440;
+      const end = input.arrive < arriveMod ? input.arrive + 1440 : input.arrive;
+      const start = hours.arrive_min;
+      if (end > hours.leave_min) return { ok: false, error: '등원 시각이 하원 시각을 넘었어요. 시각을 확인해주세요.' };
+      return clampCheck(start, end);
+    }
+    case 'early': {
+      if (!hours) return { ok: false, error: NO_HOURS_ERROR };
+      const start = hours.leave_min >= 1440 && input.leave < hours.leave_min - 1440 ? input.leave + 1440 : input.leave;
+      const end = hours.leave_min;
+      if (start < hours.arrive_min) return { ok: false, error: '하원 시각이 등원 시각보다 빨라요. 시각을 확인해주세요.' };
+      return clampCheck(start, end);
+    }
+    case 'out': {
+      const start = input.leaveAt;
+      const end = input.returnAt <= start ? input.returnAt + 1440 : input.returnAt;
+      if (hours && (start < hours.arrive_min || end > hours.leave_min)) {
+        return { ok: false, error: '재실 시간(등원~하원) 안에서만 외출을 신청할 수 있어요.' };
+      }
+      return clampCheck(start, end);
+    }
+    case 'custom': {
+      const start = input.start;
+      const end = input.end <= start ? input.end + 1440 : input.end;
+      return clampCheck(start, end);
+    }
+  }
+}
+
+const reqPad2 = (n: number) => String(n).padStart(2, '0');
+function reqFmtClock(min: number): string {
+  const m = ((min % 1440) + 1440) % 1440;
+  return `${reqPad2(Math.floor(m / 60))}:${reqPad2(m % 60)}`;
+}
+function reqFmtRange(start: number, end: number): string {
+  const endLabel = end >= 1440 ? `다음날 ${reqFmtClock(end)}` : reqFmtClock(end);
+  return `${reqFmtClock(start)}–${endLabel}`;
+}
+
+/** 신청 목록(학생 "내 신청"·관리자 "변경 신청")의 시간 표기 — 유형마다 읽히는 방식이 다르다:
+ * absent="하루 안 옴", late="10:00 등원"(도착 시각만), early="19:00 하원"(출발 시각만),
+ * out/custom="18:00–20:00"(범위, out 은 "외출" 접미). start/end 는 이미 환산·저장된 값을 그대로 쓴다. */
+const DOW_1TO7_KR = ["", "월", "화", "수", "목", "금", "토", "일"]; // index 1..7 (schedule_rule.days 의 CSV 좌표계)
+
+/** schedule_rule.days 형식의 CSV("1,3,5") → "월,수,금". 정기 일정 목록·신청 요약에서 공용으로 쓴다. */
+export function daysLabelOf(daysCsv: string): string {
+  return daysCsv
+    .split(",")
+    .map(Number)
+    .filter((n) => n >= 1 && n <= 7)
+    .sort((a, b) => a - b)
+    .map((d) => DOW_1TO7_KR[d])
+    .join(",");
+}
+
+/** 요일 번호 배열(1..7, 중복 가능) → schedule_rule.days 저장 형식의 정렬·중복제거 CSV. 빈 배열이면 "". */
+export function daysCsvOf(days: number[]): string {
+  return [...new Set(days)]
+    .filter((n) => Number.isInteger(n) && n >= 1 && n <= 7)
+    .sort((a, b) => a - b)
+    .join(",");
+}
+
+export function requestTimeLabel(reqType: string, start: number, end: number): string {
+  switch (reqType) {
+    case 'absent': return '하루 안 옴';
+    case 'late': return `${reqFmtClock(end)} 등원`;
+    case 'early': return `${reqFmtClock(start)} 하원`;
+    case 'out': return `${reqFmtRange(start, end)} 외출`;
+    default: return reqFmtRange(start, end);
+  }
 }
 
 export type GhostStyle = { bg: string; strip: string | undefined; dim: number };

@@ -2,13 +2,14 @@
 
 // 스케줄 JSON 업로드 → 미리보기 → 부분 적용. src/lib/schedule-import.ts 의 스펙/검증/비교 함수만 쓰고
 // DB 접근은 ./actions.ts(loadImportBase/applyImportSelection) 를 통해서만 한다.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   parseScheduleImportText, academyToDbFields,
   type StudentResult, type ImportHours, type DbAcademy,
 } from "@/lib/schedule-import";
 import { applyImportSelection, type ImportBase, type ApplyResult } from "./actions";
 import { diffAgainstExisting, type DiffStatus } from "@/lib/schedule-import";
+import { useScrollFocusOn } from "@/app/f/_shared/useScrollFocus";
 
 // ---------------- 아이콘(라인 스트로크, 이모지 금지) ----------------
 function IconUpload() {
@@ -170,12 +171,11 @@ export default function ImportView({ base }: { base: ImportBase }) {
   const [appliedIds, setAppliedIds] = useState<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (applyResult || applyError) {
-      resultRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
-  }, [applyResult, applyError]);
+  // 파싱이 끝나면 미리보기 표로, "반영" 이 끝나면 결과 배너로 스크롤-포커스한다.
+  useScrollFocusOn(previewRef, [rows]);
+  useScrollFocusOn(resultRef, [applyResult, applyError], { focus: false });
 
   const doParse = (text: string) => {
     setApplyResult(null);
@@ -317,7 +317,7 @@ export default function ImportView({ base }: { base: ImportBase }) {
       </div>
 
       {rows && (
-        <div className="card" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+        <div ref={previewRef} className="card" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
             <div style={{ fontSize: 12.5, color: "var(--faint)" }}>
               전체 {rows.length}명 · 매칭 {okRows.filter((r) => r.matchStatus === "matched").length}명 · 이름 없음 {okRows.filter((r) => r.matchStatus === "unmatched").length}명 ·

@@ -8,7 +8,10 @@ import {
   type Period, type Rule, type Exc, type Kind, type Hours,
 } from "./actions";
 import { importFromSheet, type ImportResult } from "./importActions";
-import { blockStyleOf } from "@/lib/schedule";
+import { blockStyleOf, SCHEDULE_REASONS, reasonOf } from "@/lib/schedule";
+import WindowView from "./WindowView";
+import RequestsView from "./RequestsView";
+import SubmissionsView from "./SubmissionsView";
 
 // hoursCount: 등하원(schedule_hours) 행 개수 — page.tsx 에서 지점 전체를 한 번에 집계해 내려준다.
 export type SStudent = { id: string; name: string; seat_number: number | null; hoursCount: number };
@@ -105,15 +108,9 @@ type Sched = { rules: Rule[]; excs: Exc[]; hours: Hours[] };
 type DBlock = { id: string; day: number; start: number; end: number; kind: Kind; reason: string; title: string; ruleId?: string; excId?: string; isExc?: boolean };
 
 // 자리 비움 사유 처리용 — 자습을 제외한 고정 5종만 둔다(자습은 등하원에서 파생되는 상태라 더 이상 블록으로 저장하지 않음).
-// 각 사유는 색상 계열(Kind)에 매핑된다.
-const REASONS: { key: string; kind: Kind; label: string }[] = [
-  { key: "academy_out", kind: "academy", label: "외부 학원" },
-  { key: "academy_in", kind: "academy", label: "원내 수업" },
-  { key: "counsel", kind: "counsel", label: "주간 상담" },
-  { key: "absent_out", kind: "absent", label: "외부 일정" },
-  { key: "etc", kind: "absent", label: "기타" },
-];
-const reasonOf = (key: string) => REASONS.find((r) => r.key === key) ?? REASONS[0];
+// 각 사유는 색상 계열(Kind)에 매핑된다. 목록·매핑 자체는 src/lib/schedule.ts 의 SCHEDULE_REASONS 가
+// 단일 출처(학생용 일정 변경 신청 폼·관리 화면도 같은 걸 쓴다) — 여기서는 별칭만 둔다.
+const REASONS = SCHEDULE_REASONS;
 /** 제목 있으면 제목, 없으면 사유 라벨을 표시용 텍스트로 쓴다. */
 const dispTitle = (title: string, reason: string) => (title.trim() ? title.trim() : reason);
 
@@ -240,6 +237,25 @@ function IconClock() {
     </svg>
   );
 }
+function IconSwap() {
+  // 하루짜리 일정 교체(신청) — 위아래 화살표로 "정기 대신 오늘만" 을 상징.
+  return (
+    <svg {...iconBase}>
+      <path d="M3.5 5.5h7L8.5 3" />
+      <path d="M12.5 10.5h-7L7.5 13" />
+    </svg>
+  );
+}
+function IconInbox() {
+  // 학생 제출을 받아서 검토·반영하는 뷰 — 받은함 트레이 모양.
+  return (
+    <svg {...iconBase}>
+      <path d="M2 9.5L4 3h8l2 6.5" />
+      <path d="M2 9.5v3a1 1 0 001 1h10a1 1 0 001-1v-3" />
+      <path d="M2 9.5h3.2l.9 1.6h3.8l.9-1.6H14" />
+    </svg>
+  );
+}
 function IconChevronLeft() {
   return <svg {...iconBase}><path d="M10 3l-5 5 5 5" /></svg>;
 }
@@ -311,6 +327,12 @@ export default function ScheduleDemo({
   const [showInputBar, setShowInputBar] = useState(false); // 기본은 보기 모드 — 입력 바는 토글로만 노출
   const [showOpsView, setShowOpsView] = useState(false); // 운영 시간표 뷰(학생 선택과 배타적)
   const [opsBtnHover, setOpsBtnHover] = useState(false); // 사이드바 "운영 시간표" 버튼 hover(인라인 스타일이라 직접 추적)
+  const [showWindowView, setShowWindowView] = useState(false); // 입력 기간 관리 뷰(학생 선택·운영 시간표와 배타적)
+  const [winBtnHover, setWinBtnHover] = useState(false); // 사이드바 "입력 기간" 버튼 hover
+  const [showRequestsView, setShowRequestsView] = useState(false); // 변경 신청 관리 뷰(학생 선택·다른 독립 뷰와 배타적)
+  const [reqBtnHover, setReqBtnHover] = useState(false); // 사이드바 "변경 신청" 버튼 hover
+  const [showSubmissionsView, setShowSubmissionsView] = useState(false); // 제출 반영 뷰(학생 선택·다른 독립 뷰와 배타적)
+  const [subBtnHover, setSubBtnHover] = useState(false); // 사이드바 "제출 반영" 버튼 hover
 
   // ── 입력 바 상태 ──
   const [reasonVal, setReasonVal] = useState<string>("academy_out");
@@ -758,13 +780,40 @@ export default function ScheduleDemo({
         {/* 학생 목록 — 독립 카드 */}
         <div className="card" style={{ flex: "none", width: 220, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
           <div style={{ flex: "none", padding: "9px 7px 0" }}>
-            <button onClick={() => setShowOpsView(true)}
+            <button onClick={() => { setShowOpsView(true); setShowWindowView(false); setShowRequestsView(false); setShowSubmissionsView(false); }}
               onMouseEnter={() => setOpsBtnHover(true)} onMouseLeave={() => setOpsBtnHover(false)}
               style={{ width: "100%", padding: "8px 9px", borderRadius: 8, cursor: "pointer", textAlign: "left",
                 border: `1px solid ${showOpsView ? "var(--accent)" : "var(--line)"}`,
                 background: showOpsView ? "var(--accent-soft)" : opsBtnHover ? "var(--panel2)" : "var(--card)" }}>
               <span style={{ ...iconRow, fontSize: 12.5, fontWeight: showOpsView ? 800 : 700, color: showOpsView ? "var(--accent)" : "var(--ink)" }}>
                 <IconCalendar />운영 시간표
+              </span>
+            </button>
+            <button onClick={() => { setShowWindowView(true); setShowOpsView(false); setShowRequestsView(false); setShowSubmissionsView(false); }}
+              onMouseEnter={() => setWinBtnHover(true)} onMouseLeave={() => setWinBtnHover(false)}
+              style={{ width: "100%", padding: "8px 9px", borderRadius: 8, cursor: "pointer", textAlign: "left", marginTop: 6,
+                border: `1px solid ${showWindowView ? "var(--accent)" : "var(--line)"}`,
+                background: showWindowView ? "var(--accent-soft)" : winBtnHover ? "var(--panel2)" : "var(--card)" }}>
+              <span style={{ ...iconRow, fontSize: 12.5, fontWeight: showWindowView ? 800 : 700, color: showWindowView ? "var(--accent)" : "var(--ink)" }}>
+                <IconClock />입력 기간
+              </span>
+            </button>
+            <button onClick={() => { setShowRequestsView(true); setShowOpsView(false); setShowWindowView(false); setShowSubmissionsView(false); }}
+              onMouseEnter={() => setReqBtnHover(true)} onMouseLeave={() => setReqBtnHover(false)}
+              style={{ width: "100%", padding: "8px 9px", borderRadius: 8, cursor: "pointer", textAlign: "left", marginTop: 6,
+                border: `1px solid ${showRequestsView ? "var(--accent)" : "var(--line)"}`,
+                background: showRequestsView ? "var(--accent-soft)" : reqBtnHover ? "var(--panel2)" : "var(--card)" }}>
+              <span style={{ ...iconRow, fontSize: 12.5, fontWeight: showRequestsView ? 800 : 700, color: showRequestsView ? "var(--accent)" : "var(--ink)" }}>
+                <IconSwap />변경 신청
+              </span>
+            </button>
+            <button onClick={() => { setShowSubmissionsView(true); setShowOpsView(false); setShowWindowView(false); setShowRequestsView(false); }}
+              onMouseEnter={() => setSubBtnHover(true)} onMouseLeave={() => setSubBtnHover(false)}
+              style={{ width: "100%", padding: "8px 9px", borderRadius: 8, cursor: "pointer", textAlign: "left", marginTop: 6,
+                border: `1px solid ${showSubmissionsView ? "var(--accent)" : "var(--line)"}`,
+                background: showSubmissionsView ? "var(--accent-soft)" : subBtnHover ? "var(--panel2)" : "var(--card)" }}>
+              <span style={{ ...iconRow, fontSize: 12.5, fontWeight: showSubmissionsView ? 800 : 700, color: showSubmissionsView ? "var(--accent)" : "var(--ink)" }}>
+                <IconInbox />제출 반영
               </span>
             </button>
             <div style={{ borderTop: "1px solid var(--line)", margin: "8px 2px" }} />
@@ -780,11 +829,11 @@ export default function ScheduleDemo({
           </div>
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 7px 9px", display: "flex", flexDirection: "column", gap: 2 }}>
             {shown.map((s) => {
-              const on = !showOpsView && s.id === dsid;
+              const on = !showOpsView && !showWindowView && !showRequestsView && !showSubmissionsView && s.id === dsid;
               const n = schedByStudent[s.id]?.rules.length ?? 0;
               const hoursUnset = hoursCountFor(s.id) === 0;
               return (
-                <button key={s.id} onClick={() => { setDsid(s.id); setShowOpsView(false); }}
+                <button key={s.id} onClick={() => { setDsid(s.id); setShowOpsView(false); setShowWindowView(false); setShowRequestsView(false); setShowSubmissionsView(false); }}
                   style={{ display: "grid", gridTemplateColumns: "44px 1fr", alignItems: "center", columnGap: 10, padding: "7px 9px", borderRadius: 9, cursor: "pointer", textAlign: "left",
                     border: `1px solid ${on ? "var(--accent)" : "transparent"}`, background: on ? "var(--accent-soft)" : "transparent" }}>
                   <span style={{ fontSize: 12.5, color: "var(--sub)", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{s.seat_number != null ? s.seat_number : "–"}</span>
@@ -826,6 +875,12 @@ export default function ScheduleDemo({
               />
             </div>
           </>
+        ) : showWindowView ? (
+          <WindowView students={students} />
+        ) : showRequestsView ? (
+          <RequestsView />
+        ) : showSubmissionsView ? (
+          <SubmissionsView />
         ) : (
         <>
           {/* 헤더 카드: 학생 이름/칩 · 주 이동 · 뷰 세그먼트 · 입력 토글 */}

@@ -117,7 +117,7 @@ const BOOT_LOCK =
 
 // 스키마·시드 내용이 바뀌면 이 값을 올린다. 그때만 DDL 이 다시 돈다.
 // (schema.modules.ts / CORE_SQL / PERMISSIONS / MODULES 를 수정하면 반드시 갱신)
-const SCHEMA_VERSION = "2026-08-12.2"; // attendance_event.note + student.access_code 컬럼 추가
+const SCHEMA_VERSION = "2026-08-21.1"; // schedule_request 확장: req_kind/target_rule_id/days/prev_snapshot(정기 일정 수정·삭제 신청), date nullable
 
 /** 이미 이 버전으로 부팅된 DB인지 한 번의 쿼리로 판정 */
 async function alreadyBooted(): Promise<boolean> {
@@ -145,6 +145,9 @@ async function boot() {
   // 운영 DB 엔 해당 행이 없어 no-op 이지만 dev 와의 일관성을 위해 넣는다.
   await db.query(`delete from schedule_rule where kind='study'`);
   await db.query(`delete from schedule_exception where kind='study' and skip_rule_id is null`);
+  // 스케쥴 입력 기간(2026-08-20): 기존 제출 행은 first_submitted_at 이 없다 — created_at 을 최초
+  // 제출 시각으로 간주해 채운다(그 순간부터는 actions.ts submitForm 이 insert 시에만 채우고 보존).
+  await db.query(`update submission set first_submitted_at = coalesce(first_submitted_at, created_at) where first_submitted_at is null`);
 
   // 권한 카탈로그
   for (const p of PERMISSIONS) {

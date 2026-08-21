@@ -205,4 +205,135 @@ create table if not exists schedule_hours(
   unique(student_id, day)
 );
 create index if not exists idx_schedule_hours_bs on schedule_hours(branch_id, student_id);
+
+-- ================= 신청·설문 접수 (공개 폼 studycube.co.kr → 여기로 적재) =================
+-- 도시락·컨텐츠·상담·스케쥴 등 모든 유형을 한 테이블로. payload=폼 답변(jsonb, 유형별 자유).
+-- 관리쪽(studycube.cloud)에서 type 으로 필터해 인사이트·처리.
+create table if not exists submission(
+  id             uuid primary key default gen_random_uuid(),
+  branch_id      uuid not null references branch(id) on delete cascade,
+  type           text not null,                       -- lunch | content | counsel | schedule
+  student_id     uuid references student(id) on delete set null,  -- 매칭되면 연결
+  submitter_name  text,
+  submitter_phone text,
+  payload        jsonb not null default '{}',
+  status         text not null default 'pending',     -- pending | done | rejected
+  note           text,
+  created_at     timestamptz not null default now(),
+  processed_by   uuid references person(id) on delete set null,
+  processed_at   timestamptz
+);
+create index if not exists idx_submission_btc on submission(branch_id, type, created_at);
+create index if not exists idx_submission_student on submission(student_id);
+-- 재제출 시 created_at 을 now() 로 덮어써 "마지막 제출"로 쓰기 때문에(actions.ts submitForm), 최초
+-- 제출 시각은 따로 보존해야 한다 — 스케쥴 입력 기간(schedule_window/schedule_grant) 판정의
+-- "첫 제출 시각으로부터 24시간" 기준이 여기서 나온다(src/lib/schedule-window.ts). insert 시 1회만
+-- 채우고 update 에서는 절대 건드리지 않는다.
+alter table submission add column if not exists first_submitted_at timestamptz;
+
+-- 공개 폼 본인확인(이름+access_code) 무차별 대입 방어: (지점,이름)별 실패 카운트·잠금.
+-- 서버리스라 인메모리 불가 → DB에 둔다. 성공 시 행 삭제, 실패 누적 시 일시 잠금.
+create table if not exists access_attempt(
+  branch_id    uuid not null references branch(id) on delete cascade,
+  name         text not null,
+  fails        int  not null default 0,
+  first_fail   timestamptz not null default now(),
+  locked_until timestamptz,
+  primary key(branch_id, name)
+);
+
+-- ================= 학생 스케쥴 입력 기간 =================
+-- 지점 전체 입력 기간(예: 방학→개학 전환기). 판정 로직은 src/lib/schedule-window.ts(순수) +
+-- src/lib/schedule-window-server.ts(조회) — "한 번도 제출 안 한 학생은 언제나 열림 + 첫 제출 후
+-- 24시간 자유수정, 그 뒤엔 여기 열린 기간 안에서만" 규칙의 후자를 담당.
+create table if not exists schedule_window(
+  id         uuid primary key default gen_random_uuid(),
+  branch_id  uuid not null references branch(id) on delete cascade,
+  label      text,
+  opens_at   timestamptz not null,
+  closes_at  timestamptz not null,
+  created_at timestamptz not null default now(),
+  created_by uuid references person(id) on delete set null,
+  check (closes_at > opens_at)
+);
+create index if not exists idx_schedule_window_bo on schedule_window(branch_id, opens_at);
+
+-- 기간을 놓친 특정 학생만 개별 개방. schedule_window 와 판정 우선순위는 같다(둘 중 하나만 열려 있어도 됨).
+create table if not exists schedule_grant(
+  id         uuid primary key default gen_random_uuid(),
+  branch_id  uuid not null references branch(id) on delete cascade,
+  student_id uuid not null references student(id) on delete cascade,
+  opens_at   timestamptz not null,
+  closes_at  timestamptz not null,
+  note       text,
+  created_at timestamptz not null default now(),
+  created_by uuid references person(id) on delete set null,
+  check (closes_at > opens_at)
+);
+create index if not exists idx_schedule_grant_bs on schedule_grant(branch_id, student_id);
+
+-- ================= 학생 일회성 일정 변경 신청 (관리자 승인 필요) =================
+-- 정기 스케쥴(schedule_rule/schedule_hours)과 별개로 "이 날만" 바뀌는 요청. 입력 기간과 무관하게
+-- 언제나 신청 가능(신청일 뿐 정기 수정이 아니다). 승인되면 schedule_exception 을 만들어 exception_id
+-- 로 연결한다. skip_rule_id 는 스키마 설계서에는 없던 컬럼이지만, "대체"로 낸 신청(겹치는 정기 규칙을
+-- 그 날만 건너뜀)을 승인 시점까지 기억해둘 곳이 필요해 schedule_exception 과 같은 패턴으로 추가했다
+-- (신청 시점에 학생이 고른 값을 그대로 승인 시 schedule_exception.skip_rule_id 에 옮겨 담는다).
+create table if not exists schedule_request(
+  id           uuid primary key default gen_random_uuid(),
+  branch_id    uuid not null references branch(id) on delete cascade,
+  student_id   uuid not null references student(id) on delete cascade,
+  date         date not null,
+  kind         text not null check (kind in ('study','academy','counsel','absent')),
+  reason       text not null,
+  title        text,
+  start_min    int  not null,
+  end_min      int  not null,
+  skip_rule_id uuid references schedule_rule(id) on delete set null,
+  status       text not null default 'pending',    -- pending | approved | rejected
+  note         text,
+  exception_id uuid references schedule_exception(id) on delete set null,
+  created_at   timestamptz not null default now(),
+  decided_at   timestamptz,
+  decided_by   uuid references person(id) on delete set null,
+  check (end_min > start_min)
+);
+create index if not exists idx_schedule_request_bsd on schedule_request(branch_id, status, date);
+create index if not exists idx_schedule_request_sd on schedule_request(student_id, date);
+-- 신청 유형(absent|late|early|out|custom) — src/lib/schedule.ts REQUEST_TYPES 가 단일 출처.
+-- start_min/end_min 은 이미 그 유형에 맞게 환산된 값(schedule-request-actions.ts resolveRequestRange)이고,
+-- req_type 은 표시(칩·시간 라벨 읽기 방식)에만 쓰인다 — schedule_exception 승인 로직은 지금처럼 start/end/kind/reason 만 본다.
+alter table schedule_request add column if not exists req_type text not null default 'custom';
+
+-- 신청 갈래(temp|rule_edit|rule_delete) — src/lib/schedule.ts REQUEST_KINDS 가 단일 출처.
+-- temp(기존): 특정 날짜 하루만 바뀌는 신청. 기존 컬럼(date/kind/reason/title/start_min/end_min) 그대로 쓰고
+-- target_rule_id/days 는 null.
+-- rule_edit: 기존 정기 규칙(target_rule_id) 하나의 요일/시간/사유/제목을 바꾸는 신청. "새 값"을 기존 컬럼
+-- (kind/reason/title/start_min/end_min)에 재사용하고, 요일은 days(schedule_rule.days 와 같은 CSV 형식)에 담는다.
+-- date 는 특정 날짜가 없으므로 null.
+-- rule_delete: 기존 정기 규칙(target_rule_id) 하나를 영구 삭제하는 신청. kind/reason/title/start_min/end_min/
+-- days 는 신청 시점의 "현재 값" 스냅샷(표시용 — 승인 뒤 규칙이 지워져도 무엇을 지웠는지 보여줄 수 있게).
+-- date 는 null.
+-- target_rule_id 는 "on delete set null"(cascade 아님) — 그 규칙이 다른 경로로 지워져도 이 신청 행 자체는
+-- 남아 있어야 승인 시점에 "대상이 사라졌다"고 판단해 반려 사유를 남길 수 있고(schedule-request.ts),
+-- rule_delete 승인 자체가 그 규칙을 지울 때도(같은 트랜잭션 안) 방금 승인 처리한 이 행이 cascade 로
+-- 함께 지워지는 걸 막아 prev_snapshot(되돌리기용)이 살아남는다.
+alter table schedule_request add column if not exists req_kind text not null default 'temp';
+alter table schedule_request add column if not exists target_rule_id uuid references schedule_rule(id) on delete set null;
+alter table schedule_request add column if not exists days text;
+alter table schedule_request alter column date drop not null;
+-- 승인 시점의 이전 값 스냅샷(되돌리기용, jsonb). rule_edit=수정 전 규칙 전체 행, rule_delete=삭제 전 규칙
+-- 전체 행({id,reason,kind,title,start_min,end_min,days}) — 되돌릴 때 rule_delete 는 이 스냅샷으로
+-- (가능하면 같은 id로) schedule_rule 행을 재생성한다. temp 는 지금처럼 exception_id 를 지우는 것만으로
+-- 충분해 prev_snapshot 을 쓰지 않는다.
+alter table schedule_request add column if not exists prev_snapshot jsonb;
+
+-- ================= 지점별 설정 (키-값) =================
+-- 예: schedule_auto_approve='1' → 변경 신청을 접수 즉시 자동 승인.
+create table if not exists branch_setting(
+  branch_id  uuid not null references branch(id) on delete cascade,
+  key        text not null,
+  value      text not null,
+  updated_at timestamptz not null default now(),
+  primary key(branch_id, key)
+);
 `;

@@ -38,7 +38,10 @@ export default async function StudentPage() {
             <Link href="/home" className="chip" style={{ cursor: "pointer" }}>‹ 홈</Link>
             <span style={{ fontWeight: 700 }}>학생 관리</span>
           </div>
-          <div style={{ fontSize: 12.5, color: "var(--sub)" }}>재원 {enrolled} · 전체 {rows.length}</div>
+          <div className="flex items-center gap-3">
+            <Link href="/m/submission" className="chip" style={{ cursor: "pointer" }}>신청·설문 응답 →</Link>
+            <div style={{ fontSize: 12.5, color: "var(--sub)" }}>재원 {enrolled} · 전체 {rows.length}</div>
+          </div>
         </div>
       </header>
 
