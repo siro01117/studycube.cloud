@@ -17,6 +17,7 @@ import { submitForm } from "../../actions";
 import { getHubSlug } from "../../registry";
 import type { FormDef } from "../../registry";
 import { blockStyleOf } from "@/lib/schedule";
+import { SCHEDULE_MAX_MIN } from "@/lib/schedule-import";
 import { checkScheduleWindow, type ScheduleWindowCheck, type SchedulePayloadShape } from "./schedule-window-actions";
 import type { EditState } from "@/lib/schedule-window";
 
@@ -45,6 +46,19 @@ function parseHM(v: HM): number | null {
   const h = clampInt(parseInt(v.h, 10) || 0, 0, 23);
   const m = clampInt(parseInt(v.m, 10) || 0, 0, 59);
   return h * 60 + m;
+}
+/** 자정 넘김 하원/종료를 +1440 으로 편 값(overnight 이 아니면 그대로). 서버(actions.ts
+ *  validateSchedulePayload, schedule-import.ts validAcademies/validHours)의 SCHEDULE_MAX_MIN 상한과
+ *  반드시 같은 기준으로 계산해야 한다 — 다르면 여기선 통과된 입력이 제출에서만 막힌다(과거 버그:
+ *  위저드에 이 상한 체크가 아예 없어서, 학생이 3단계 검토까지 문제없이 진행한 뒤 제출에서만
+ *  "하원 시간이 올바르지 않습니다"로 막혔다). */
+function adjustedLeave(a: number, lRaw: number): number {
+  return lRaw <= a ? lRaw + 1440 : lRaw;
+}
+/** true 면 자정 넘김 하원/종료가 서버 상한(다음날 새벽 2시)을 넘는다. */
+function overCap(a: number | null, lRaw: number | null): boolean {
+  if (a == null || lRaw == null) return false;
+  return adjustedLeave(a, lRaw) > SCHEDULE_MAX_MIN;
 }
 const pad2 = (n: number) => String(n).padStart(2, "0");
 function fmtMin(min: number): string {
@@ -377,6 +391,10 @@ function Wizard({
     const academiesPayload = academies
       .map((a) => ({ ...a, days: a.days.filter((d) => hoursDays.includes(d)) }))
       .filter((a) => a.name.trim() && a.days.length && parseHM(a.start) != null && parseHM(a.end) != null)
+      // 등·하원 그룹(HoursRow)은 상한 초과 시 "추가" 버튼 자체를 막아 애초에 groups 에 들어올 수 없지만,
+      // 학원 카드는 시간을 바로 편집하는 방식이라 같은 게이트가 없다 — 여기서 걸러 서버가 이 이유로
+      // 통째로 거부하는 대신, 카드에 뜨는 경고(AcademyCard overCap)와 일치하게 조용히 빠진다.
+      .filter((a) => !overCap(parseHM(a.start), parseHM(a.end)))
       .map((a) => {
         const s = parseHM(a.start)!;
         const eRaw = parseHM(a.end)!;
@@ -391,6 +409,13 @@ function Wizard({
     const payload = buildPayload();
     if (payload.hours.length + payload.restDays.length !== 7) {
       setErr("모든 요일의 등·하원 또는 쉬는 날을 정해주세요.");
+      setStep(1);
+      return;
+    }
+    // 방어적 재확인 — "추가" 버튼이 이미 상한(overCap) 을 막지만, groups 상태가 어떤 경로로든
+    // 상한을 넘는 값을 담고 있으면 여기서 걸러 서버가 이유 없이 거부하는 상황을 막는다.
+    if (payload.hours.some((h) => h.leave > SCHEDULE_MAX_MIN)) {
+      setErr("하원 시간이 다음날 새벽 2시를 넘는 요일이 있어요. 시간을 다시 확인해주세요.");
       setStep(1);
       return;
     }
@@ -532,7 +557,11 @@ function StepHours({
 }) {
   const assignedDays = groups.flatMap((g) => g.days);
   const unassigned = ALL_DAYS.filter((d) => !assignedDays.includes(d));
-  const canAddAttend = builderDays.length > 0 && parseHM(builderArrive) != null && parseHM(builderLeave) != null;
+  const canAddAttend =
+    builderDays.length > 0 &&
+    parseHM(builderArrive) != null &&
+    parseHM(builderLeave) != null &&
+    !overCap(parseHM(builderArrive), parseHM(builderLeave));
   const canAddRest = builderDays.length > 0;
 
   // 그룹을 추가하면(요일 묶음 확정) 새로 생긴 카드로 먼저, 이어서 남은 요일 선택 영역으로 스크롤-포커스한다
@@ -675,15 +704,21 @@ function HoursRow({ arrive, leave, onArrive, onLeave }: { arrive: HM; leave: HM;
   const a = parseHM(arrive);
   const lRaw = parseHM(leave);
   const overnight = a != null && lRaw != null && lRaw <= a;
+  const capped = overCap(a, lRaw);
   return (
     <div>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
         <TimeField label="등원" value={arrive} onChange={onArrive} />
         <TimeField label="하원" value={leave} onChange={onLeave} />
       </div>
-      {overnight && lRaw != null && (
+      {overnight && lRaw != null && !capped && (
         <div style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 700, marginTop: 10 }}>
           자정을 넘겨요 — {fmtLeave(lRaw + 1440)} 로 저장돼요.
+        </div>
+      )}
+      {capped && (
+        <div style={{ fontSize: 12.5, color: "var(--danger)", fontWeight: 700, marginTop: 10 }}>
+          하원 시간은 다음날 새벽 2시를 넘을 수 없어요.
         </div>
       )}
     </div>
@@ -817,6 +852,7 @@ function AcademyCard({ item, days, onChange, onRemove }: { item: Academy; days: 
   const s = parseHM(item.start);
   const eRaw = parseHM(item.end);
   const overnight = s != null && eRaw != null && eRaw <= s;
+  const capped = overCap(s, eRaw);
   return (
     <div style={{ border: "1px solid var(--line)", borderRadius: 14, padding: "16px 14px 14px", position: "relative", display: "flex", flexDirection: "column", gap: 14 }}>
       <button
@@ -877,8 +913,13 @@ function AcademyCard({ item, days, onChange, onRemove }: { item: Academy; days: 
           <ClockInput value={item.end} onChange={(v) => onChange({ ...item, end: v })} />
         </div>
       </div>
-      {overnight && eRaw != null && (
+      {overnight && eRaw != null && !capped && (
         <div style={{ fontSize: 12.5, color: "var(--warn)", fontWeight: 700 }}>자정을 넘겨요 — {fmtLeave(eRaw + 1440)} 로 저장돼요.</div>
+      )}
+      {capped && (
+        <div style={{ fontSize: 12.5, color: "var(--danger)", fontWeight: 700 }}>
+          종료 시간이 다음날 새벽 2시를 넘어서 이 일정은 제출에 포함되지 않아요. 시간을 조정해주세요.
+        </div>
       )}
     </div>
   );

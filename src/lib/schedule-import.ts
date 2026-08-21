@@ -52,8 +52,15 @@ export type ParseFileResult = { ok: true; file: ParsedImportFile } | { ok: false
 const MAX_STUDENTS = 500;
 const MAX_HOURS_PER_STUDENT = 7;
 const MAX_ACADEMIES_PER_STUDENT = 30;
-const MIN_MIN = 0;
-const MAX_MIN = 1560;
+// 분 값 상한/하한 — 제출 폼(f/actions.ts validateSchedulePayload)·이 파일(validHours/validAcademies)·
+// 학생 위저드(f/[slug]/forms/sch9m2vt.tsx)가 전부 이 두 값을 "단일 출처"로 가져다 쓴다(과거엔 세 곳에
+// 리터럴 1560 이 따로 박혀 있어서 위저드가 서버보다 넓은 범위를 허용 — 학생이 3단계 검토 화면까지
+// 문제없이 진행한 뒤 제출에서만 "하원 시간이 올바르지 않습니다"로 막히는 원인이었다). MAX=1560(=26:00,
+// 자정 넘김 최대 새벽 2시)까지만 자정 넘김 하원/종료를 허용한다.
+export const SCHEDULE_MIN_MIN = 0;
+export const SCHEDULE_MAX_MIN = 1560;
+const MIN_MIN = SCHEDULE_MIN_MIN;
+const MAX_MIN = SCHEDULE_MAX_MIN;
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);

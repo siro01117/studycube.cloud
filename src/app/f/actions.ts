@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { ready } from "@/lib/bootstrap";
 import { findStudent, publicAuthError } from "@/lib/public-auth";
 import { resolveEditState } from "@/lib/schedule-window-server";
+import { SCHEDULE_MIN_MIN, SCHEDULE_MAX_MIN } from "@/lib/schedule-import";
 import { getForm } from "./registry";
 
 const s = (v: FormDataEntryValue | null): string => String(v ?? "").trim();
@@ -25,8 +26,10 @@ async function branchId(): Promise<string | null> {
 const SCHEDULE_MAX_HOURS_DAYS = 7;
 const SCHEDULE_MAX_ACADEMIES = 20;
 const SCHEDULE_MAX_NAME_LEN = 40;
-const SCHEDULE_MIN_MIN = 0;
-const SCHEDULE_MAX_MIN = 1560;
+// 분 상한/하한(SCHEDULE_MIN_MIN/SCHEDULE_MAX_MIN)은 @/lib/schedule-import 가 단일 출처 — 이 파일과
+// schedule-import.ts(관리자 "제출 반영"이 재검증할 때)·sch9m2vt.tsx(위저드가 미리 막을 때)가 전부 같은
+// 값을 쓴다. 예전엔 여기 리터럴 1560 이 따로 있었고 위저드는 아예 상한 체크가 없어서, 자정을 새벽
+// 2시 넘게 넘기는 하원/학원 시간을 학생이 3단계 검토까지 문제없이 진행한 뒤 제출에서만 걸렸다.
 
 function isMinuteInRange(v: unknown): v is number {
   return typeof v === "number" && Number.isInteger(v) && v >= SCHEDULE_MIN_MIN && v <= SCHEDULE_MAX_MIN;
@@ -40,13 +43,21 @@ function validateSchedulePayload(payload: Record<string, unknown>): string | nul
   const hoursDays: number[] = [];
   if (hours !== undefined) {
     if (!Array.isArray(hours) || hours.length > SCHEDULE_MAX_HOURS_DAYS) return "요일 정보가 올바르지 않습니다.";
+    const seenHourDays = new Set<number>();
     for (const raw of hours) {
       if (!raw || typeof raw !== "object") return "요일 정보가 올바르지 않습니다.";
       const h = raw as Record<string, unknown>;
       if (!isDay(h.day)) return "요일 값이 올바르지 않습니다.";
       if (!isMinuteInRange(h.arrive)) return "등원 시간이 올바르지 않습니다.";
       if (!isMinuteInRange(h.leave)) return "하원 시간이 올바르지 않습니다.";
-      hoursDays.push(h.day);
+      // schedule-import.ts validHours 와 동일 규칙(관리자 "제출 반영"에서 재검증할 때 같은 데이터가
+      // 다른 결론에 이르지 않도록) — 여기서 먼저 걸러야 학생이 제출 시점에 바로 이유를 알 수 있다.
+      if ((h.leave as number) <= (h.arrive as number)) {
+        return `${h.day}요일 하원 시간이 등원 시간보다 늦어야 합니다(자정을 넘기면 다음날 새벽 2시까지만 가능해요).`;
+      }
+      if (seenHourDays.has(h.day as number)) return "같은 요일이 두 번 이상 들어있습니다.";
+      seenHourDays.add(h.day as number);
+      hoursDays.push(h.day as number);
     }
   }
 
@@ -80,6 +91,9 @@ function validateSchedulePayload(payload: Record<string, unknown>): string | nul
       if (!Array.isArray(a.days) || a.days.length === 0 || a.days.length > 7 || !a.days.every(isDay)) return "학원 요일을 확인해주세요.";
       if (!isMinuteInRange(a.start)) return "학원 시작 시간을 확인해주세요.";
       if (!isMinuteInRange(a.end)) return "학원 종료 시간을 확인해주세요.";
+      // schedule-import.ts validAcademies 와 동일 규칙 — 종료가 시작보다 늦어야 한다(자정 넘김은
+      // end 를 +1440 해서 표현하므로, 여기서 걸리면 위저드의 상한 체크가 빠졌다는 뜻).
+      if ((a.end as number) <= (a.start as number)) return "학원 종료 시간이 시작 시간보다 늦어야 합니다.";
     }
   }
 

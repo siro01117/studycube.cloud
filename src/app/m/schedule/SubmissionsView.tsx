@@ -342,8 +342,11 @@ export default function SubmissionsView() {
                           <td style={{ ...td, fontVariantNumeric: "tabular-nums", color: "var(--faint)" }}>{sub.firstSubmittedLabel ?? "-"}</td>
                           <td style={td}>
                             {row.parseOk ? summaryOf(row.hours, row.academies, row.restDays) : (
-                              <span title={row.parseError} style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--danger)" }}>
-                                <IconAlertCircle />형식 오류
+                              // 사유를 title(호버 툴팁)에만 두지 않고 바로 옆에 텍스트로 보여준다 — 안 그러면
+                              // "형식 오류"만 보이고 왜 안 되는지 알려면 마우스를 올려야 해서 놓치기 쉽다.
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--danger)" }}>
+                                <IconAlertCircle />
+                                <span>형식 오류{row.parseError ? `: ${row.parseError}` : ""}</span>
                               </span>
                             )}
                           </td>
