@@ -6,7 +6,7 @@
 // 그 로직이 받는 모양으로 감싸는 어댑터만 src/lib/schedule-submission.ts 에 따로 뒀다(재사용 원칙).
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
-  loadSubmissionsBase, applySubmissions, rejectSubmission,
+  loadSubmissionsBase, applySubmissions, rejectSubmission, deleteSubmission,
   type SubmissionRow, type SubmissionsBase, type SubStatus, type ApplySubmissionsResult,
 } from "./submissionActions";
 import { diffAgainstExisting, academyToDbFields, type DiffStatus, type ImportHours, type DbAcademy } from "@/lib/schedule-import";
@@ -60,6 +60,16 @@ const diffChip: Record<DiffStatus | "n/a", { label: string; fg: string; bg: stri
   changed: { label: "수정", fg: "var(--accent)", bg: "var(--accent-soft)" },
   "n/a": { label: "-", fg: "var(--faint)", bg: "transparent" },
 };
+// 무채색 — 형식 오류(danger)·상태(warn/ok)와 헷갈리지 않도록 테스트 제출은 색을 아예 안 쓴다.
+const testChip = { label: "테스트", fg: "var(--faint)", bg: "var(--panel2)" };
+const unlinkedChip = { label: "학생 미연결", fg: "var(--warn)", bg: "var(--warn-soft)" };
+
+/** submission.payload._test === true 인지 — f/actions.ts 의 개발용 "테스트로 건너뛰기" 우회로 만들어진
+ *  제출의 표식. 이 판정은 서버(submissionActions.ts deleteSubmission)에도 동일하게 있다(단일 출처는
+ *  아니지만, 클라는 UI 판단용이고 서버는 삭제 허용 여부의 최종 방어선이라 각자 필요 — 재계산 비용도 없다). */
+function isTestPayload(payload: unknown): boolean {
+  return typeof payload === "object" && payload !== null && !Array.isArray(payload) && (payload as Record<string, unknown>)._test === true;
+}
 
 function Chip({ label, fg, bg }: { label: string; fg: string; bg: string }) {
   return (
@@ -89,6 +99,12 @@ type Row = {
   diffDetail: string;
   existingHours: ImportHours[];
   existingAcademies: DbAcademy[];
+  // 테스트 신원(개발용 "테스트로 건너뛰기")으로 낸 제출 — 반영 대상이 아니라 형식 오류와는 다른 사유로
+  // 구분해서 보여준다(그렇지 않으면 "형식 오류"라는 엉뚱한 메시지로 보인다).
+  isTest: boolean;
+  // 진짜 신원이 있었는데(student_id 있음) 조인된 학생 행을 못 찾은 경우 — isTest 와는 다른 문제라
+  // 별도로 표시한다(학생이 지워졌거나 하는 드문 경우).
+  isUnlinked: boolean;
 };
 
 function buildRows(base: SubmissionsBase): Row[] {
@@ -109,11 +125,13 @@ function buildRows(base: SubmissionsBase): Row[] {
     const result = adaptSubmissionPayload(sub.payload, sub.studentName, sub.seatNumber, 0);
     const existingHours = sub.studentId ? (hoursByStudent.get(sub.studentId) ?? []) : [];
     const existingAcademies = sub.studentId ? (acadByStudent.get(sub.studentId) ?? []) : [];
+    const isTest = isTestPayload(sub.payload) || sub.studentId == null;
+    const isUnlinked = !isTest && !sub.studentMatched;
     if (!result.ok) {
       return {
         submission: sub, parseOk: false, parseError: result.error,
         hours: [], restDays: [], academies: [], diffStatus: "n/a", diffDetail: "",
-        existingHours, existingAcademies,
+        existingHours, existingAcademies, isTest, isUnlinked,
       };
     }
     const st = result.student;
@@ -128,7 +146,7 @@ function buildRows(base: SubmissionsBase): Row[] {
     return {
       submission: sub, parseOk: true,
       hours: st.hours, restDays: st.restDays, academies: dbAcademies,
-      diffStatus, diffDetail, existingHours, existingAcademies,
+      diffStatus, diffDetail, existingHours, existingAcademies, isTest, isUnlinked,
     };
   });
 }
@@ -145,6 +163,7 @@ export default function SubmissionsView() {
   const [rejectNote, setRejectNote] = useState("");
   const [rowBusy, setRowBusy] = useState<string | null>(null);
   const [rowErr, setRowErr] = useState<{ id: string; msg: string } | null>(null);
+  const [showTestRows, setShowTestRows] = useState(false); // 테스트 제출 — 기본은 숨김
 
   const reload = () => {
     loadSubmissionsBase()
@@ -155,7 +174,7 @@ export default function SubmissionsView() {
         const rows = buildRows(b);
         const def = new Set<string>();
         for (const r of rows) {
-          if (r.submission.status === "pending" && r.parseOk && r.submission.studentId && (r.diffStatus === "new" || r.diffStatus === "changed")) {
+          if (r.submission.status === "pending" && r.parseOk && r.submission.studentId && !r.isTest && (r.diffStatus === "new" || r.diffStatus === "changed")) {
             def.add(r.submission.id);
           }
         }
@@ -167,8 +186,10 @@ export default function SubmissionsView() {
   useEffect(reload, []);
 
   const rows = useMemo(() => (base ? buildRows(base) : []), [base]);
+  const visibleRows = useMemo(() => (showTestRows ? rows : rows.filter((r) => !r.isTest)), [rows, showTestRows]);
+  const testCount = useMemo(() => rows.filter((r) => r.isTest).length, [rows]);
   const selectableRows = useMemo(
-    () => rows.filter((r) => r.submission.status === "pending" && r.parseOk && r.submission.studentId),
+    () => rows.filter((r) => r.submission.status === "pending" && r.parseOk && r.submission.studentId && !r.isTest),
     [rows],
   );
   const allSelectableChecked = selectableRows.length > 0 && selectableRows.every((r) => selected.has(r.submission.id));
@@ -222,7 +243,29 @@ export default function SubmissionsView() {
     }
   };
 
-  const pendingCount = rows.filter((r) => r.submission.status === "pending").length;
+  const doDelete = async (id: string) => {
+    if (!window.confirm("테스트 제출을 삭제할까요? 되돌릴 수 없습니다.")) return;
+    setRowBusy(id);
+    setRowErr(null);
+    try {
+      await deleteSubmission(id);
+      setSelected((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      reload();
+    } catch (e) {
+      setRowErr({ id, msg: e instanceof Error ? e.message : "삭제에 실패했습니다" });
+    } finally {
+      setRowBusy(null);
+    }
+  };
+
+  // 테스트 제출은 실제로는 처리할 수 없는 상태라 "대기 N건" 배지에 섞이면 마치 처리할 일이 남은
+  // 것처럼 보인다 — 실제 처리 대상만 센다. 테스트 건수는 아래 토글 옆에 별도로 보여준다.
+  const pendingCount = rows.filter((r) => r.submission.status === "pending" && !r.isTest).length;
 
   return (
     <>
@@ -231,14 +274,19 @@ export default function SubmissionsView() {
         .sc-sub-spin { animation: sc-sub-spin 0.8s linear infinite; transform-origin: 50% 50%; }
         @media (prefers-reduced-motion: reduce) { .sc-sub-spin { animation: none; } }
       `}</style>
-      <div className="card" style={{ flex: "none", display: "flex", alignItems: "center", gap: 14, padding: "12px 16px", flexWrap: "wrap" }}>
-        <span style={{ fontSize: 20, fontWeight: 700 }}>제출 반영</span>
-        <span style={{ fontSize: 12, color: "var(--faint)" }}>학생이 공개 폼으로 낸 정기 스케쥴을 검토해 실제 시간표에 반영합니다</span>
-        {pendingCount > 0 && (
-          <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--warn)", background: "var(--warn-soft)", borderRadius: 999, padding: "2px 10px" }}>
-            대기 {pendingCount}건
-          </span>
-        )}
+      <div className="card" style={{ flex: "none", display: "flex", flexDirection: "column", gap: 4, padding: "12px 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 20, fontWeight: 700 }}>제출 반영</span>
+          <span style={{ fontSize: 12, color: "var(--faint)" }}>학생이 공개 폼으로 낸 정기 스케쥴을 검토해 실제 시간표에 반영합니다</span>
+          {pendingCount > 0 && (
+            <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--warn)", background: "var(--warn-soft)", borderRadius: 999, padding: "2px 10px" }}>
+              대기 {pendingCount}건
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 11, color: "var(--faint)" }}>
+          실제 반영을 테스트하려면 학생 관리에서 코드를 발급한 뒤 그 이름+코드로 로그인해 제출하세요.
+        </div>
       </div>
 
       <div className="card" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "10px 12px 18px" }}>
@@ -253,8 +301,16 @@ export default function SubmissionsView() {
         ) : (
           <>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-              <div style={{ fontSize: 12.5, color: "var(--faint)" }}>
-                전체 {rows.length}건 · 대기 {pendingCount}건 · 선택됨 {selected.size}건
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12.5, color: "var(--faint)" }}>
+                  전체 {visibleRows.length}건 · 대기 {pendingCount}건 · 선택됨 {selected.size}건
+                </span>
+                {testCount > 0 && (
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--faint)", cursor: "pointer" }}>
+                    <input type="checkbox" checked={showTestRows} onChange={(e) => setShowTestRows(e.target.checked)} />
+                    테스트 {testCount}건 {showTestRows ? "표시 중" : "숨김"}
+                  </label>
+                )}
               </div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button type="button" className="btn" style={{ height: 30, padding: "0 10px", fontSize: 11.5 }}
@@ -300,6 +356,11 @@ export default function SubmissionsView() {
               </div>
             )}
 
+            {visibleRows.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: "var(--faint)", padding: "14px 4px" }}>
+                표시할 제출이 없습니다. 테스트 제출 {testCount}건은 위 체크박스로 볼 수 있습니다.
+              </div>
+            ) : (
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
@@ -316,9 +377,9 @@ export default function SubmissionsView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row) => {
+                  {visibleRows.map((row) => {
                     const sub = row.submission;
-                    const selectable = sub.status === "pending" && row.parseOk && !!sub.studentId;
+                    const selectable = sub.status === "pending" && row.parseOk && !!sub.studentId && !row.isTest;
                     const open = openId === sub.id;
                     return (
                       <Fragment key={sub.id}>
@@ -336,24 +397,42 @@ export default function SubmissionsView() {
                           <td style={{ ...td, fontWeight: 700 }}>
                             {sub.studentName}
                             {sub.seatNumber != null && <span style={{ marginLeft: 6, fontSize: 11.5, fontWeight: 600, color: "var(--faint)" }}>{sub.seatNumber}번</span>}
-                            {!sub.studentId && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 700, color: "var(--danger)" }}>미매칭</span>}
                           </td>
                           <td style={{ ...td, fontVariantNumeric: "tabular-nums", color: "var(--sub)" }}>{sub.createdLabel}</td>
                           <td style={{ ...td, fontVariantNumeric: "tabular-nums", color: "var(--faint)" }}>{sub.firstSubmittedLabel ?? "-"}</td>
                           <td style={td}>
-                            {row.parseOk ? summaryOf(row.hours, row.academies, row.restDays) : (
+                            {!row.parseOk ? (
                               // 사유를 title(호버 툴팁)에만 두지 않고 바로 옆에 텍스트로 보여준다 — 안 그러면
                               // "형식 오류"만 보이고 왜 안 되는지 알려면 마우스를 올려야 해서 놓치기 쉽다.
+                              // 진짜 형식 문제일 때만 이 메시지를 쓴다 — 테스트 제출·미연결 제출은 형식은
+                              // 멀쩡하므로 아래 별도 분기에서 각자의 사유를 보여준다.
                               <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--danger)" }}>
                                 <IconAlertCircle />
                                 <span>형식 오류{row.parseError ? `: ${row.parseError}` : ""}</span>
                               </span>
+                            ) : row.isTest ? (
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--faint)" }}>
+                                <Chip {...testChip} />
+                                <span>테스트 신원으로 낸 제출이라 반영할 수 없어요</span>
+                              </span>
+                            ) : row.isUnlinked ? (
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--warn)" }}>
+                                <Chip {...unlinkedChip} />
+                                <span>학생 정보와 연결되지 않아 반영할 수 없어요</span>
+                              </span>
+                            ) : (
+                              summaryOf(row.hours, row.academies, row.restDays)
                             )}
                           </td>
                           <td style={td}><Chip {...diffChip[row.diffStatus]} /></td>
                           <td style={td}><Chip {...statusChip[sub.status]} /></td>
                           <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
-                            {sub.status === "pending" && rejectingId !== sub.id && (
+                            {row.isTest ? (
+                              <button type="button" disabled={rowBusy === sub.id} onClick={() => doDelete(sub.id)}
+                                style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid var(--danger)", background: "var(--card)", color: "var(--danger)", fontSize: 11.5, fontWeight: 700, cursor: rowBusy === sub.id ? "default" : "pointer", opacity: rowBusy === sub.id ? 0.6 : 1 }}>
+                                삭제
+                              </button>
+                            ) : sub.status === "pending" && rejectingId !== sub.id && (
                               <button type="button" disabled={rowBusy === sub.id} onClick={() => { setRejectingId(sub.id); setRejectNote(""); setRowErr(null); }}
                                 style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--card)", color: "var(--sub)", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>
                                 반려
@@ -420,6 +499,7 @@ export default function SubmissionsView() {
                 </tbody>
               </table>
             </div>
+            )}
           </>
         )}
       </div>

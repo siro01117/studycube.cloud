@@ -21,6 +21,7 @@ export type SubmissionRow = {
   id: string;
   studentId: string | null;
   studentName: string;
+  studentMatched: boolean; // student_id 가 있고 실제 student 행과 조인이 됐는지 — false 면 "학생 미연결"
   seatNumber: number | null;
   status: SubStatus;
   note: string | null;
@@ -83,6 +84,7 @@ export async function loadSubmissionsBase(): Promise<SubmissionsBase> {
     id: r.id,
     studentId: r.student_id,
     studentName: r.student_name ?? r.submitter_name ?? "(알 수 없음)",
+    studentMatched: r.student_id != null && r.student_name != null,
     seatNumber: r.seat_number,
     status: (r.status as SubStatus) ?? "pending",
     note: r.note,
@@ -264,5 +266,33 @@ export async function rejectSubmission(formData: FormData): Promise<void> {
     [note, me.id, id, me.activeBranchId],
   );
   if (r.rows.length === 0) throw new Error("대기 중인 제출이 아닙니다");
+  revalidatePath("/m/schedule");
+}
+
+// ---------------- 테스트 제출 삭제 ----------------
+// 개발 중 "테스트로 건너뛰기"(f/actions.ts testBypass)로 만들어진 제출은 실제 학생 데이터가 아니라
+// 목록에 계속 남아 있어도 반영할 수 없다 — 행에서 바로 지울 수 있게 한다. 실제 학생 제출을 실수로
+// 지우는 사고를 막기 위해, 클라가 어떤 값을 보내든 서버가 "테스트 제출인지"를 다시 판정해서 아니면
+// 거부한다(payload._test===true 이거나 student_id 가 null인 경우만 — SubmissionsView.tsx 의 판정과 동일).
+export async function deleteSubmission(id: string): Promise<void> {
+  const me = await guard("schedule.manage");
+  const branchId = me.activeBranchId;
+  if (!branchId) throw new Error("소속 지점을 확인할 수 없습니다");
+  if (!id) throw new Error("요청을 확인하세요");
+
+  const rows = await db.query<{ id: string; student_id: string | null; payload: unknown }>(
+    `select id, student_id, payload from submission where id=$1 and branch_id=$2 and type='schedule'`,
+    [id, branchId],
+  );
+  const row = rows.rows[0];
+  if (!row) throw new Error("제출을 찾을 수 없습니다");
+
+  const p = row.payload;
+  const isTestPayload = typeof p === "object" && p !== null && !Array.isArray(p) && (p as Record<string, unknown>)._test === true;
+  if (!isTestPayload && row.student_id != null) {
+    throw new Error("테스트 제출만 삭제할 수 있습니다");
+  }
+
+  await db.query(`delete from submission where id=$1 and branch_id=$2`, [id, branchId]);
   revalidatePath("/m/schedule");
 }
