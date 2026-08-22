@@ -37,10 +37,12 @@ export default async function MobileRecordsPage({ searchParams }: { searchParams
 
   // 표시 문자열은 서버에서 만든다. 클라에서 toLocale*/new Date 를 쓰면
   // 서버(UTC·en 로케일)와 브라우저(KST·ko)가 달라 하이드레이션이 깨진다.
-  // started_at 은 '2026-08-04 07:49:28.559+09' 형태(이미 KST) → 문자열에서 직접 자른다.
+  // started_kst 는 서버가 'YYYY-MM-DD HH24:MI'(KST)로 만들어 내려준 표시용 문자열이다.
+  // started_at(::text)을 그대로 자르면 안 된다 — 그건 DB 세션 타임존을 따라서 운영(UTC)에서는
+  // 9시간 어긋난 값이 나온다(날짜 경계 근처면 날짜까지 하루 밀린다).
   const sessions = raw.map((s) => {
-    const day = s.started_at.slice(0, 10);
-    const time = s.started_at.slice(11, 16);
+    const day = s.started_kst.slice(0, 10);
+    const time = s.started_kst.slice(11, 16);
     const [, m, d] = day.split("-");
     return {
       id: s.id,

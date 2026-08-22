@@ -266,8 +266,17 @@ export async function deletePatrolSession(formData: FormData) {
 export async function getPatrolSessions(date?: string) {
   const me = await guard("patrol.view");
   const d = date ?? todayStr();
-  const r = await db.query<{ id: string; started_at: string; ended_at: string | null; marked: number; penalty: number }>(
+  // started_at/ended_at(::text)은 DB 세션 타임존을 따른다 — 로컬 PGlite 는 KST 라 '+09' 가 붙지만
+  // 운영(Supabase)은 UTC 라 '+00' 이 붙는다. 오프셋이 있으니 Date.parse 로 하는 소요시간 계산과
+  // 브라우저 toLocale* 표시는 어느 쪽이든 맞다. 다만 문자열을 그대로 잘라 쓰는 화면(/records)이
+  // 있어서, 표시용 KST 문자열을 서버에서 따로 만들어 함께 내려준다.
+  const r = await db.query<{
+    id: string; started_at: string; ended_at: string | null;
+    started_kst: string; ended_kst: string | null; marked: number; penalty: number;
+  }>(
     `select ps.id, ps.started_at::text as started_at, ps.ended_at::text as ended_at,
+            to_char(ps.started_at at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI') as started_kst,
+            to_char(ps.ended_at   at time zone 'Asia/Seoul', 'YYYY-MM-DD HH24:MI') as ended_kst,
             count(pe.id)::int as marked, coalesce(sum(pe.points),0)::int as penalty
        from patrol_session ps
        left join patrol_event pe on pe.session_id = ps.id
