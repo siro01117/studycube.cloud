@@ -72,6 +72,17 @@ function fmtLeave(min: number): string {
 let seq = 0;
 const uid = () => "id" + Date.now().toString(36) + ++seq;
 
+/** 열려 있을 때 위저드 상단에 보여줄 "언제까지 가능한지" 한 줄. 첫 제출(reason='first', 마감 없음)이면
+ *  안내할 마감이 없어 null. 24시간 유예(reason='grace')는 "왜 지금 열려 있는지"도 같이 알려준다 —
+ *  안 그러면 학생이 왜 마감이 있는지 모른 채 시간에 쫓기게 된다. Hub.tsx 의 같은 이름 로직과 문구를
+ *  맞춘다(허브 카드 배너 ↔ 폼 상단 배너가 다른 말을 하면 혼란스럽다). */
+function scheduleBannerText(state: Extract<EditState, { open: true }>): string | null {
+  if (state.reason === "grace") {
+    return state.until ? `처음 낸 뒤 24시간 동안 고칠 수 있어요 — ${state.until}까지` : "처음 낸 뒤 24시간 동안 고칠 수 있어요";
+  }
+  return state.until ? `${state.until}까지 수정할 수 있어요` : null;
+}
+
 export default function ScheduleForm({ def }: { def: FormDef }) {
   const { identity, hydrated, clear } = useIdentity();
   const router = useRouter();
@@ -133,7 +144,7 @@ export default function ScheduleForm({ def }: { def: FormDef }) {
           lastNote={check.lastNote}
         />
       ) : (
-        <Wizard def={def} identity={identity} onExpired={clear} hubSlug={hubSlug} banner={check.state.until ?? null} onDirtyChange={setDirty} />
+        <Wizard def={def} identity={identity} onExpired={clear} hubSlug={hubSlug} banner={scheduleBannerText(check.state)} onDirtyChange={setDirty} />
       )}
     </FormShell>
   );
@@ -463,7 +474,7 @@ function Wizard({
           }}
         >
           <ClockBadgeIcon />
-          {banner}까지 수정할 수 있어요
+          {banner}
         </div>
       )}
 

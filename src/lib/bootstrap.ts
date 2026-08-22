@@ -117,7 +117,7 @@ const BOOT_LOCK =
 
 // 스키마·시드 내용이 바뀌면 이 값을 올린다. 그때만 DDL 이 다시 돈다.
 // (schema.modules.ts / CORE_SQL / PERMISSIONS / MODULES 를 수정하면 반드시 갱신)
-const SCHEMA_VERSION = "2026-08-21.1"; // schedule_request 확장: req_kind/target_rule_id/days/prev_snapshot(정기 일정 수정·삭제 신청), date nullable
+const SCHEMA_VERSION = "2026-08-22.1"; // schedule_grant.label 추가(입력 기간 화면 통합 — 전체/개별을 한 폼으로)
 
 /** 이미 이 버전으로 부팅된 DB인지 한 번의 쿼리로 판정 */
 async function alreadyBooted(): Promise<boolean> {

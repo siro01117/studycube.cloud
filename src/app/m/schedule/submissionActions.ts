@@ -9,9 +9,9 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { guard } from "@/lib/auth";
 import { dateTimeLabel } from "@/lib/date";
-import { academyToDbFields, type ImportHours, type DbAcademy } from "@/lib/schedule-import";
 import { adaptSubmissionPayload } from "@/lib/schedule-submission";
 import { asJsonObject } from "@/lib/jsonb";
+import { applySubmissionsCore, isScheduleAutoApplyOn, type ApplySubmissionsResult } from "@/lib/schedule-submission-apply";
 
 const s = (v: FormDataEntryValue | null): string => String(v ?? "").trim();
 
@@ -35,7 +35,13 @@ export type SubmissionRow = {
 
 export type BaseHours = { studentId: string; day: number; arrive: number; leave: number };
 export type BaseAcademy = { studentId: string; reason: string; title: string; days: number[]; start: number; end: number };
-export type SubmissionsBase = { submissions: SubmissionRow[]; hours: BaseHours[]; academies: BaseAcademy[] };
+export type SubmissionsBase = {
+  submissions: SubmissionRow[];
+  hours: BaseHours[];
+  academies: BaseAcademy[];
+  /** 지점의 자동 반영 설정(schedule_auto_apply) — 기본 켜짐(isScheduleAutoApplyOn 과 동일 규칙). */
+  autoApply: boolean;
+};
 
 type SubmissionRowDb = {
   id: string;
@@ -57,7 +63,7 @@ export async function loadSubmissionsBase(): Promise<SubmissionsBase> {
   const branchId = me.activeBranchId;
   if (!branchId) throw new Error("소속 지점을 확인할 수 없습니다");
 
-  const [subRows, hoursRows, ruleRows] = await Promise.all([
+  const [subRows, hoursRows, ruleRows, autoApply] = await Promise.all([
     db.query<SubmissionRowDb>(
       `select sub.id, sub.student_id, st.name as student_name, seat.number as seat_number,
               sub.submitter_name, sub.payload, sub.status, sub.note,
@@ -79,6 +85,7 @@ export async function loadSubmissionsBase(): Promise<SubmissionsBase> {
       `select student_id, reason, title, start_min, end_min, days from schedule_rule where branch_id=$1 and kind='academy'`,
       [branchId],
     ),
+    isScheduleAutoApplyOn(branchId),
   ]);
 
   const submissions: SubmissionRow[] = subRows.rows.map((r) => ({
@@ -107,20 +114,25 @@ export async function loadSubmissionsBase(): Promise<SubmissionsBase> {
       start: r.start_min,
       end: r.end_min,
     })),
+    autoApply,
   };
 }
 
-// ---------------- 반영 ----------------
-// 클라가 보낸 hours/academies 를 신뢰하지 않는다 — 승인은 신뢰 판정이라, 선택된 submission id 만 받아
-// DB의 payload 를 서버에서 다시 조회·검증해서 쓴다(JSON 일괄 반영의 applyImportSelection 과 다른 점 —
-// 그쪽은 업로드된 파일이 애초에 서버가 모르는 새 데이터라 클라가 정제한 값을 그대로 받는 게 맞지만,
-// 여기는 이미 DB에 있는 제출을 "그대로 반영"하는 것이므로 재조회가 맞다).
-export type ApplySubmissionsResult = {
-  applied: number;
-  appliedIds: string[]; // 반영에 성공한 submission id
-  failed: { id: string; name: string; error: string }[];
-};
+// ---------------- 자동 반영 설정 ----------------
+export async function setAutoApply(on: boolean): Promise<void> {
+  const me = await guard("schedule.manage");
+  await db.query(
+    `insert into branch_setting(branch_id, key, value) values ($1,'schedule_auto_apply',$2)
+     on conflict (branch_id, key) do update set value=excluded.value, updated_at=now()`,
+    [me.activeBranchId, on ? "1" : "0"],
+  );
+  revalidatePath("/m/schedule");
+}
 
+// ---------------- 반영 ----------------
+// 실제 반영 로직(재조회·검증·delete+insert)은 src/lib/schedule-submission-apply.ts applySubmissionsCore
+// 하나로 통일돼 있다 — 자동 반영(f/actions.ts submitForm)도 같은 함수를 그대로 쓴다(두 경로가 갈리면
+// "자동 반영"과 "관리자가 수동 반영"의 결과가 달라질 수 있다). 여기서는 권한(guard)과 id 파싱만 맡는다.
 export async function applySubmissions(idsJson: string): Promise<ApplySubmissionsResult> {
   const me = await guard("schedule.manage");
   const branchId = me.activeBranchId;
@@ -133,126 +145,21 @@ export async function applySubmissions(idsJson: string): Promise<ApplySubmission
     throw new Error("입력값을 확인하세요");
   }
   if (!Array.isArray(ids)) throw new Error("입력값을 확인하세요");
-  const uniqIds = [...new Set(ids.filter((x): x is string => typeof x === "string" && x.length > 0))];
-  if (uniqIds.length === 0) return { applied: 0, appliedIds: [], failed: [] };
+  const uniqIds = ids.filter((x): x is string => typeof x === "string" && x.length > 0);
 
-  const params: string[] = [branchId];
-  const ph = uniqIds.map((id) => {
-    params.push(id);
-    return `$${params.length}`;
-  });
-  const rows = await db.query<{ id: string; student_id: string | null; student_name: string | null; payload: unknown; status: string }>(
-    `select sub.id, sub.student_id, st.name as student_name, sub.payload, sub.status
-       from submission sub
-       left join student st on st.id = sub.student_id and st.status='enrolled'
-      where sub.branch_id=$1 and sub.type='schedule' and sub.id in (${ph.join(",")})`,
-    params,
-  );
-  const found = new Map(rows.rows.map((r) => [r.id, r]));
-
-  const failed: { id: string; name: string; error: string }[] = [];
-  const usable: { id: string; studentId: string; hours: ImportHours[]; academies: DbAcademy[] }[] = [];
-  const seenStudents = new Set<string>();
-
-  for (const id of uniqIds) {
-    const row = found.get(id);
-    if (!row) {
-      failed.push({ id, name: "-", error: "제출을 찾을 수 없습니다" });
-      continue;
-    }
-    if (row.status !== "pending") {
-      failed.push({ id, name: row.student_name ?? "-", error: "대기 중 상태가 아닙니다" });
-      continue;
-    }
-    if (!row.student_id || !row.student_name) {
-      failed.push({ id, name: row.student_name ?? "-", error: "재원생이 아닙니다(학생 정보 없음)" });
-      continue;
-    }
-    if (seenStudents.has(row.student_id)) {
-      failed.push({ id, name: row.student_name, error: "같은 학생의 다른 제출과 중복됩니다" });
-      continue;
-    }
-    const result = adaptSubmissionPayload(row.payload, row.student_name, null, 0);
-    if (!result.ok) {
-      failed.push({ id, name: row.student_name, error: result.error });
-      continue;
-    }
-    seenStudents.add(row.student_id);
-    usable.push({
-      id,
-      studentId: row.student_id,
-      hours: result.student.hours,
-      academies: result.student.academies.map(academyToDbFields),
-    });
-  }
-
-  if (usable.length === 0) return { applied: 0, appliedIds: [], failed };
-
-  const targetStudentIds = usable.map((u) => u.studentId);
-
-  // 기존 등하원 전부 + schedule_rule(kind='academy') 만 지우고 새로 넣는다(임시 일정·예외·다른 사유 보존).
-  {
-    const delParams: string[] = [branchId];
-    const delPh = targetStudentIds.map((id) => {
-      delParams.push(id);
-      return `$${delParams.length}`;
-    });
-    await db.query(`delete from schedule_hours where branch_id=$1 and student_id in (${delPh.join(",")})`, delParams);
-    await db.query(`delete from schedule_rule where branch_id=$1 and kind='academy' and student_id in (${delPh.join(",")})`, delParams);
-  }
-
-  {
-    const insParams: (string | number)[] = [branchId];
-    const values: string[] = [];
-    for (const item of usable) {
-      for (const h of item.hours) {
-        const base = insParams.length;
-        insParams.push(item.studentId, h.day, h.arrive, h.leave);
-        values.push(`($1,$${base + 1},$${base + 2},$${base + 3},$${base + 4})`);
-      }
-    }
-    if (values.length > 0) {
-      await db.query(
-        `insert into schedule_hours(branch_id, student_id, day, arrive_min, leave_min) values ${values.join(",")}`,
-        insParams,
-      );
-    }
-  }
-
-  {
-    const insParams: (string | number)[] = [branchId];
-    const values: string[] = [];
-    for (const item of usable) {
-      for (const a of item.academies) {
-        const daysCsv = [...new Set(a.days)].sort((x, y) => x - y).join(",");
-        const base = insParams.length;
-        insParams.push(item.studentId, a.reason, a.title, a.start, a.end, daysCsv);
-        values.push(`($1,$${base + 1},$${base + 2},'academy',$${base + 3},$${base + 4},$${base + 5},$${base + 6})`);
-      }
-    }
-    if (values.length > 0) {
-      await db.query(
-        `insert into schedule_rule(branch_id, student_id, reason, kind, title, start_min, end_min, days) values ${values.join(",")}`,
-        insParams,
-      );
-    }
-  }
-
-  {
+  const result = await applySubmissionsCore(branchId, uniqIds);
+  // processed_by 는 applySubmissionsCore 가 null 로 남기므로(자동 반영엔 처리자가 없다), 관리자가
+  // 직접 반영한 건은 여기서 me.id 로 덮어써서 "처리 M월 D일 HH:MM (이름)" 이 정확히 보이게 한다.
+  if (result.appliedIds.length > 0) {
     const updParams: string[] = [me.id, branchId];
-    const updPh = usable.map((u) => {
-      updParams.push(u.id);
+    const ph = result.appliedIds.map((id) => {
+      updParams.push(id);
       return `$${updParams.length}`;
     });
-    await db.query(
-      `update submission set status='done', note=null, processed_by=$1, processed_at=now()
-        where branch_id=$2 and id in (${updPh.join(",")})`,
-      updParams,
-    );
+    await db.query(`update submission set processed_by=$1 where branch_id=$2 and id in (${ph.join(",")})`, updParams);
   }
-
   revalidatePath("/m/schedule");
-  return { applied: usable.length, appliedIds: usable.map((u) => u.id), failed };
+  return result;
 }
 
 // ---------------- 반려 ----------------
@@ -270,30 +177,66 @@ export async function rejectSubmission(formData: FormData): Promise<void> {
   revalidatePath("/m/schedule");
 }
 
-// ---------------- 테스트 제출 삭제 ----------------
-// 개발 중 "테스트로 건너뛰기"(f/actions.ts testBypass)로 만들어진 제출은 실제 학생 데이터가 아니라
-// 목록에 계속 남아 있어도 반영할 수 없다 — 행에서 바로 지울 수 있게 한다. 실제 학생 제출을 실수로
-// 지우는 사고를 막기 위해, 클라가 어떤 값을 보내든 서버가 "테스트 제출인지"를 다시 판정해서 아니면
-// 거부한다(payload._test===true 이거나 student_id 가 null인 경우만 — SubmissionsView.tsx 의 판정과 동일).
-export async function deleteSubmission(id: string): Promise<void> {
+// ---------------- 삭제(테스트 제출 · 처리 끝난 제출) ----------------
+// 삭제 가능한 건: (1) 테스트 제출(payload._test===true 이거나 student_id 가 null) — 실제 학생 데이터가
+// 아니므로 상태와 무관하게 삭제 가능, (2) 처리가 끝난 제출(status='done'|'rejected') — 검토가 이미
+// 끝나 시간표(또는 반려 사유)에 결과가 남아있으므로 기록만 지워도 안전하다.
+// 대기 중(pending)인 진짜 제출은 여기서 막는다 — 실수로 지우면 검토 대상이 통째로 사라지고 학생에게는
+// 아무 처리도 안 된 것처럼 보인다. 화면(SubmissionsView.tsx)은 그 경우 삭제 버튼을 비활성화하고
+// "반려한 뒤 삭제하세요" 안내만 보여주지만, 클라가 어떤 값을 보내든 서버가 다시 판정해서 거부한다.
+export type DeleteSubmissionsResult = { deleted: number; failed: { id: string; error: string }[] };
+
+function isDeletablePayload(payload: unknown, studentId: string | null): boolean {
+  return asJsonObject(payload)?._test === true || studentId == null;
+}
+
+export async function deleteSubmissions(idsJson: string): Promise<DeleteSubmissionsResult> {
   const me = await guard("schedule.manage");
   const branchId = me.activeBranchId;
   if (!branchId) throw new Error("소속 지점을 확인할 수 없습니다");
-  if (!id) throw new Error("요청을 확인하세요");
 
-  const rows = await db.query<{ id: string; student_id: string | null; payload: unknown }>(
-    `select id, student_id, payload from submission where id=$1 and branch_id=$2 and type='schedule'`,
-    [id, branchId],
+  let ids: unknown;
+  try {
+    ids = JSON.parse(idsJson);
+  } catch {
+    throw new Error("입력값을 확인하세요");
+  }
+  if (!Array.isArray(ids)) throw new Error("입력값을 확인하세요");
+  const uniqIds = [...new Set(ids.filter((x): x is string => typeof x === "string" && x.length > 0))];
+  if (uniqIds.length === 0) return { deleted: 0, failed: [] };
+
+  const params: string[] = [branchId];
+  const ph = uniqIds.map((id) => {
+    params.push(id);
+    return `$${params.length}`;
+  });
+  const rows = await db.query<{ id: string; student_id: string | null; payload: unknown; status: string }>(
+    `select id, student_id, payload, status from submission where branch_id=$1 and type='schedule' and id in (${ph.join(",")})`,
+    params,
   );
-  const row = rows.rows[0];
-  if (!row) throw new Error("제출을 찾을 수 없습니다");
+  const found = new Map(rows.rows.map((r) => [r.id, r]));
 
-  // 운영에서는 jsonb 가 문자열로 온다(lib/jsonb.ts) — 정규화 후 판정한다.
-  const isTestPayload = asJsonObject(row.payload)?._test === true;
-  if (!isTestPayload && row.student_id != null) {
-    throw new Error("테스트 제출만 삭제할 수 있습니다");
+  const deletableIds: string[] = [];
+  const failed: { id: string; error: string }[] = [];
+  for (const id of uniqIds) {
+    const row = found.get(id);
+    if (!row) { failed.push({ id, error: "제출을 찾을 수 없습니다" }); continue; }
+    const isTest = isDeletablePayload(row.payload, row.student_id);
+    if (isTest || row.status === "done" || row.status === "rejected") {
+      deletableIds.push(id);
+    } else {
+      failed.push({ id, error: "대기 중인 제출은 반려한 뒤 삭제할 수 있습니다" });
+    }
   }
 
-  await db.query(`delete from submission where id=$1 and branch_id=$2`, [id, branchId]);
+  if (deletableIds.length === 0) return { deleted: 0, failed };
+
+  const delParams: string[] = [branchId];
+  const delPh = deletableIds.map((id) => {
+    delParams.push(id);
+    return `$${delParams.length}`;
+  });
+  await db.query(`delete from submission where branch_id=$1 and id in (${delPh.join(",")})`, delParams);
   revalidatePath("/m/schedule");
+  return { deleted: deletableIds.length, failed };
 }

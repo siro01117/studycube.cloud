@@ -7,18 +7,13 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { guard } from "@/lib/auth";
-import { dateTimeLabel } from "@/lib/date";
+import { dateTimeLabel, kstDateTimeLocal } from "@/lib/date";
 import { evaluateEdit, type EditDecision, type TimeRange } from "@/lib/schedule-window";
 import { getFormSlugByType } from "@/app/f/registry";
 
 const SCHEDULE_SLUG = getFormSlugByType("schedule") ?? "sch9m2vt";
 
 export type PeriodStatus = "upcoming" | "active" | "ended";
-export type WindowRow = { id: string; label: string | null; opensLabel: string; closesLabel: string; status: PeriodStatus };
-export type GrantRow = {
-  id: string; studentId: string; studentName: string; opensLabel: string; closesLabel: string;
-  note: string | null; status: PeriodStatus;
-};
 export type SubmissionStatusRow = {
   studentId: string; studentName: string; seatNumber: number | null;
   submitted: boolean; lastSubmittedLabel: string | null; editable: boolean; reasonLabel: string;
@@ -40,105 +35,163 @@ function kstToInstant(v: string): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-// ---------------- 입력 기간(schedule_window) ----------------
-export async function listWindows(): Promise<WindowRow[]> {
+// ---------------- 입력 기간 — 하나의 폼(대상: 전체 학생 / 특정 학생)으로 통합 ----------------
+// schedule_window(대상=전체 학생, 학생 없음)와 schedule_grant(대상=특정 학생 1명)는 테이블은 그대로 두고
+// 화면·서버액션만 하나로 합친다 — 라벨(공통 입력)을 grant 에도 저장할 수 있도록 schedule_grant.label
+// 컬럼만 추가했다(schema.modules.ts, SCHEMA_VERSION 2026-08-22.1).
+export type OpeningKind = "window" | "grant";
+export type OpeningRow = {
+  id: string;
+  kind: OpeningKind;
+  label: string | null;
+  target: string; // "전체 학생" 또는 학생 이름
+  opensLabel: string;
+  closesLabel: string;
+  note: string | null;
+  status: PeriodStatus;
+};
+
+const STATUS_WEIGHT: Record<PeriodStatus, number> = { active: 0, upcoming: 1, ended: 2 };
+
+/** 입력 기간(전체) + 개별 개방을 하나의 목록으로 합쳐서 내려준다 — 진행중을 위로, 종료를 아래로
+ *  (상태 우선, 같은 상태끼리는 시작 시각이 이른 순). 학생별 루프 쿼리 없이 두 테이블을 한 번씩만 읽는다. */
+export async function listOpenings(): Promise<OpeningRow[]> {
   const me = await guard("schedule.view");
-  const r = await db.query<{ id: string; label: string | null; opens_at: string; closes_at: string }>(
-    `select id, label, opens_at, closes_at from schedule_window where branch_id=$1 order by opens_at desc`,
-    [me.activeBranchId],
-  );
+  const branchId = me.activeBranchId;
+  const [winRows, grantRows] = await Promise.all([
+    db.query<{ id: string; label: string | null; opens_at: string; closes_at: string }>(
+      `select id, label, opens_at, closes_at from schedule_window where branch_id=$1`,
+      [branchId],
+    ),
+    db.query<{ id: string; label: string | null; student_name: string; opens_at: string; closes_at: string; note: string | null }>(
+      `select g.id, g.label, st.name as student_name, g.opens_at, g.closes_at, g.note
+         from schedule_grant g
+         join student st on st.id = g.student_id
+        where g.branch_id=$1`,
+      [branchId],
+    ),
+  ]);
+
   const now = new Date();
-  return r.rows.map((row) => ({
-    id: row.id,
-    label: row.label,
-    opensLabel: dateTimeLabel(row.opens_at),
-    closesLabel: dateTimeLabel(row.closes_at),
-    status: statusOf(new Date(row.opens_at), new Date(row.closes_at), now),
-  }));
+  const merged: (OpeningRow & { opensAtMs: number })[] = [
+    ...winRows.rows.map((r) => {
+      const opensAt = new Date(r.opens_at);
+      const closesAt = new Date(r.closes_at);
+      return {
+        id: r.id, kind: "window" as const, label: r.label, target: "전체 학생",
+        opensLabel: dateTimeLabel(r.opens_at), closesLabel: dateTimeLabel(r.closes_at), note: null,
+        status: statusOf(opensAt, closesAt, now), opensAtMs: opensAt.getTime(),
+      };
+    }),
+    ...grantRows.rows.map((r) => {
+      const opensAt = new Date(r.opens_at);
+      const closesAt = new Date(r.closes_at);
+      return {
+        id: r.id, kind: "grant" as const, label: r.label, target: r.student_name,
+        opensLabel: dateTimeLabel(r.opens_at), closesLabel: dateTimeLabel(r.closes_at), note: r.note,
+        status: statusOf(opensAt, closesAt, now), opensAtMs: opensAt.getTime(),
+      };
+    }),
+  ];
+  merged.sort((a, b) => STATUS_WEIGHT[a.status] - STATUS_WEIGHT[b.status] || a.opensAtMs - b.opensAtMs);
+  return merged.map(({ opensAtMs: _drop, ...row }) => row);
 }
 
-export async function createWindow(fd: FormData): Promise<WindowRow> {
+/** 오늘(KST) 기준 시작·종료 기본값 — 시작=지금, 종료=7일 뒤 23:59. 클라 렌더에서 new Date() 를 쓰지
+ *  않도록 폼이 마운트될 때 이 서버액션으로 값을 받아 채운다. */
+export async function getOpeningDateDefaults(): Promise<{ start: string; end: string }> {
+  const now = new Date();
+  const end = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  // 날짜(KST)만 7일 뒤 것을 쓰고 시각은 23:59 로 고정 — "그날 안에는 다 받는다"는 취지의 기본값.
+  const endDatePart = kstDateTimeLocal(end).slice(0, 10);
+  return { start: kstDateTimeLocal(now), end: `${endDatePart}T23:59` };
+}
+
+/** FormData 필드: target("all"|"students"), studentIds(JSON 문자열 배열, target=students 일 때),
+ *  label, opensAt, closesAt(datetime-local, KST), note. target=all 이면 schedule_window 1행,
+ *  target=students 면 선택된 학생마다 schedule_grant 1행씩(한 번의 다중 VALUES insert로, 학생별
+ *  왕복 없이) 만든다. */
+export async function createOpening(fd: FormData): Promise<OpeningRow[]> {
   const me = await guard("schedule.manage");
+  const branchId = me.activeBranchId;
+  if (!branchId) throw new Error("소속 지점을 확인할 수 없습니다");
+
+  const target = s(fd.get("target"));
   const label = s(fd.get("label")) || null;
-  const opensAt = kstToInstant(s(fd.get("opensAt")));
-  const closesAt = kstToInstant(s(fd.get("closesAt")));
-  if (!opensAt || !closesAt) throw new Error("시작·종료 시각을 확인하세요");
-  if (closesAt <= opensAt) throw new Error("종료 시각은 시작 시각보다 뒤여야 합니다");
-
-  const row = await db.query<{ id: string; label: string | null; opens_at: string; closes_at: string }>(
-    `insert into schedule_window(branch_id, label, opens_at, closes_at, created_by)
-     values ($1,$2,$3,$4,$5)
-     returning id, label, opens_at, closes_at`,
-    [me.activeBranchId, label, opensAt.toISOString(), closesAt.toISOString(), me.id],
-  );
-  const r = row.rows[0];
-  if (!r) throw new Error("저장에 실패했습니다");
-  revalidatePath("/m/schedule");
-  const now = new Date();
-  return {
-    id: r.id, label: r.label, opensLabel: dateTimeLabel(r.opens_at), closesLabel: dateTimeLabel(r.closes_at),
-    status: statusOf(new Date(r.opens_at), new Date(r.closes_at), now),
-  };
-}
-
-export async function deleteWindow(id: string): Promise<void> {
-  const me = await guard("schedule.manage");
-  await db.query(`delete from schedule_window where id=$1 and branch_id=$2`, [id, me.activeBranchId]);
-  revalidatePath("/m/schedule");
-}
-
-// ---------------- 개별 개방(schedule_grant) ----------------
-export async function listGrants(): Promise<GrantRow[]> {
-  const me = await guard("schedule.view");
-  const r = await db.query<{ id: string; student_id: string; student_name: string; opens_at: string; closes_at: string; note: string | null }>(
-    `select g.id, g.student_id, st.name as student_name, g.opens_at, g.closes_at, g.note
-       from schedule_grant g
-       join student st on st.id = g.student_id
-      where g.branch_id=$1
-      order by g.opens_at desc`,
-    [me.activeBranchId],
-  );
-  const now = new Date();
-  return r.rows.map((row) => ({
-    id: row.id, studentId: row.student_id, studentName: row.student_name,
-    opensLabel: dateTimeLabel(row.opens_at), closesLabel: dateTimeLabel(row.closes_at), note: row.note,
-    status: statusOf(new Date(row.opens_at), new Date(row.closes_at), now),
-  }));
-}
-
-export async function createGrant(fd: FormData): Promise<GrantRow> {
-  const me = await guard("schedule.manage");
-  const studentId = s(fd.get("studentId"));
   const note = s(fd.get("note")) || null;
   const opensAt = kstToInstant(s(fd.get("opensAt")));
   const closesAt = kstToInstant(s(fd.get("closesAt")));
-  if (!studentId) throw new Error("학생을 선택하세요");
   if (!opensAt || !closesAt) throw new Error("시작·종료 시각을 확인하세요");
   if (closesAt <= opensAt) throw new Error("종료 시각은 시작 시각보다 뒤여야 합니다");
 
-  // 이 지점 학생인지 확인하며 삽입(다른 지점 studentId 로 개방을 만들 수 없게).
-  const ins = await db.query<{ id: string; student_id: string; opens_at: string; closes_at: string; note: string | null }>(
-    `insert into schedule_grant(branch_id, student_id, opens_at, closes_at, note, created_by)
-     select $1, st.id, $3, $4, $5, $6 from student st where st.id=$2 and st.branch_id=$1
-     returning id, student_id, opens_at, closes_at, note`,
-    [me.activeBranchId, studentId, opensAt.toISOString(), closesAt.toISOString(), note, me.id],
+  if (target === "all") {
+    const row = await db.query<{ id: string; label: string | null; opens_at: string; closes_at: string }>(
+      `insert into schedule_window(branch_id, label, opens_at, closes_at, created_by)
+       values ($1,$2,$3,$4,$5)
+       returning id, label, opens_at, closes_at`,
+      [branchId, label, opensAt.toISOString(), closesAt.toISOString(), me.id],
+    );
+    const r = row.rows[0];
+    if (!r) throw new Error("저장에 실패했습니다");
+    revalidatePath("/m/schedule");
+    const now = new Date();
+    return [{
+      id: r.id, kind: "window", label: r.label, target: "전체 학생",
+      opensLabel: dateTimeLabel(r.opens_at), closesLabel: dateTimeLabel(r.closes_at), note: null,
+      status: statusOf(new Date(r.opens_at), new Date(r.closes_at), now),
+    }];
+  }
+
+  if (target !== "students") throw new Error("대상을 선택하세요");
+  let studentIds: unknown;
+  try {
+    studentIds = JSON.parse(s(fd.get("studentIds")) || "[]");
+  } catch {
+    throw new Error("학생 선택을 확인하세요");
+  }
+  const uniqIds = Array.isArray(studentIds)
+    ? [...new Set(studentIds.filter((x): x is string => typeof x === "string" && x.length > 0))]
+    : [];
+  if (uniqIds.length === 0) throw new Error("학생을 1명 이상 선택하세요");
+
+  // 이 지점 학생인지 확인하며 한 번의 다중 VALUES insert(학생별 왕복 쿼리 없이).
+  const params: (string | number | null)[] = [branchId, label, opensAt.toISOString(), closesAt.toISOString(), note, me.id];
+  const values = uniqIds.map((id) => {
+    params.push(id);
+    return `($1,$${params.length},$2,$3,$4,$5,$6)`;
+  });
+  const ins = await db.query<{ id: string; student_id: string; label: string | null; opens_at: string; closes_at: string; note: string | null }>(
+    `insert into schedule_grant(branch_id, student_id, label, opens_at, closes_at, note, created_by)
+     select v.branch_id, v.student_id, v.label, v.opens_at, v.closes_at, v.note, v.created_by
+       from (values ${values.join(",")}) as v(branch_id, student_id, label, opens_at, closes_at, note, created_by)
+       join student st on st.id = v.student_id and st.branch_id = v.branch_id
+     returning id, student_id, label, opens_at, closes_at, note`,
+    params,
   );
-  const r = ins.rows[0];
-  if (!r) throw new Error("학생을 찾을 수 없습니다");
-  const nameRow = await db.query<{ name: string }>(`select name from student where id=$1`, [r.student_id]);
+  if (ins.rows.length === 0) throw new Error("학생을 찾을 수 없습니다");
+
+  const nameRows = await db.query<{ id: string; name: string }>(
+    `select id, name from student where id in (${ins.rows.map((_, i) => `$${i + 1}`).join(",")})`,
+    ins.rows.map((r) => r.student_id),
+  );
+  const nameOf = new Map(nameRows.rows.map((r) => [r.id, r.name]));
 
   revalidatePath("/m/schedule");
   const now = new Date();
-  return {
-    id: r.id, studentId: r.student_id, studentName: nameRow.rows[0]?.name ?? "",
+  return ins.rows.map((r) => ({
+    id: r.id, kind: "grant" as const, label: r.label, target: nameOf.get(r.student_id) ?? "",
     opensLabel: dateTimeLabel(r.opens_at), closesLabel: dateTimeLabel(r.closes_at), note: r.note,
     status: statusOf(new Date(r.opens_at), new Date(r.closes_at), now),
-  };
+  }));
 }
 
-export async function deleteGrant(id: string): Promise<void> {
+export async function deleteOpening(id: string, kind: OpeningKind): Promise<void> {
   const me = await guard("schedule.manage");
-  await db.query(`delete from schedule_grant where id=$1 and branch_id=$2`, [id, me.activeBranchId]);
+  if (kind === "window") {
+    await db.query(`delete from schedule_window where id=$1 and branch_id=$2`, [id, me.activeBranchId]);
+  } else {
+    await db.query(`delete from schedule_grant where id=$1 and branch_id=$2`, [id, me.activeBranchId]);
+  }
   revalidatePath("/m/schedule");
 }
 

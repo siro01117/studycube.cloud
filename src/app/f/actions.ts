@@ -6,6 +6,7 @@ import { ready } from "@/lib/bootstrap";
 import { findStudent, publicAuthError } from "@/lib/public-auth";
 import { resolveEditState } from "@/lib/schedule-window-server";
 import { SCHEDULE_MIN_MIN, SCHEDULE_MAX_MIN } from "@/lib/schedule-import";
+import { applySubmissionsCore, isScheduleAutoApplyOn } from "@/lib/schedule-submission-apply";
 import { getForm } from "./registry";
 
 const s = (v: FormDataEntryValue | null): string => String(v ?? "").trim();
@@ -197,6 +198,7 @@ export async function submitForm(formData: FormData): Promise<SubmitResult> {
   const payloadJson = JSON.stringify({ ...payload, _slug: slug, ...(testBypass ? { _test: true } : {}) });
 
   // 같은 학생 + 같은 슬러그 재제출 → 기본은 기존 행 갱신(폼 정의에 multiple:true 면 새로 쌓음).
+  let submissionId: string | null = null;
   if (studentId && !def.multiple) {
     const existing = await db.query<{ id: string }>(
       `select id from submission
@@ -205,21 +207,41 @@ export async function submitForm(formData: FormData): Promise<SubmitResult> {
       [branch, studentId, def.type, slug],
     );
     if (existing.rows[0]) {
+      submissionId = existing.rows[0].id;
       await db.query(
         `update submission
             set payload=$1::jsonb, submitter_name=$2, submitter_phone=$3,
                 status='pending', note=null, created_at=now()
           where id=$4`,
-        [payloadJson, submitterName, submitterPhone, existing.rows[0].id],
+        [payloadJson, submitterName, submitterPhone, submissionId],
       );
-      return { ok: true };
     }
   }
 
-  await db.query(
-    `insert into submission(branch_id, type, student_id, submitter_name, submitter_phone, payload, status, first_submitted_at)
-     values ($1,$2,$3,$4,$5,$6::jsonb,'pending',now())`,
-    [branch, def.type, studentId, submitterName, submitterPhone, payloadJson],
-  );
+  if (submissionId == null) {
+    const ins = await db.query<{ id: string }>(
+      `insert into submission(branch_id, type, student_id, submitter_name, submitter_phone, payload, status, first_submitted_at)
+       values ($1,$2,$3,$4,$5,$6::jsonb,'pending',now())
+       returning id`,
+      [branch, def.type, studentId, submitterName, submitterPhone, payloadJson],
+    );
+    submissionId = ins.rows[0]?.id ?? null;
+  }
+
+  // 정기 스케쥴 제출은 방학·개학처럼 빈도가 낮고 신뢰도가 높아 "제출하면 즉시 시간표에 반영"이 기본이다
+  // (지점 설정 schedule_auto_apply, 기본 켜짐 — 설정 행이 없는 새 지점도 켜진 것으로 간주).
+  // 관리자 "제출 반영" 화면의 수동 반영과 완전히 같은 경로(applySubmissionsCore)를 타야 결과가 갈리지
+  // 않는다. 형식 오류·학생 미연결 등으로 실패하면 조용히 넘기지 않고 pending 상태로 남기고 사유를
+  // submission.note 에 적어 관리자 화면(제출 반영 탭)에서 바로 보이게 한다.
+  if (def.type === "schedule" && studentId && !testBypass && submissionId) {
+    const autoOn = await isScheduleAutoApplyOn(branch);
+    if (autoOn) {
+      const result = await applySubmissionsCore(branch, [submissionId]);
+      if (result.applied === 0 && result.failed[0]) {
+        await db.query(`update submission set note=$1 where id=$2 and status='pending'`, [result.failed[0].error, submissionId]);
+      }
+    }
+  }
+
   return { ok: true };
 }

@@ -6,9 +6,10 @@
 // 그 로직이 받는 모양으로 감싸는 어댑터만 src/lib/schedule-submission.ts 에 따로 뒀다(재사용 원칙).
 import { Fragment, useEffect, useMemo, useState } from "react";
 import {
-  loadSubmissionsBase, applySubmissions, rejectSubmission, deleteSubmission,
-  type SubmissionRow, type SubmissionsBase, type SubStatus, type ApplySubmissionsResult,
+  loadSubmissionsBase, applySubmissions, rejectSubmission, deleteSubmissions, setAutoApply,
+  type SubmissionRow, type SubmissionsBase, type SubStatus,
 } from "./submissionActions";
+import type { ApplySubmissionsResult } from "@/lib/schedule-submission-apply";
 import { diffAgainstExisting, academyToDbFields, type DiffStatus, type ImportHours, type DbAcademy } from "@/lib/schedule-import";
 import { adaptSubmissionPayload } from "@/lib/schedule-submission";
 import { blockStyleOf } from "@/lib/schedule";
@@ -44,6 +45,22 @@ function IconChevron({ open }: { open: boolean }) {
     </svg>
   );
 }
+function IconToggleOn() {
+  return (
+    <svg width="30" height="18" viewBox="0 0 30 18" fill="none">
+      <rect x="0.5" y="0.5" width="29" height="17" rx="8.5" fill="var(--accent)" stroke="var(--accent)" />
+      <circle cx="21" cy="9" r="6.5" fill="#fff" />
+    </svg>
+  );
+}
+function IconToggleOff() {
+  return (
+    <svg width="30" height="18" viewBox="0 0 30 18" fill="none">
+      <rect x="0.5" y="0.5" width="29" height="17" rx="8.5" fill="var(--panel2)" stroke="var(--line)" />
+      <circle cx="9" cy="9" r="6.5" fill="#fff" stroke="var(--line)" />
+    </svg>
+  );
+}
 
 const th: React.CSSProperties = { textAlign: "left", padding: "7px 10px", fontSize: 11.5, fontWeight: 700, color: "var(--faint)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
 const td: React.CSSProperties = { padding: "9px 10px", fontSize: 13, borderBottom: "1px solid var(--line)", verticalAlign: "middle" };
@@ -66,7 +83,7 @@ const testChip = { label: "테스트", fg: "var(--faint)", bg: "var(--panel2)" }
 const unlinkedChip = { label: "학생 미연결", fg: "var(--warn)", bg: "var(--warn-soft)" };
 
 /** submission.payload._test === true 인지 — f/actions.ts 의 개발용 "테스트로 건너뛰기" 우회로 만들어진
- *  제출의 표식. 이 판정은 서버(submissionActions.ts deleteSubmission)에도 동일하게 있다(단일 출처는
+ *  제출의 표식. 이 판정은 서버(submissionActions.ts deleteSubmissions)에도 동일하게 있다(단일 출처는
  *  아니지만, 클라는 UI 판단용이고 서버는 삭제 허용 여부의 최종 방어선이라 각자 필요 — 재계산 비용도 없다). */
 function isTestPayload(payload: unknown): boolean {
   // 운영에서는 jsonb 가 문자열로 온다(lib/jsonb.ts 주석 참고) — asJsonObject 로 먼저 정규화한다.
@@ -107,6 +124,9 @@ type Row = {
   // 진짜 신원이 있었는데(student_id 있음) 조인된 학생 행을 못 찾은 경우 — isTest 와는 다른 문제라
   // 별도로 표시한다(학생이 지워졌거나 하는 드문 경우).
   isUnlinked: boolean;
+  // 삭제 가능 여부 — 테스트 제출은 언제나, 실제 제출은 처리(반영·반려)가 끝난 뒤에만(서버
+  // deleteSubmissions 의 판정과 동일 규칙). 대기 중인 진짜 제출은 반려부터 하도록 유도한다.
+  deletable: boolean;
 };
 
 function buildRows(base: SubmissionsBase): Row[] {
@@ -129,11 +149,12 @@ function buildRows(base: SubmissionsBase): Row[] {
     const existingAcademies = sub.studentId ? (acadByStudent.get(sub.studentId) ?? []) : [];
     const isTest = isTestPayload(sub.payload) || sub.studentId == null;
     const isUnlinked = !isTest && !sub.studentMatched;
+    const deletable = isTest || sub.status !== "pending";
     if (!result.ok) {
       return {
         submission: sub, parseOk: false, parseError: result.error,
         hours: [], restDays: [], academies: [], diffStatus: "n/a", diffDetail: "",
-        existingHours, existingAcademies, isTest, isUnlinked,
+        existingHours, existingAcademies, isTest, isUnlinked, deletable,
       };
     }
     const st = result.student;
@@ -148,7 +169,7 @@ function buildRows(base: SubmissionsBase): Row[] {
     return {
       submission: sub, parseOk: true,
       hours: st.hours, restDays: st.restDays, academies: dbAcademies,
-      diffStatus, diffDetail, existingHours, existingAcademies, isTest, isUnlinked,
+      diffStatus, diffDetail, existingHours, existingAcademies, isTest, isUnlinked, deletable,
     };
   });
 }
@@ -166,6 +187,10 @@ export default function SubmissionsView() {
   const [rowBusy, setRowBusy] = useState<string | null>(null);
   const [rowErr, setRowErr] = useState<{ id: string; msg: string } | null>(null);
   const [showTestRows, setShowTestRows] = useState(false); // 테스트 제출 — 기본은 숨김
+  const [delSelected, setDelSelected] = useState<Set<string>>(new Set()); // 삭제 대상(처리 끝난 제출·테스트 제출)으로 고른 행
+  const [deleting, setDeleting] = useState(false);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
+  const [autoBusy, setAutoBusy] = useState(false);
 
   const reload = () => {
     loadSubmissionsBase()
@@ -181,6 +206,9 @@ export default function SubmissionsView() {
           }
         }
         setSelected(def);
+        // 삭제 선택도 새로 불러온 목록에 없는(또는 더 이상 삭제 가능하지 않은) id 는 정리한다.
+        const stillDeletable = new Set(rows.filter((r) => r.deletable).map((r) => r.submission.id));
+        setDelSelected((prev) => new Set([...prev].filter((id) => stillDeletable.has(id))));
       })
       .catch((e) => setLoadErr(e instanceof Error ? e.message : "불러오기에 실패했습니다"));
   };
@@ -245,13 +273,21 @@ export default function SubmissionsView() {
     }
   };
 
-  const doDelete = async (id: string) => {
-    if (!window.confirm("테스트 제출을 삭제할까요? 되돌릴 수 없습니다.")) return;
+  const toggleDelOne = (id: string, on: boolean) =>
+    setDelSelected((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id); else next.delete(id);
+      return next;
+    });
+
+  const doDeleteOne = async (id: string) => {
+    if (!window.confirm("이 제출을 삭제할까요? 되돌릴 수 없습니다.")) return;
     setRowBusy(id);
     setRowErr(null);
     try {
-      await deleteSubmission(id);
-      setSelected((prev) => {
+      const r = await deleteSubmissions(JSON.stringify([id]));
+      if (r.failed.length > 0) throw new Error(r.failed[0].error);
+      setDelSelected((prev) => {
         if (!prev.has(id)) return prev;
         const next = new Set(prev);
         next.delete(id);
@@ -262,6 +298,39 @@ export default function SubmissionsView() {
       setRowErr({ id, msg: e instanceof Error ? e.message : "삭제에 실패했습니다" });
     } finally {
       setRowBusy(null);
+    }
+  };
+
+  const doDeleteSelected = async () => {
+    if (deleting || delSelected.size === 0) return;
+    if (!window.confirm(`선택한 제출 ${delSelected.size}건을 삭제할까요? 되돌릴 수 없습니다.`)) return;
+    setDeleting(true);
+    setDeleteErr(null);
+    try {
+      const r = await deleteSubmissions(JSON.stringify([...delSelected]));
+      if (r.failed.length > 0) {
+        setDeleteErr(`${r.deleted}건 삭제됨 · ${r.failed.length}건 실패: ${r.failed[0].error}`);
+      }
+      setDelSelected(new Set());
+      reload();
+    } catch (e) {
+      setDeleteErr(e instanceof Error ? e.message : "삭제에 실패했습니다");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const toggleAuto = async () => {
+    if (!base || autoBusy) return;
+    const next = !base.autoApply;
+    setAutoBusy(true);
+    setBase({ ...base, autoApply: next });
+    try {
+      await setAutoApply(next);
+    } catch {
+      setBase((cur) => (cur ? { ...cur, autoApply: !next } : cur));
+    } finally {
+      setAutoBusy(false);
     }
   };
 
@@ -285,6 +354,20 @@ export default function SubmissionsView() {
               대기 {pendingCount}건
             </span>
           )}
+          <button
+            type="button"
+            onClick={toggleAuto}
+            disabled={!base || autoBusy}
+            style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, border: "none", background: "none", cursor: base ? "pointer" : "default", padding: 0 }}
+          >
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--sub)" }}>자동 반영</span>
+            {base?.autoApply ? <IconToggleOn /> : <IconToggleOff />}
+          </button>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--faint)" }}>
+          {base?.autoApply
+            ? "제출 즉시 시간표에 반영됩니다 — 형식 오류·학생 미연결 등으로 실패하면 대기 상태로 남고 사유가 표시됩니다."
+            : "학생 제출이 대기 상태로 쌓입니다 — 아래에서 검토 후 직접 반영하세요."}
         </div>
         <div style={{ fontSize: 11, color: "var(--faint)" }}>
           실제 반영을 테스트하려면 학생 관리에서 코드를 발급한 뒤 그 이름+코드로 로그인해 제출하세요.
@@ -330,9 +413,19 @@ export default function SubmissionsView() {
                     {`선택 ${selected.size}건 반영`}
                   </button>
                 )}
+                <button type="button"
+                  style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid var(--danger)", background: "var(--card)", color: "var(--danger)", fontSize: 11.5, fontWeight: 700, cursor: deleting || delSelected.size === 0 ? "default" : "pointer", opacity: deleting || delSelected.size === 0 ? 0.5 : 1 }}
+                  disabled={deleting || delSelected.size === 0} onClick={doDeleteSelected}>
+                  {deleting ? "삭제 중…" : `선택 ${delSelected.size}건 삭제`}
+                </button>
               </div>
             </div>
 
+            {deleteErr && (
+              <div role="alert" style={{ padding: "10px 12px", borderRadius: 9, border: "1px solid var(--danger)", background: "var(--panel2)", fontSize: 12.5, color: "var(--danger)", display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                <IconAlertCircle />{deleteErr}
+              </div>
+            )}
             {applyError && (
               <div role="alert" style={{ padding: "10px 12px", borderRadius: 9, border: "1px solid var(--danger)", background: "var(--panel2)", fontSize: 12.5, color: "var(--danger)", display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
                 <IconAlertCircle />{applyError}
@@ -375,6 +468,7 @@ export default function SubmissionsView() {
                     <th style={th}>내용</th>
                     <th style={th}>변경</th>
                     <th style={th}>상태</th>
+                    <th style={{ ...th, width: 26 }} title="삭제 선택" />
                     <th style={th} />
                   </tr>
                 </thead>
@@ -429,23 +523,36 @@ export default function SubmissionsView() {
                           </td>
                           <td style={td}><Chip {...diffChip[row.diffStatus]} /></td>
                           <td style={td}><Chip {...statusChip[sub.status]} /></td>
+                          <td style={{ ...td, textAlign: "center" }}>
+                            <input type="checkbox" disabled={!row.deletable || deleting} checked={delSelected.has(sub.id)}
+                              title={row.deletable ? undefined : "대기 중인 제출은 반려한 뒤 삭제할 수 있어요"}
+                              onChange={(e) => toggleDelOne(sub.id, e.target.checked)} />
+                          </td>
                           <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
-                            {row.isTest ? (
-                              <button type="button" disabled={rowBusy === sub.id} onClick={() => doDelete(sub.id)}
-                                style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid var(--danger)", background: "var(--card)", color: "var(--danger)", fontSize: 11.5, fontWeight: 700, cursor: rowBusy === sub.id ? "default" : "pointer", opacity: rowBusy === sub.id ? 0.6 : 1 }}>
-                                삭제
-                              </button>
-                            ) : sub.status === "pending" && rejectingId !== sub.id && (
-                              <button type="button" disabled={rowBusy === sub.id} onClick={() => { setRejectingId(sub.id); setRejectNote(""); setRowErr(null); }}
-                                style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--card)", color: "var(--sub)", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>
-                                반려
-                              </button>
-                            )}
+                            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                              {sub.status === "pending" && rejectingId !== sub.id && (
+                                <button type="button" disabled={rowBusy === sub.id} onClick={() => { setRejectingId(sub.id); setRejectNote(""); setRowErr(null); }}
+                                  style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--card)", color: "var(--sub)", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>
+                                  반려
+                                </button>
+                              )}
+                              {row.deletable ? (
+                                <button type="button" disabled={rowBusy === sub.id} onClick={() => doDeleteOne(sub.id)}
+                                  style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid var(--danger)", background: "var(--card)", color: "var(--danger)", fontSize: 11.5, fontWeight: 700, cursor: rowBusy === sub.id ? "default" : "pointer", opacity: rowBusy === sub.id ? 0.6 : 1 }}>
+                                  삭제
+                                </button>
+                              ) : (
+                                <button type="button" disabled title="대기 중인 제출은 반려한 뒤 삭제할 수 있어요"
+                                  style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--card)", color: "var(--faint)", fontSize: 11.5, fontWeight: 700, cursor: "not-allowed", opacity: 0.6 }}>
+                                  삭제
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                         {rejectingId === sub.id && (
                           <tr>
-                            <td colSpan={9} style={{ ...td, background: "var(--panel2)" }}>
+                            <td colSpan={10} style={{ ...td, background: "var(--panel2)" }}>
                               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                                 <input className="input" style={{ height: 34, flex: "1 1 220px", fontSize: 12.5 }} placeholder="반려 사유(선택)"
                                   value={rejectNote} onChange={(e) => setRejectNote(e.target.value)} />
@@ -462,11 +569,11 @@ export default function SubmissionsView() {
                           </tr>
                         )}
                         {rowErr?.id === sub.id && (
-                          <tr><td colSpan={9} style={{ ...td, color: "var(--danger)", fontSize: 12 }}>{rowErr.msg}</td></tr>
+                          <tr><td colSpan={10} style={{ ...td, color: "var(--danger)", fontSize: 12 }}>{rowErr.msg}</td></tr>
                         )}
                         {open && (
                           <tr>
-                            <td colSpan={9} style={{ ...td, background: "var(--panel2)" }}>
+                            <td colSpan={10} style={{ ...td, background: "var(--panel2)" }}>
                               {sub.status === "rejected" && sub.note && (
                                 <div style={{ fontSize: 12.5, color: "var(--danger)", marginBottom: 10 }}>반려 사유: {sub.note}</div>
                               )}

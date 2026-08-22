@@ -94,6 +94,17 @@ export function dayLabel(key: string, today: string): string {
   return `${m}월 ${d}일`;
 }
 
+/** Date → KST 기준 datetime-local 입력값("YYYY-MM-DDTHH:mm", 초 없음). 관리 화면의 시작·종료 일시
+ *  입력에 "오늘"을 기본값으로 채워줄 때 쓴다 — 클라에서 new Date()(무인자)로 만들면 서버가 KST 가
+ *  아닌 환경(UTC 등)에서 날짜가 하루 밀릴 수 있으므로 반드시 서버에서 계산해 문자열로 내려준다. */
+export function kstDateTimeLocal(at: Date = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: KST, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(at);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
+}
+
 /** 주 시작 라벨 "7월 20일 (월)" — KST 날짜 문자열 기준. */
 export function weekStartLabel(key: string): string {
   const [y, m, d] = key.split("-").map(Number);

@@ -272,6 +272,11 @@ create table if not exists schedule_grant(
 );
 create index if not exists idx_schedule_grant_bs on schedule_grant(branch_id, student_id);
 
+-- 입력 기간(전체) + 개별 개방을 관리 화면에서 하나의 폼(대상: 전체/특정 학생)으로 합치면서(2026-08-22)
+-- 라벨(이름)을 두 종류 모두 공통 입력으로 받는다 — schedule_window 는 이미 label 이 있었고, grant 에는
+-- 없었으므로 추가한다. 기존 행은 label=null(화면에서는 "(라벨 없음)"으로 표시, schedule_window 와 동일).
+alter table schedule_grant add column if not exists label text;
+
 -- ================= 학생 일회성 일정 변경 신청 (관리자 승인 필요) =================
 -- 정기 스케쥴(schedule_rule/schedule_hours)과 별개로 "이 날만" 바뀌는 요청. 입력 기간과 무관하게
 -- 언제나 신청 가능(신청일 뿐 정기 수정이 아니다). 승인되면 schedule_exception 을 만들어 exception_id
