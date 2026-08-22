@@ -6,10 +6,21 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { addStudent, setStudentStatus, deleteStudent, issueAccessCodes } from "./actions";
 import { releaseSeat } from "../seat/actions";
-import { levelLabel, type Student } from "./util";
+import { levelLabel, STU_STATUS, type Student } from "./util";
 import StudentPopup, { ReleaseSeatIcon } from "../_shared/StudentPopup";
 import ContextMenu, { type MenuItem } from "../_shared/ContextMenu";
 import { useLongPress } from "../_shared/useLongPress";
+import { useSort, SortPicker, type SortColumn } from "../_shared/sort";
+
+// 정렬 가능한 속성: 좌석번호 / 이름 / 구분(학년·N수) / 상태(재원·휴원) / 등록일 / 코드 발급 여부.
+const SORT_COLUMNS: SortColumn<Student>[] = [
+  { key: "seat", label: "좌석", sortValue: (s) => s.seat_number, type: "number" },
+  { key: "name", label: "이름", sortValue: (s) => s.name },
+  { key: "level", label: "구분", sortValue: (s) => levelLabel(s) },
+  { key: "status", label: "상태", sortValue: (s) => STU_STATUS[s.status] ?? s.status },
+  { key: "enrolled", label: "등록일", sortValue: (s) => s.enrolled_at },
+  { key: "code", label: "코드 발급 여부", sortValue: (s) => (s.access_code ? "발급" : "미발급") },
+];
 
 // 행 끝 '상세 보기' 화살표 — 인라인 stroke SVG(이모지 금지 원칙).
 const ChevronIcon = () => (
@@ -41,7 +52,7 @@ export default function StudentList({
   // '휴원'이 아닌 상태는 전부 재원 탭으로(레거시 withdrawn 방어)
   const inTab = (s: Student) => (tab === "leave" ? s.status === "leave" : s.status !== "leave");
 
-  const list = useMemo(() => {
+  const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return students
       .filter(inTab)
@@ -57,6 +68,9 @@ export default function StudentList({
         );
       });
   }, [students, q, tab]);
+
+  // 정렬 상태는 화면(student-list)별로 localStorage 에 유지 — 기본값은 기존 쿼리 순서(이름 오름차순, page.tsx `order by s.name`)와 동일하게 둔다.
+  const { sorted: list, sortKey, sortDir, requestSort } = useSort(filtered, SORT_COLUMNS, "name", "student-list");
 
   const enrolledCount = students.filter((s) => s.status !== "leave").length;
   const leaveCount = students.filter((s) => s.status === "leave").length;
@@ -130,6 +144,7 @@ export default function StudentList({
             </button>
           );
         })}
+        <SortPicker columns={SORT_COLUMNS} activeKey={sortKey} dir={sortDir} onSort={requestSort} ariaLabel="학생 목록 정렬 기준" />
         <span style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--faint)" }}>
           {q ? `검색 ${list.length}명` : `${list.length}명`}
         </span>

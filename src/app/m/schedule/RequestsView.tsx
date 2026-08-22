@@ -10,6 +10,7 @@ import {
   type RequestRow, type RequestListResult, type RequestDetail, type RuleCompareRow,
 } from "./requestActions";
 import { blockStyleOf, requestTypeOf, requestKindOf, REQUEST_KINDS, type RequestKind } from "@/lib/schedule";
+import { useSort, SortHeader, type SortColumn } from "../_shared/sort";
 
 const th: React.CSSProperties = { textAlign: "left", padding: "7px 10px", fontSize: 11.5, fontWeight: 700, color: "var(--faint)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
 const td: React.CSSProperties = { padding: "9px 10px", fontSize: 13, borderBottom: "1px solid var(--line)", verticalAlign: "middle" };
@@ -91,6 +92,15 @@ function IconArrowRight() {
   );
 }
 
+// 정렬 가능한 속성: 학생 / 날짜 / 종류 / 상태 / 신청 시각.
+const SORT_COLUMNS: SortColumn<RequestRow>[] = [
+  { key: "student", label: "학생", sortValue: (r) => r.studentName },
+  { key: "date", label: "날짜", sortValue: (r) => r.date },
+  { key: "kind", label: "종류", sortValue: (r) => requestKindOf(r.reqKind).label },
+  { key: "status", label: "상태", sortValue: (r) => statusChip[r.status].label },
+  { key: "createdAt", label: "신청 시각", sortValue: (r) => r.createdAt },
+];
+
 export default function RequestsView() {
   const [data, setData] = useState<RequestListResult | null>(null);
   const [autoBusy, setAutoBusy] = useState(false);
@@ -117,6 +127,9 @@ export default function RequestsView() {
     if (!data) return [];
     return data.rows.filter((r) => (kindFilter === "all" || r.reqKind === kindFilter) && (statusFilter === "all" || r.status === statusFilter));
   }, [data, kindFilter, statusFilter]);
+
+  // 정렬 상태는 화면(schedule-requests)별로 localStorage 에 유지 — 기본값은 정렬 미적용(서버가 내려준 순서 그대로).
+  const { sorted: sortedRows, sortKey, sortDir, requestSort } = useSort(filteredRows, SORT_COLUMNS, "__original__", "schedule-requests");
 
   return (
     <>
@@ -154,18 +167,19 @@ export default function RequestsView() {
               <thead>
                 <tr>
                   <th style={{ ...th, width: 28 }} />
-                  <th style={th}>학생</th>
-                  <th style={th}>종류</th>
-                  <th style={th}>날짜</th>
+                  <SortHeader label="학생" sortKey="student" activeKey={sortKey} dir={sortDir} onSort={requestSort} thStyle={th} />
+                  <SortHeader label="종류" sortKey="kind" activeKey={sortKey} dir={sortDir} onSort={requestSort} thStyle={th} />
+                  <SortHeader label="날짜" sortKey="date" activeKey={sortKey} dir={sortDir} onSort={requestSort} thStyle={th} />
                   <th style={th}>사유</th>
                   <th style={th}>내용</th>
                   <th style={th}>메모</th>
-                  <th style={th}>상태</th>
+                  <SortHeader label="상태" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={requestSort} thStyle={th} />
+                  <SortHeader label="신청 시각" sortKey="createdAt" activeKey={sortKey} dir={sortDir} onSort={requestSort} thStyle={th} />
                   <th style={th} />
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.map((r) => (
+                {sortedRows.map((r) => (
                   <RequestRowItem key={r.id} row={r} onChanged={reload} />
                 ))}
               </tbody>
@@ -266,6 +280,7 @@ function RequestRowItem({ row, onChanged }: { row: RequestRow; onChanged: () => 
         <td style={{ ...td, fontVariantNumeric: "tabular-nums" }}>{row.timeLabel}</td>
         <td style={{ ...td, color: "var(--sub)", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.title || "–"}</td>
         <td style={td}><StatusChip status={row.status} /></td>
+        <td style={{ ...td, fontVariantNumeric: "tabular-nums", color: "var(--faint)", whiteSpace: "nowrap" }}>{row.createdLabel}</td>
         <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
           {row.status === "pending" && !rejecting && (
             <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
@@ -278,7 +293,7 @@ function RequestRowItem({ row, onChanged }: { row: RequestRow; onChanged: () => 
       </tr>
       {rejecting && (
         <tr>
-          <td colSpan={9} style={{ ...td, background: "var(--panel2)" }}>
+          <td colSpan={10} style={{ ...td, background: "var(--panel2)" }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <input className="input" style={{ height: 34, flex: "1 1 220px", fontSize: 12.5 }} placeholder="반려 사유(선택)" value={note} onChange={(e) => setNote(e.target.value)} />
               <ActionBtn label="반려 확정" kind="danger" busy={busy} onClick={doReject} />
@@ -291,12 +306,12 @@ function RequestRowItem({ row, onChanged }: { row: RequestRow; onChanged: () => 
       )}
       {err && (
         <tr>
-          <td colSpan={9} style={{ ...td, color: "var(--danger)", fontWeight: 600, fontSize: 12 }}>{err}</td>
+          <td colSpan={10} style={{ ...td, color: "var(--danger)", fontWeight: 600, fontSize: 12 }}>{err}</td>
         </tr>
       )}
       {open && (
         <tr>
-          <td colSpan={9} style={{ ...td, background: "var(--panel2)" }}>
+          <td colSpan={10} style={{ ...td, background: "var(--panel2)" }}>
             <DetailPanel row={row} detail={detail} />
           </td>
         </tr>

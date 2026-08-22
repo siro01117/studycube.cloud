@@ -16,6 +16,7 @@ export type StudentActivationRow = {
   studentName: string;
   seatNumber: number | null;
   lastSubmittedLabel: string | null;
+  lastSubmittedAt: string | null; // 정렬용 원시 timestamptz(표시는 라벨만 쓴다)
   state: ActivationState;
 };
 
@@ -57,6 +58,7 @@ export async function listActivationStatus(): Promise<StudentActivationRow[]> {
       studentName: row.name,
       seatNumber: row.seat_number,
       lastSubmittedLabel: row.created_at ? dateTimeLabel(row.created_at) : null,
+      lastSubmittedAt: row.created_at,
       state: decision.open ? (decision.reason as "first" | "grant") : "locked",
     };
   });

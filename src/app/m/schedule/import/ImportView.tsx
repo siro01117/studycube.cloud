@@ -10,6 +10,7 @@ import {
 import { applyImportSelection, type ImportBase, type ApplyResult } from "./actions";
 import { diffAgainstExisting, type DiffStatus } from "@/lib/schedule-import";
 import { useScrollFocusOn } from "@/app/f/_shared/useScrollFocus";
+import { useSort, SortHeader, type SortColumn } from "../../_shared/sort";
 
 // ---------------- 아이콘(라인 스트로크, 이모지 금지) ----------------
 function IconUpload() {
@@ -159,6 +160,14 @@ function Chip({ label, fg, bg }: { label: string; fg: string; bg: string }) {
   );
 }
 
+// 정렬 가능한 속성: 이름 / 좌석 / 매칭 상태 / 변경 여부.
+const SORT_COLUMNS: SortColumn<Row>[] = [
+  { key: "name", label: "이름", sortValue: (r) => r.name },
+  { key: "seat", label: "좌석", sortValue: (r) => r.seat, type: "number" },
+  { key: "match", label: "매칭 상태", sortValue: (r) => matchChip[r.matchStatus].label },
+  { key: "diff", label: "변경", sortValue: (r) => diffChip[r.diffStatus].label },
+];
+
 export default function ImportView({ base }: { base: ImportBase }) {
   const [rawText, setRawText] = useState("");
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -269,6 +278,9 @@ export default function ImportView({ base }: { base: ImportBase }) {
   const errorRows = (rows ?? []).filter((r) => !r.parseOk);
   const okRows = (rows ?? []).filter((r) => r.parseOk);
   const allSelectableChecked = selectableRows.length > 0 && selectableRows.every((r) => selected.has(r.index));
+
+  // 정렬 상태는 화면(schedule-import)별로 localStorage 에 유지 — 기본값은 정렬 미적용(파싱된 순서 그대로).
+  const { sorted: sortedRows, sortKey, sortDir, requestSort } = useSort(rows ?? [], SORT_COLUMNS, "__original__", "schedule-import");
 
   return (
     <>
@@ -383,16 +395,16 @@ export default function ImportView({ base }: { base: ImportBase }) {
               <thead>
                 <tr>
                   <th style={th}></th>
-                  <th style={th}>이름</th>
-                  <th style={th}>좌석</th>
-                  <th style={th}>매칭 상태</th>
+                  <SortHeader label="이름" sortKey="name" activeKey={sortKey} dir={sortDir} onSort={requestSort} thStyle={th} />
+                  <SortHeader label="좌석" sortKey="seat" activeKey={sortKey} dir={sortDir} onSort={requestSort} thStyle={th} />
+                  <SortHeader label="매칭 상태" sortKey="match" activeKey={sortKey} dir={sortDir} onSort={requestSort} thStyle={th} />
                   <th style={th}>내용</th>
-                  <th style={th}>변경</th>
+                  <SortHeader label="변경" sortKey="diff" activeKey={sortKey} dir={sortDir} onSort={requestSort} thStyle={th} />
                   <th style={th}>경고</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => {
+                {sortedRows.map((row) => {
                   const selectable = row.parseOk && row.matchStatus === "matched";
                   return (
                     <tr key={row.index} style={{ opacity: row.parseOk ? 1 : 0.6 }}>

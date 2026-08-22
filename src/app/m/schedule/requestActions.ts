@@ -51,6 +51,7 @@ export type RequestRow = {
   note: string | null;
   mode: "add" | "replace";
   createdLabel: string;
+  createdAt: string; // 정렬용 원시 timestamptz(표시는 라벨만 쓴다)
   decidedLabel: string | null;
   decidedByName: string | null;
 };
@@ -77,7 +78,8 @@ const toRow = (r: RequestRowDb): RequestRow => ({
   reqType: r.req_type as RequestType,
   timeLabel: summaryOf(r), status: r.status as RequestStatus, note: r.note,
   mode: r.skip_rule_id ? "replace" : "add",
-  createdLabel: dateTimeLabel(r.created_at), decidedLabel: r.decided_at ? dateTimeLabel(r.decided_at) : null,
+  createdLabel: dateTimeLabel(r.created_at), createdAt: r.created_at,
+  decidedLabel: r.decided_at ? dateTimeLabel(r.decided_at) : null,
   decidedByName: r.decided_by_name,
 });
 

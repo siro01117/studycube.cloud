@@ -28,7 +28,9 @@ export type SubmissionRow = {
   note: string | null;
   payload: unknown; // 원시 jsonb — 화면(클라)이 adaptSubmissionPayload 로 검증·정규화한다
   createdLabel: string; // 마지막 제출(수정) 시각
+  createdAt: string; // 정렬용 원시 timestamptz(표시는 라벨만 쓴다)
   firstSubmittedLabel: string | null; // 최초 제출 시각(재제출해도 안 바뀜)
+  firstSubmittedAt: string | null; // 정렬용 원시 timestamptz
   processedLabel: string | null;
   processedByName: string | null;
 };
@@ -98,7 +100,9 @@ export async function loadSubmissionsBase(): Promise<SubmissionsBase> {
     note: r.note,
     payload: r.payload,
     createdLabel: dateTimeLabel(r.created_at),
+    createdAt: r.created_at,
     firstSubmittedLabel: r.first_submitted_at ? dateTimeLabel(r.first_submitted_at) : null,
+    firstSubmittedAt: r.first_submitted_at,
     processedLabel: r.processed_at ? dateTimeLabel(r.processed_at) : null,
     processedByName: r.processed_by_name,
   }));

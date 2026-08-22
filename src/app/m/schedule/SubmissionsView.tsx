@@ -14,6 +14,7 @@ import { diffAgainstExisting, academyToDbFields, type DiffStatus, type ImportHou
 import { adaptSubmissionPayload } from "@/lib/schedule-submission";
 import { blockStyleOf } from "@/lib/schedule";
 import { asJsonObject } from "@/lib/jsonb";
+import { useSort, SortHeader, type SortColumn } from "../_shared/sort";
 
 // ---------------- 아이콘(라인 스트로크, 이모지 금지) ----------------
 function IconCheck() {
@@ -174,6 +175,15 @@ function buildRows(base: SubmissionsBase): Row[] {
   });
 }
 
+// 정렬 가능한 속성: 학생(좌석·이름) / 제출 시각 / 최초 제출 / 상태 / 변경 여부.
+const SORT_COLUMNS: SortColumn<Row>[] = [
+  { key: "student", label: "학생", sortValue: (r) => r.submission.studentName },
+  { key: "createdAt", label: "제출 시각", sortValue: (r) => r.submission.createdAt },
+  { key: "firstSubmittedAt", label: "최초 제출", sortValue: (r) => r.submission.firstSubmittedAt },
+  { key: "status", label: "상태", sortValue: (r) => statusChip[r.submission.status].label },
+  { key: "diff", label: "변경", sortValue: (r) => diffChip[r.diffStatus].label },
+];
+
 export default function SubmissionsView() {
   const [base, setBase] = useState<SubmissionsBase | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
@@ -216,7 +226,9 @@ export default function SubmissionsView() {
   useEffect(reload, []);
 
   const rows = useMemo(() => (base ? buildRows(base) : []), [base]);
-  const visibleRows = useMemo(() => (showTestRows ? rows : rows.filter((r) => !r.isTest)), [rows, showTestRows]);
+  const visibleRowsUnsorted = useMemo(() => (showTestRows ? rows : rows.filter((r) => !r.isTest)), [rows, showTestRows]);
+  // 정렬 상태는 화면(schedule-submissions)별로 localStorage 에 유지 — 기본값은 정렬 미적용(서버가 내려준 순서 그대로).
+  const { sorted: visibleRows, sortKey, sortDir, requestSort } = useSort(visibleRowsUnsorted, SORT_COLUMNS, "__original__", "schedule-submissions");
   const testCount = useMemo(() => rows.filter((r) => r.isTest).length, [rows]);
   const selectableRows = useMemo(
     () => rows.filter((r) => r.submission.status === "pending" && r.parseOk && r.submission.studentId && !r.isTest),
@@ -462,12 +474,12 @@ export default function SubmissionsView() {
                   <tr>
                     <th style={{ ...th, width: 26 }} />
                     <th style={{ ...th, width: 26 }} />
-                    <th style={th}>학생</th>
-                    <th style={th}>제출 시각</th>
-                    <th style={th}>최초 제출</th>
+                    <SortHeader label="학생" sortKey="student" activeKey={sortKey} dir={sortDir} onSort={requestSort} thStyle={th} />
+                    <SortHeader label="제출 시각" sortKey="createdAt" activeKey={sortKey} dir={sortDir} onSort={requestSort} thStyle={th} />
+                    <SortHeader label="최초 제출" sortKey="firstSubmittedAt" activeKey={sortKey} dir={sortDir} onSort={requestSort} thStyle={th} />
                     <th style={th}>내용</th>
-                    <th style={th}>변경</th>
-                    <th style={th}>상태</th>
+                    <SortHeader label="변경" sortKey="diff" activeKey={sortKey} dir={sortDir} onSort={requestSort} thStyle={th} />
+                    <SortHeader label="상태" sortKey="status" activeKey={sortKey} dir={sortDir} onSort={requestSort} thStyle={th} />
                     <th style={{ ...th, width: 26 }} title="삭제 선택" />
                     <th style={th} />
                   </tr>

@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { listActivationStatus, activateStudents, revokeActivation, type StudentActivationRow } from "./windowActions";
 import type { SStudent } from "./ScheduleDemo";
+import { useSort, SortHeader, SortLabel, type SortColumn } from "../_shared/sort";
 
 const th: React.CSSProperties = { textAlign: "left", padding: "7px 10px", fontSize: 11.5, fontWeight: 700, color: "var(--faint)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
 const td: React.CSSProperties = { padding: "8px 10px", fontSize: 13, borderBottom: "1px solid var(--line)", verticalAlign: "middle" };
@@ -73,11 +74,23 @@ export default function WindowView({ students }: { students: SStudent[] }) {
 
   const byName = useMemo(() => new Map(students.map((st) => [st.id, st])), [students]);
 
+  // 정렬 가능한 속성: 좌석번호 / 이름 / 마지막 제출 / 상태(열림·잠김). 좌석은 학생 목록(byName)에서 끌어와야
+  // 해서 컬럼 정의가 byName 에 의존한다.
+  const sortColumns: SortColumn<StudentActivationRow>[] = useMemo(() => [
+    { key: "seat", label: "좌석번호", sortValue: (r) => byName.get(r.studentId)?.seat_number, type: "number" },
+    { key: "name", label: "이름", sortValue: (r) => r.studentName },
+    { key: "lastSubmitted", label: "마지막 제출", sortValue: (r) => r.lastSubmittedAt },
+    { key: "state", label: "상태", sortValue: (r) => stateChip[r.state].label },
+  ], [byName]);
+
   const filtered = useMemo(() => {
     if (!rows) return null;
     const t = q.trim();
     return t ? rows.filter((r) => r.studentName.includes(t) || String(byName.get(r.studentId)?.seat_number ?? "").includes(t)) : rows;
   }, [rows, q, byName]);
+
+  // 기본값은 기존 쿼리 순서(좌석번호 오름차순, listActivationStatus 의 `order by seat.number nulls last, s.name`)와 동일하게 둔다.
+  const { sorted: sortedFiltered, sortKey, sortDir, requestSort } = useSort(filtered ?? [], sortColumns, "seat", "schedule-window");
 
   const lockedRows = useMemo(() => (filtered ?? []).filter((r) => r.state === "locked"), [filtered]);
   const allLockedSelected = lockedRows.length > 0 && lockedRows.every((r) => selected.has(r.studentId));
@@ -185,14 +198,19 @@ export default function WindowView({ students }: { students: SStudent[] }) {
                       onChange={toggleAllLocked}
                     />
                   </th>
-                  <th style={th}>좌석·이름</th>
-                  <th style={th}>마지막 제출</th>
-                  <th style={th}>상태</th>
+                  <th style={th}>
+                    {/* 표시는 "좌석·이름" 한 칸이지만 좌석/이름은 서로 다른 정렬 속성이라 각각 클릭할 수 있게 나눈다. */}
+                    <SortLabel label="좌석" sortKey="seat" activeKey={sortKey} dir={sortDir} onSort={requestSort} />
+                    {" · "}
+                    <SortLabel label="이름" sortKey="name" activeKey={sortKey} dir={sortDir} onSort={requestSort} />
+                  </th>
+                  <SortHeader label="마지막 제출" sortKey="lastSubmitted" activeKey={sortKey} dir={sortDir} onSort={requestSort} thStyle={th} />
+                  <SortHeader label="상태" sortKey="state" activeKey={sortKey} dir={sortDir} onSort={requestSort} thStyle={th} />
                   <th style={th} />
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r) => {
+                {sortedFiltered.map((r) => {
                   const seat = byName.get(r.studentId)?.seat_number ?? null;
                   const locked = r.state === "locked";
                   return (

@@ -4,6 +4,7 @@
 import { useState, useTransition } from "react";
 import { setSubmissionStatus } from "./actions";
 import { asJsonObject } from "@/lib/jsonb";
+import { useSort, SortPicker, type SortColumn } from "../_shared/sort";
 
 export type SubmissionRow = {
   id: string;
@@ -15,12 +16,20 @@ export type SubmissionRow = {
   submitter_phone: string | null;
   student_name: string | null;
   seat_number: number | null;
-  created_at_raw?: unknown; // 서버에서만 쓰고 클라로는 라벨만 내려감
+  created_at_raw: string; // 원시 timestamptz(ISO) — 정렬 비교용. 표시는 created_at_label 만 쓴다.
   created_at_label: string;
 };
 
 const STATUS_LABEL: Record<string, string> = { pending: "대기", done: "처리완료", rejected: "반려" };
 const STATUS_COLOR: Record<string, string> = { pending: "var(--warn)", done: "var(--ok)", rejected: "var(--danger)" };
+
+// 정렬 가능한 속성: 설문 유형 / 제출자 / 제출 시각 / 상태.
+const SORT_COLUMNS: SortColumn<SubmissionRow>[] = [
+  { key: "type", label: "설문 유형", sortValue: (r) => r.type },
+  { key: "submitter", label: "제출자", sortValue: (r) => r.student_name ?? r.submitter_name },
+  { key: "createdAt", label: "제출 시각", sortValue: (r) => r.created_at_raw },
+  { key: "status", label: "상태", sortValue: (r) => STATUS_LABEL[r.status] ?? r.status },
+];
 
 export default function SubmissionList({
   rows,
@@ -39,6 +48,10 @@ export default function SubmissionList({
 }) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const toggle = (id: string) => setOpen((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  // 정렬 상태는 화면(submission-list)별로 localStorage 에 유지 — 기본값은 기존 쿼리 순서(제출 시각 내림차순,
+  // page.tsx `order by sub.created_at desc`)와 동일하게 둔다.
+  const { sorted: sortedRows, sortKey, sortDir, requestSort } = useSort(rows, SORT_COLUMNS, "createdAt", "submission-list", "desc");
 
   return (
     <div>
@@ -62,11 +75,16 @@ export default function SubmissionList({
       {rows.length === 0 ? (
         <div className="card" style={{ padding: 32, textAlign: "center", color: "var(--faint)", fontSize: 13.5 }}>조건에 맞는 응답이 없습니다.</div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {rows.map((r) => (
-            <SubmissionCard key={r.id} row={r} isOpen={open.has(r.id)} onToggle={() => toggle(r.id)} canManage={canManage} />
-          ))}
-        </div>
+        <>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+            <SortPicker columns={SORT_COLUMNS} activeKey={sortKey} dir={sortDir} onSort={requestSort} ariaLabel="응답 목록 정렬 기준" />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {sortedRows.map((r) => (
+              <SubmissionCard key={r.id} row={r} isOpen={open.has(r.id)} onToggle={() => toggle(r.id)} canManage={canManage} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
