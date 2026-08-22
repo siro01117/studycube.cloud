@@ -327,8 +327,8 @@ export default function ScheduleDemo({
   const [showInputBar, setShowInputBar] = useState(false); // 기본은 보기 모드 — 입력 바는 토글로만 노출
   const [showOpsView, setShowOpsView] = useState(false); // 운영 시간표 뷰(학생 선택과 배타적)
   const [opsBtnHover, setOpsBtnHover] = useState(false); // 사이드바 "운영 시간표" 버튼 hover(인라인 스타일이라 직접 추적)
-  const [showWindowView, setShowWindowView] = useState(false); // 입력 기간 관리 뷰(학생 선택·운영 시간표와 배타적)
-  const [winBtnHover, setWinBtnHover] = useState(false); // 사이드바 "입력 기간" 버튼 hover
+  const [showWindowView, setShowWindowView] = useState(false); // 입력 활성화 관리 뷰(학생 선택·운영 시간표와 배타적)
+  const [winBtnHover, setWinBtnHover] = useState(false); // 사이드바 "입력 활성화" 버튼 hover
   const [showRequestsView, setShowRequestsView] = useState(false); // 변경 신청 관리 뷰(학생 선택·다른 독립 뷰와 배타적)
   const [reqBtnHover, setReqBtnHover] = useState(false); // 사이드바 "변경 신청" 버튼 hover
   const [showSubmissionsView, setShowSubmissionsView] = useState(false); // 제출 반영 뷰(학생 선택·다른 독립 뷰와 배타적)
@@ -795,7 +795,7 @@ export default function ScheduleDemo({
                 border: `1px solid ${showWindowView ? "var(--accent)" : "var(--line)"}`,
                 background: showWindowView ? "var(--accent-soft)" : winBtnHover ? "var(--panel2)" : "var(--card)" }}>
               <span style={{ ...iconRow, fontSize: 12.5, fontWeight: showWindowView ? 800 : 700, color: showWindowView ? "var(--accent)" : "var(--ink)" }}>
-                <IconClock />입력 기간
+                <IconClock />입력 활성화
               </span>
             </button>
             <button onClick={() => { setShowRequestsView(true); setShowOpsView(false); setShowWindowView(false); setShowSubmissionsView(false); }}

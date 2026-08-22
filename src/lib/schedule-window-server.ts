@@ -1,20 +1,20 @@
 import "server-only";
 
-// 스케쥴 입력 기간 판정 — 조회(DB) 담당. 판정 자체(순수 로직)는 schedule-window.ts.
-// 학생 1명 기준 쿼리 3개(첫 제출 시각·windows·grants)로 끝난다 — 목록 화면(관리자 제출 현황)처럼
-// 여러 학생을 한 번에 봐야 할 때는 이 함수를 학생마다 부르지 말고, windowActions.ts 처럼 windows/grants
-// 를 한 번만 불러온 뒤 evaluateEdit 을 학생마다 메모리에서 돌려라(DB 왕복 없이).
+// 스케쥴 입력 개방 판정 — 조회(DB) 담당. 판정 자체(순수 로직)는 schedule-window.ts.
+// 학생 1명 기준 쿼리 2개(제출 이력·유효한 활성화)로 끝난다 — 목록 화면(관리자 "입력 활성화")처럼
+// 여러 학생을 한 번에 봐야 할 때는 이 함수를 학생마다 부르지 말고, windowActions.ts 처럼 제출 이력·
+// 활성화를 한 번만 불러온 뒤 evaluateEdit 을 학생마다 메모리에서 돌려라(DB 왕복 없이).
 import { db } from "./db";
-import { evaluateEdit, formatEditState, type EditState, type TimeRange } from "./schedule-window";
+import { asJsonObject } from "./jsonb";
+import { evaluateEdit, type EditState } from "./schedule-window";
 
 type SubmissionLookupRow = {
-  payload: Record<string, unknown>;
+  payload: unknown;
   first_submitted_at: string | null;
   created_at: string;
   status: string;
   note: string | null;
 };
-type RangeRow = { opens_at: string; closes_at: string };
 
 export type EditResolution = {
   state: EditState;
@@ -28,18 +28,15 @@ export type EditResolution = {
   lastNote: string | null;
 };
 
-const toRange = (r: RangeRow): TimeRange => ({ opensAt: new Date(r.opens_at), closesAt: new Date(r.closes_at) });
-
-/** 한 학생의 스케쥴 입력 기간 판정 — type/slug 는 submission.type 과 payload->>'_slug' (여러 폼이 같은
+/** 한 학생의 스케쥴 입력 개방 판정 — type/slug 는 submission.type 과 payload->>'_slug' (여러 폼이 같은
  *  type 을 공유할 가능성을 대비해 slug 까지 맞춘다 — actions.ts submitForm 의 재제출 조회와 동일 관례). */
 export async function resolveEditState(
   branchId: string,
   studentId: string,
   type: string,
   slug: string,
-  now: Date = new Date(),
 ): Promise<EditResolution> {
-  const [subRows, windowRows, grantRows] = await Promise.all([
+  const [subRows, grantRows] = await Promise.all([
     db.query<SubmissionLookupRow>(
       `select payload, first_submitted_at, created_at, status, note
          from submission
@@ -47,24 +44,32 @@ export async function resolveEditState(
         order by created_at desc limit 1`,
       [branchId, studentId, type, slug],
     ),
-    db.query<RangeRow>(`select opens_at, closes_at from schedule_window where branch_id=$1`, [branchId]),
-    db.query<RangeRow>(`select opens_at, closes_at from schedule_grant where branch_id=$1 and student_id=$2`, [
-      branchId,
-      studentId,
-    ]),
+    db.query<{ id: string }>(
+      `select id from schedule_grant where branch_id=$1 and student_id=$2 and consumed_at is null limit 1`,
+      [branchId, studentId],
+    ),
   ]);
 
   const sub = subRows.rows[0] ?? null;
   const firstSubmittedAt = sub?.first_submitted_at ? new Date(sub.first_submitted_at) : null;
-  const windows = windowRows.rows.map(toRange);
-  const grants = grantRows.rows.map(toRange);
+  const hasActiveGrant = grantRows.rows.length > 0;
 
-  const decision = evaluateEdit({ now, firstSubmittedAt, windows, grants });
+  const state = evaluateEdit({ firstSubmittedAt, hasActiveGrant });
   return {
-    state: formatEditState(decision, now),
-    lastPayload: sub?.payload ?? null,
+    state,
+    lastPayload: sub ? asJsonObject(sub.payload) : null,
     lastSubmittedAt: sub ? sub.created_at : null,
     lastStatus: sub ? (sub.status as "pending" | "done" | "rejected") : null,
     lastNote: sub?.note ?? null,
   };
+}
+
+/** 제출 성공 직후 그 학생의 유효한(아직 소진되지 않은) 활성화를 소진시킨다 — 관리자가 활성화해서
+ *  연 개방은 1회용이라, 제출 하나가 끝나면 다시 잠겨야 한다. 활성화가 없었다면(=첫 제출로 연 경우)
+ *  0행이 바뀌고 조용히 끝난다 — 소진할 게 없는 게 정상이라 에러가 아니다. */
+export async function consumeActiveGrant(branchId: string, studentId: string): Promise<void> {
+  await db.query(
+    `update schedule_grant set consumed_at=now() where branch_id=$1 and student_id=$2 and consumed_at is null`,
+    [branchId, studentId],
+  );
 }

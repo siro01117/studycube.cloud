@@ -4,7 +4,7 @@
 import { db } from "@/lib/db";
 import { ready } from "@/lib/bootstrap";
 import { findStudent, publicAuthError } from "@/lib/public-auth";
-import { resolveEditState } from "@/lib/schedule-window-server";
+import { resolveEditState, consumeActiveGrant } from "@/lib/schedule-window-server";
 import { SCHEDULE_MIN_MIN, SCHEDULE_MAX_MIN } from "@/lib/schedule-import";
 import { applySubmissionsCore, isScheduleAutoApplyOn } from "@/lib/schedule-submission-apply";
 import { getForm } from "./registry";
@@ -168,19 +168,15 @@ export async function submitForm(formData: FormData): Promise<SubmitResult> {
       submitterName = match.name;
     }
 
-    // 스케쥴 폼은 입력 기간(schedule_window/schedule_grant) 안에서만 제출을 받는다. 화면(sch9m2vt.tsx)이
-    // 이미 잠김이면 폼 자체를 안 보여주지만, 그건 UX 일 뿐 — 여기서 다시 판정해야 잠긴 상태의 제출을
-    // 실제로 막을 수 있다(클라를 우회해 직접 submitForm 을 호출하는 경우 대비). 테스트 신원(testBypass)은
-    // 화면 판정(schedule-window-actions.ts checkScheduleWindow)과 동일하게 항상 열림으로 취급.
+    // 스케쥴 폼은 "한 번도 제출한 적 없거나(첫 제출) 관리자가 활성화한 학생"만 제출을 받는다.
+    // 화면(sch9m2vt.tsx)이 이미 잠김이면 폼 자체를 안 보여주지만, 그건 UX 일 뿐 — 여기서 다시
+    // 판정해야 잠긴 상태의 제출을 실제로 막을 수 있다(클라를 우회해 직접 submitForm 을 호출하는
+    // 경우 대비). 테스트 신원(testBypass)은 화면 판정(schedule-window-actions.ts checkScheduleWindow)과
+    // 동일하게 항상 열림으로 취급.
     if (def.type === "schedule" && studentId && !testBypass) {
       const { state } = await resolveEditState(branch, studentId, def.type, slug);
       if (!state.open) {
-        return {
-          ok: false,
-          error: state.nextOpen
-            ? `지금은 스케쥴 입력 기간이 아니에요. 다음 입력 기간: ${state.nextOpen}부터`
-            : "지금은 스케쥴 입력 기간이 아니에요.",
-        };
+        return { ok: false, error: "이미 시간표를 제출했어요. 고쳐야 하면 카운터에 말씀해 주세요." };
       }
     }
   } else {
@@ -226,6 +222,17 @@ export async function submitForm(formData: FormData): Promise<SubmitResult> {
       [branch, def.type, studentId, submitterName, submitterPhone, payloadJson],
     );
     submissionId = ins.rows[0]?.id ?? null;
+  }
+
+  // 제출이 성공했으니(그 학생의 grant 로 열었든 첫 제출로 열었든) 유효한 활성화가 있으면 소진시킨다 —
+  // 활성화는 1회용이라 이 제출로 끝난다. 제출 자체는 이미 커밋됐으므로, 소진이 실패해도(드묾) 제출을
+  // 되돌리지 않는다 — 그 학생이 계속 열려 있는 상태로 남는 정도라 다음 제출로 자연히 정리된다.
+  if (def.type === "schedule" && studentId && !testBypass) {
+    try {
+      await consumeActiveGrant(branch, studentId);
+    } catch {
+      // 소진 실패는 조용히 넘어간다(제출 자체는 이미 성공) — 위 주석 참고.
+    }
   }
 
   // 정기 스케쥴 제출은 방학·개학처럼 빈도가 낮고 신뢰도가 높아 "제출하면 즉시 시간표에 반영"이 기본이다

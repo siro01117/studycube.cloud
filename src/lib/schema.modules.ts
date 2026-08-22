@@ -276,6 +276,44 @@ create index if not exists idx_schedule_grant_bs on schedule_grant(branch_id, st
 -- 라벨(이름)을 두 종류 모두 공통 입력으로 받는다 — schedule_window 는 이미 label 이 있었고, grant 에는
 -- 없었으므로 추가한다. 기존 행은 label=null(화면에서는 "(라벨 없음)"으로 표시, schedule_window 와 동일).
 alter table schedule_grant add column if not exists label text;
+-- 1회용 활성화(2026-08-22): 학생이 제출하면 소진되는 시각. null=아직 유효(열려 있음).
+alter table schedule_grant add column if not exists consumed_at timestamptz;
+-- 기간제였던 기존 행(과거 opens_at/closes_at 기준)은 새 규칙에서 아무 의미가 없다 — 유니크 인덱스를
+-- 만들기 전에 무효화(소진 처리)한다.
+-- 반드시 cutover 시점 이전에 만들어진 행만 건드린다: 이 블록은 SCHEMA_VERSION 이 바뀔 때마다 다시
+-- 도는 자리라, 조건 없이 쓰면 앞으로 스키마를 올릴 때마다 그때 살아있던 활성화가 전부 취소된다.
+update schedule_grant set consumed_at = now()
+ where consumed_at is null and created_at < timestamptz '2026-08-22 00:00+09';
+-- 학생당 "아직 소진되지 않은" 활성화는 최대 1개만 — 활성화 insert 를 on conflict do nothing 으로
+-- 멱등하게 만들고(이미 열려 있는 학생을 다시 활성화해도 중복행이 안 생긴다), 판정 쿼리도 항상
+-- 최대 1행만 보면 되게 한다.
+create unique index if not exists uq_schedule_grant_active on schedule_grant(branch_id, student_id) where consumed_at is null;
+
+-- ================= 학생 일회성 일정 변경 신청 (관리자 승인 필요) =================
+-- 정기 스케쥴(schedule_rule/schedule_hours)과 별개로 "이 날만" 바뀌는 요청. 입력 기간과 무관하게
+-- 언제나 신청 가능(신청일 뿐 정기 수정이 아니다). 승인되면 schedule_exception 을 만들어 exception_id
+-- 로 연결한다. skip_rule_id 는 스키마 설계서에는 없던 컬럼이지만, "대체"로 낸 신청(겹치는 정기 규칙을
+-- 그 날만 건너뜀)을 승인 시점까지 기억해둘 곳이 필요해 schedule_exception 과 같은 패턴으로 추가했다
+-- (신청 시점에 학생이 고른 값을 그대로 승인 시 schedule_exception.skip_rule_id 에 옮겨 담는다).
+create table if not exists schedule_request(
+  id           uuid primary key default gen_random_uuid(),
+  branch_id    uuid not null references branch(id) on delete cascade,
+  student_id   uuid not null references student(id) on delete cascade,
+  date         date not null,
+  kind         text not null check (kind in ('study','academy','counsel','absent')),
+  reason       text not null,
+  title        text,
+  start_min    int  not null,
+  end_min      int  not null,
+  skip_rule_id uuid references schedule_rule(id) on delete set null,
+  status       text not null default 'pending',    -- pending | approved | rejected
+  note         text,
+  exception_id uuid references schedule_exception(id) on delete set null,
+  created_at   timestamptz not null default now(),
+  decided_at   timestamptz,
+  decided_by   uuid references person(id) on delete set null,
+  check (end_min > start_min)
+);
 
 -- ================= 학생 일회성 일정 변경 신청 (관리자 승인 필요) =================
 -- 정기 스케쥴(schedule_rule/schedule_hours)과 별개로 "이 날만" 바뀌는 요청. 입력 기간과 무관하게

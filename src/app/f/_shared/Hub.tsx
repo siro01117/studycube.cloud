@@ -22,20 +22,16 @@ import type { EditState } from "@/lib/schedule-window";
 // 빌드 타임에 고정되는 값 — 프로덕션 빌드에서는 이 분기가 아예 번들에 남지 않는다.
 const IS_DEV = process.env.NODE_ENV !== "production";
 
-/** 스케쥴 입력 항목의 잠금 팝업 문구 — 학생이 읽는 짧은 말로. */
-function scheduleLockLines(state: Extract<EditState, { open: false }>): string[] {
-  const lines = ["지금은 시간표 입력 기간이 아니에요."];
-  if (state.nextOpen) lines.push(`다음 입력 기간은 ${state.nextOpen}부터예요.`);
-  lines.push("급하면 카운터에 말씀해 주세요.");
-  return lines;
+/** 스케쥴 입력 항목의 잠금 팝업 문구 — 학생이 읽는 짧은 말로. 기간 개념이 없어졌으므로 "다음 입력
+ *  기간" 같은 안내는 하지 않는다(2026-08-22). */
+function scheduleLockLines(): string[] {
+  return ["이미 시간표를 제출했어요.", "고쳐야 하면 카운터에 말씀해 주세요."];
 }
 
-/** 열려 있을 때 카드에 보여줄 "언제까지 가능한지" 한 줄. 첫 제출(마감 없음)이면 안내할 마감이 없어 null. */
-function scheduleBanner(state: Extract<EditState, { open: true }>): string | null {
-  if (state.reason === "grace") {
-    return state.until ? `처음 낸 뒤 24시간 동안 고칠 수 있어요 — ${state.until}까지` : "처음 낸 뒤 24시간 동안 고칠 수 있어요";
-  }
-  return state.until ? `${state.until}까지 수정할 수 있어요` : null;
+/** 열려 있을 때 카드에 보여줄 한 줄 — sch9m2vt.tsx Wizard 상단 배너와 같은 문구를 쓴다(허브 카드 ↔
+ *  폼 상단이 다른 말을 하면 혼란스럽다). */
+function scheduleBanner(state: Extract<EditState, { open: true }>): string {
+  return state.reason === "first" ? "아직 제출 전이에요. 지금 낼 수 있어요." : "수정할 수 있게 열어 두었어요. 제출하면 다시 잠겨요.";
 }
 
 export default function Hub() {
@@ -50,8 +46,8 @@ export default function Hub() {
   // 마운트 시에도 false->true 로 바뀌지만 그때는 identity 가 still null 이라 이 deps 는 안 변한다.
   useScrollFocusOn(menuListRef, [!!identity], { focus: false });
 
-  // 스케쥴 입력 항목은 평소엔 닫혀 있다가, 그 학생이 지금 입력 가능한 상태(첫 제출/24시간 유예/입력
-  // 기간/개별 개방)일 때만 열린다 — sch9m2vt.tsx 가 폼 진입 시 쓰는 checkScheduleWindow 를 허브에서도
+  // 스케쥴 입력 항목은 평소엔 닫혀 있다가, 그 학생이 지금 입력 가능한 상태(첫 제출 전이거나, 관리자가
+  // 활성화한 경우)일 때만 열린다 — sch9m2vt.tsx 가 폼 진입 시 쓰는 checkScheduleWindow 를 허브에서도
   // 그대로 재사용한다. undefined=아직 확인 전, null=확인 실패(신원 만료 등, 어차피 폼 진입 시 다시 걸러짐).
   const scheduleItem = applyItems.find((item) => item.type === "schedule") ?? null;
   const [scheduleState, setScheduleState] = useState<EditState | null | undefined>(undefined);
@@ -103,7 +99,7 @@ export default function Hub() {
                   onLocked={
                     loading
                       ? undefined
-                      : () => setLockPopup({ title: item.title, lines: resolved && !resolved.open ? scheduleLockLines(resolved) : GENERIC_LOCKED_LINES })
+                      : () => setLockPopup({ title: item.title, lines: resolved && !resolved.open ? scheduleLockLines() : GENERIC_LOCKED_LINES })
                   }
                 />
               );

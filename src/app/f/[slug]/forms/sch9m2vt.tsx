@@ -72,15 +72,11 @@ function fmtLeave(min: number): string {
 let seq = 0;
 const uid = () => "id" + Date.now().toString(36) + ++seq;
 
-/** 열려 있을 때 위저드 상단에 보여줄 "언제까지 가능한지" 한 줄. 첫 제출(reason='first', 마감 없음)이면
- *  안내할 마감이 없어 null. 24시간 유예(reason='grace')는 "왜 지금 열려 있는지"도 같이 알려준다 —
- *  안 그러면 학생이 왜 마감이 있는지 모른 채 시간에 쫓기게 된다. Hub.tsx 의 같은 이름 로직과 문구를
- *  맞춘다(허브 카드 배너 ↔ 폼 상단 배너가 다른 말을 하면 혼란스럽다). */
-function scheduleBannerText(state: Extract<EditState, { open: true }>): string | null {
-  if (state.reason === "grace") {
-    return state.until ? `처음 낸 뒤 24시간 동안 고칠 수 있어요 — ${state.until}까지` : "처음 낸 뒤 24시간 동안 고칠 수 있어요";
-  }
-  return state.until ? `${state.until}까지 수정할 수 있어요` : null;
+/** 열려 있을 때 위저드 상단에 보여줄 한 줄. 기간 개념이 없어졌으므로(2026-08-22) 남은 시간 안내 대신
+ *  "왜 지금 열려 있는지"만 알려준다. Hub.tsx 의 같은 이름 로직과 문구를 맞춘다(허브 카드 배너 ↔ 폼
+ *  상단 배너가 다른 말을 하면 혼란스럽다). */
+function scheduleBannerText(state: Extract<EditState, { open: true }>): string {
+  return state.reason === "first" ? "아직 제출 전이에요. 지금 낼 수 있어요." : "수정할 수 있게 열어 두었어요. 제출하면 다시 잠겨요.";
 }
 
 export default function ScheduleForm({ def }: { def: FormDef }) {
@@ -192,10 +188,8 @@ function LockedScreen({
         <div style={{ width: 52, height: 52, borderRadius: "50%", background: "var(--panel2)", color: "var(--dim)", display: "grid", placeItems: "center", margin: "0 auto 14px" }}>
           <LockIcon />
         </div>
-        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>지금은 스케쥴 입력 기간이 아니에요</div>
-        {state.nextOpen && (
-          <div style={{ fontSize: 13.5, color: "var(--dim)", lineHeight: 1.6, marginBottom: 14 }}>다음 입력 기간: {state.nextOpen}부터</div>
-        )}
+        <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 8 }}>이미 시간표를 제출했어요</div>
+        <div style={{ fontSize: 13.5, color: "var(--dim)", lineHeight: 1.6, marginBottom: 14 }}>고쳐야 하면 카운터에 말씀해 주세요.</div>
         {lastStatus && <SubmissionStatusBadge status={lastStatus} note={lastNote} />}
       </div>
 
@@ -277,7 +271,7 @@ function Wizard({
   identity: StoredIdentity;
   onExpired: () => void;
   hubSlug: string;
-  /** 남은 시간 안내(grace/grant/window 종료 시각) — "first"(첫 제출 전, 마감 없음)면 null. */
+  /** 지금 열려 있는 이유 한 줄(첫 제출 전 / 활성화됨) — Wizard 상단 배너. */
   banner?: string | null;
   /** 입력 중인 내용이 있는지 상위(ScheduleForm)로 올린다 — 상단 "‹ 홈" 확인 여부에 쓰인다. */
   onDirtyChange: (dirty: boolean) => void;
