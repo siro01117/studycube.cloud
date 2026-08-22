@@ -174,7 +174,7 @@ export async function submitForm(formData: FormData): Promise<SubmitResult> {
     // 경우 대비). 테스트 신원(testBypass)은 화면 판정(schedule-window-actions.ts checkScheduleWindow)과
     // 동일하게 항상 열림으로 취급.
     if (def.type === "schedule" && studentId && !testBypass) {
-      const { state } = await resolveEditState(branch, studentId, def.type, slug);
+      const { state } = await resolveEditState(branch, studentId, def.type);
       if (!state.open) {
         return { ok: false, error: "이미 시간표를 제출했어요. 고쳐야 하면 카운터에 말씀해 주세요." };
       }

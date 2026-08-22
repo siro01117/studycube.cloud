@@ -37,12 +37,11 @@ export type ScheduleWindowCheck =
       lastNote: string | null;
     };
 
-/** FormData 필드: slug, name, code, (개발전용) test="1". */
+/** FormData 필드: name, code, (개발전용) test="1". */
 export async function checkScheduleWindow(formData: FormData): Promise<ScheduleWindowCheck> {
   await ready();
   const name = s(formData.get("name"));
   const code = s(formData.get("code"));
-  const slug = s(formData.get("slug")) || "sch9m2vt";
 
   // ===== DEV-ONLY: 허브 "테스트로 건너뛰기" 신원 — f/actions.ts submitForm 의 testBypass 와 동일 원칙.
   // NODE_ENV!=production 일 때만, 실제 학생 DB 행 없이 항상 열림으로 취급(빌드 타임 상수라 프로덕션에선
@@ -57,7 +56,7 @@ export async function checkScheduleWindow(formData: FormData): Promise<ScheduleW
   const branch = await branchId();
   if (!branch) return { ok: false, error: "처리할 수 없습니다. 잠시 후 다시 시도해주세요." };
 
-  const { state, lastPayload, lastStatus, lastNote } = await resolveEditState(branch, match.id, "schedule", slug);
+  const { state, lastPayload, lastStatus, lastNote } = await resolveEditState(branch, match.id, "schedule");
   return {
     ok: true,
     state,

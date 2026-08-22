@@ -7,7 +7,6 @@ import {
   upsertException, deleteException, savePeriods, setHours, clearHours,
   type Period, type Rule, type Exc, type Kind, type Hours,
 } from "./actions";
-import { importFromSheet, type ImportResult } from "./importActions";
 import { blockStyleOf, SCHEDULE_REASONS, reasonOf } from "@/lib/schedule";
 import WindowView from "./WindowView";
 import RequestsView from "./RequestsView";
@@ -526,31 +525,6 @@ export default function ScheduleDemo({
   };
   const deletePeriod = (id: string) => { updatePeriods((l) => l.filter((p) => p.id !== id)); if (editPeriod?.id === id) setEditPeriod(null); };
 
-  // ── 엑셀 일정 가져오기 (서버: 이름 매칭 -> 기존 등하원 전부 + 자습·외부 학원 규칙만 삭제 후 새로 깐다) ──
-  const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<ImportResult | null>(null);
-  const runImportFromSheet = async () => {
-    if (!window.confirm("기존 등하원·외부 학원 일정을 덮어씁니다. 계속할까요?")) return;
-    setImporting(true);
-    try {
-      const r = await importFromSheet();
-      setImportResult(r);
-      setSchedByStudent({});
-      if (dsid) {
-        setLoading(true);
-        const { periods: p, rules, exceptions, hours } = await listSchedule(dsid, weekStart, addDays(weekStart, 6));
-        setPeriods(p);
-        setSchedByStudent((d) => ({ ...d, [dsid]: { rules, excs: exceptions, hours } }));
-        setLoading(false);
-      }
-      say(`엑셀 일정 가져오기 완료 (등하원 ${r.hoursInserted}일, 일정 ${r.inserted}건, ${r.students}명)`);
-    } catch (err) {
-      say(err instanceof Error ? err.message : "가져오기에 실패했습니다");
-    } finally {
-      setImporting(false);
-    }
-  };
-
   const shown = useMemo(() => {
     const t = q.trim();
     return t ? students.filter((s) => s.name.includes(t) || String(s.seat_number ?? "").includes(t)) : students;
@@ -869,9 +843,6 @@ export default function ScheduleDemo({
                 savePeriod={savePeriod}
                 addPeriodRow={addPeriodRow}
                 deletePeriod={deletePeriod}
-                importing={importing}
-                importResult={importResult}
-                runImportFromSheet={runImportFromSheet}
               />
             </div>
           </>
@@ -1473,7 +1444,6 @@ export default function ScheduleDemo({
 type EditPeriodDraft = { id: string; label: string; startRaw: string; endRaw: string };
 function OpsView({
   periods, editPeriod, setEditPeriod, startEditPeriod, savePeriod, addPeriodRow, deletePeriod,
-  importing, importResult, runImportFromSheet,
 }: {
   periods: Period[];
   editPeriod: EditPeriodDraft | null;
@@ -1482,9 +1452,6 @@ function OpsView({
   savePeriod: () => void;
   addPeriodRow: () => void;
   deletePeriod: (id: string) => void;
-  importing: boolean;
-  importResult: ImportResult | null;
-  runImportFromSheet: () => void;
 }) {
   // 교시끼리 겹치는지(경고 표시용). 추가 자체는 막지 않는다.
   const overlapIds = useMemo(() => {
@@ -1541,26 +1508,10 @@ function OpsView({
             </tbody>
           </table>
         </div>
-        {/* 표 하단: 행 추가 · 엑셀 일정 가져오기 */}
+        {/* 표 하단: 행 추가 */}
         <div style={{ flex: "none", display: "flex", gap: 8, paddingTop: 10, flexWrap: "wrap" }}>
           <button className="btn" onClick={addPeriodRow} style={{ ...iconRow, height: 34, padding: "0 14px", fontSize: 12.5 }}><IconPlus />행 추가</button>
-          <button className="btn" onClick={runImportFromSheet} disabled={importing}
-            style={{ ...iconRow, height: 34, padding: "0 14px", fontSize: 12.5, opacity: importing ? 0.6 : 1, cursor: importing ? "not-allowed" : "pointer" }}>
-            <IconPlus />{importing ? "가져오는 중…" : "엑셀 일정 가져오기"}
-          </button>
         </div>
-        {importResult && (
-          <div style={{ flex: "none", marginTop: 10, padding: "10px 12px", borderRadius: 9, border: "1px solid var(--line)", background: "var(--panel2)", fontSize: 12.5 }}>
-            <div style={{ fontWeight: 700, marginBottom: 4 }}>
-              엑셀 일정 가져오기 결과 — 등하원 {importResult.hoursInserted}일 / 일정 {importResult.inserted}건 반영 / {importResult.students}명 매칭 / 경고 {importResult.warnings}건
-            </div>
-            {importResult.unmatched.length > 0 && (
-              <div style={{ color: "var(--danger)" }}>
-                매칭 실패 {importResult.unmatched.length}명: {importResult.unmatched.join(", ")}
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {/* 우측: 타임테이블 미리보기 (07:00~익일 01:00, 학생 타임테이블과 동일 좌표계) */}

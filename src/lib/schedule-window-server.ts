@@ -28,21 +28,21 @@ export type EditResolution = {
   lastNote: string | null;
 };
 
-/** 한 학생의 스케쥴 입력 개방 판정 — type/slug 는 submission.type 과 payload->>'_slug' (여러 폼이 같은
- *  type 을 공유할 가능성을 대비해 slug 까지 맞춘다 — actions.ts submitForm 의 재제출 조회와 동일 관례). */
+/** 한 학생의 스케쥴 입력 개방 판정 — 기준은 submission.type 뿐이다. payload->>'_slug' 는 부가 키라
+ *  값이 다르거나 예전 제출에 없으면 실제로는 제출했는데도 못 찾는 문제가 있었다(2026-08-22 수정) —
+ *  type='schedule' 은 registry.ts 상 슬러그 sch9m2vt 하나뿐이라 type 만으로 충분하다. */
 export async function resolveEditState(
   branchId: string,
   studentId: string,
   type: string,
-  slug: string,
 ): Promise<EditResolution> {
   const [subRows, grantRows] = await Promise.all([
     db.query<SubmissionLookupRow>(
       `select payload, first_submitted_at, created_at, status, note
          from submission
-        where branch_id=$1 and student_id=$2 and type=$3 and payload->>'_slug'=$4
+        where branch_id=$1 and student_id=$2 and type=$3
         order by created_at desc limit 1`,
-      [branchId, studentId, type, slug],
+      [branchId, studentId, type],
     ),
     db.query<{ id: string }>(
       `select id from schedule_grant where branch_id=$1 and student_id=$2 and consumed_at is null limit 1`,

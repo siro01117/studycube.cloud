@@ -14,7 +14,6 @@ import { PATROL_BY_KEY } from "@/lib/patrol";
 import { PENALTY_BY_KEY } from "@/lib/penalty";
 import { solid, tint } from "@/lib/semantic-color";
 import { todayKey, addDays, weekdayOf, weekStartKey, timeLabel, minuteOfKST } from "@/lib/date";
-import { getFormSlugByType } from "../../registry";
 
 const s = (v: FormDataEntryValue | null): string => String(v ?? "").trim();
 
@@ -106,7 +105,6 @@ export async function getMyScheduleOverview(formData: FormData): Promise<MySched
   const today = todayKey();
   const weekStart = weekStartKey(new Date(`${today}T12:00:00Z`));
   const rangeEnd = addDays(weekStart, 13); // 이번 주(월~일) + 다음 주(월~일)
-  const scheduleSlug = getFormSlugByType("schedule") ?? "";
 
   const [exRes, subRes] = await Promise.all([
     db.query<{ id: string; date: string; reason: string; title: string | null; start_min: number; end_min: number }>(
@@ -117,9 +115,9 @@ export async function getMyScheduleOverview(formData: FormData): Promise<MySched
     ),
     db.query<{ status: string; note: string | null }>(
       `select status, note from submission
-        where branch_id=$1 and student_id=$2 and type='schedule' and payload->>'_slug'=$3
+        where branch_id=$1 and student_id=$2 and type='schedule'
         order by created_at desc limit 1`,
-      [branch, id.studentId, scheduleSlug],
+      [branch, id.studentId],
     ),
   ]);
 

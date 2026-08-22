@@ -9,9 +9,6 @@ import { db } from "@/lib/db";
 import { guard } from "@/lib/auth";
 import { dateTimeLabel } from "@/lib/date";
 import { evaluateEdit } from "@/lib/schedule-window";
-import { getFormSlugByType } from "@/app/f/registry";
-
-const SCHEDULE_SLUG = getFormSlugByType("schedule") ?? "sch9m2vt";
 
 export type ActivationState = "first" | "grant" | "locked";
 export type StudentActivationRow = {
@@ -33,7 +30,7 @@ export async function listActivationStatus(): Promise<StudentActivationRow[]> {
       `with sub as (
          select distinct on (student_id) student_id, first_submitted_at, created_at
            from submission
-          where branch_id=$1 and type='schedule' and payload->>'_slug'=$2 and student_id is not null
+          where branch_id=$1 and type='schedule' and student_id is not null
           order by student_id, created_at desc
        )
        select s.id, s.name, seat.number as seat_number, sub.first_submitted_at, sub.created_at
@@ -42,7 +39,7 @@ export async function listActivationStatus(): Promise<StudentActivationRow[]> {
          left join sub on sub.student_id = s.id
         where s.branch_id=$1 and s.status='enrolled'
         order by seat.number nulls last, s.name`,
-      [me.activeBranchId, SCHEDULE_SLUG],
+      [me.activeBranchId],
     ),
     db.query<{ student_id: string }>(
       `select student_id from schedule_grant where branch_id=$1 and consumed_at is null`,
@@ -102,7 +99,8 @@ export async function activateStudents(fd: FormData): Promise<number> {
        join student st on st.id = v.student_id and st.branch_id = v.branch_id
       where exists (
         select 1 from submission sub
-         where sub.branch_id = v.branch_id and sub.student_id = v.student_id and sub.first_submitted_at is not null
+         where sub.branch_id = v.branch_id and sub.student_id = v.student_id
+           and sub.type = 'schedule' and sub.first_submitted_at is not null
       )
      on conflict (branch_id, student_id) where consumed_at is null do nothing
      returning student_id`,
