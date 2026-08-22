@@ -11,6 +11,7 @@ import { guard } from "@/lib/auth";
 import { dateTimeLabel } from "@/lib/date";
 import { academyToDbFields, type ImportHours, type DbAcademy } from "@/lib/schedule-import";
 import { adaptSubmissionPayload } from "@/lib/schedule-submission";
+import { asJsonObject } from "@/lib/jsonb";
 
 const s = (v: FormDataEntryValue | null): string => String(v ?? "").trim();
 
@@ -287,8 +288,8 @@ export async function deleteSubmission(id: string): Promise<void> {
   const row = rows.rows[0];
   if (!row) throw new Error("제출을 찾을 수 없습니다");
 
-  const p = row.payload;
-  const isTestPayload = typeof p === "object" && p !== null && !Array.isArray(p) && (p as Record<string, unknown>)._test === true;
+  // 운영에서는 jsonb 가 문자열로 온다(lib/jsonb.ts) — 정규화 후 판정한다.
+  const isTestPayload = asJsonObject(row.payload)?._test === true;
   if (!isTestPayload && row.student_id != null) {
     throw new Error("테스트 제출만 삭제할 수 있습니다");
   }

@@ -4,6 +4,7 @@
 // 이미 알고 있는 학생 이름·좌석을 채워 넣어 validateStudent() 를 그대로 통과시킨다.
 // 순수 함수만 — DOM·DB 의존 없음(관리자 화면의 클라이언트 컴포넌트에서도 그대로 import 해서 쓴다).
 import { validateStudent, type StudentResult } from "./schedule-import";
+import { asJsonObject } from "./jsonb";
 
 /** submission.payload(unknown, jsonb) → schedule-import.ts 검증기 입력 모양으로 감싼다.
  *  payload 형식 자체가 틀렸으면(객체가 아님 등) 그 자리에서 실패로 반환 — 호출부는 이 결과 하나로
@@ -14,10 +15,11 @@ export function adaptSubmissionPayload(
   seat: number | null,
   index: number,
 ): StudentResult {
-  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+  // 운영(postgres.js + fetch_types:false)은 jsonb 를 문자열로 돌려준다 — asJsonObject 가 그 차이를 흡수한다.
+  const p = asJsonObject(payload);
+  if (p === null) {
     return { ok: false, index, name: displayName || null, error: "제출 내용 형식이 올바르지 않습니다" };
   }
-  const p = payload as Record<string, unknown>;
   return validateStudent(
     { name: displayName, seat, hours: p.hours, restDays: p.restDays, academies: p.academies },
     index,

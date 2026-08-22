@@ -12,6 +12,7 @@ import {
 import { diffAgainstExisting, academyToDbFields, type DiffStatus, type ImportHours, type DbAcademy } from "@/lib/schedule-import";
 import { adaptSubmissionPayload } from "@/lib/schedule-submission";
 import { blockStyleOf } from "@/lib/schedule";
+import { asJsonObject } from "@/lib/jsonb";
 
 // ---------------- 아이콘(라인 스트로크, 이모지 금지) ----------------
 function IconCheck() {
@@ -68,7 +69,8 @@ const unlinkedChip = { label: "학생 미연결", fg: "var(--warn)", bg: "var(--
  *  제출의 표식. 이 판정은 서버(submissionActions.ts deleteSubmission)에도 동일하게 있다(단일 출처는
  *  아니지만, 클라는 UI 판단용이고 서버는 삭제 허용 여부의 최종 방어선이라 각자 필요 — 재계산 비용도 없다). */
 function isTestPayload(payload: unknown): boolean {
-  return typeof payload === "object" && payload !== null && !Array.isArray(payload) && (payload as Record<string, unknown>)._test === true;
+  // 운영에서는 jsonb 가 문자열로 온다(lib/jsonb.ts 주석 참고) — asJsonObject 로 먼저 정규화한다.
+  return asJsonObject(payload)?._test === true;
 }
 
 function Chip({ label, fg, bg }: { label: string; fg: string; bg: string }) {

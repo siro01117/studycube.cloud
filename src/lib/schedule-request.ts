@@ -18,6 +18,7 @@ import "server-only";
 // - rule_delete 신청 자신을 승인해 우리가 그 규칙을 지울 때도, 방금 approved 로 표시한 이 신청 행이
 //   cascade 로 함께 사라지지 않는다(prev_snapshot 이 살아남아야 되돌리기가 가능하다).
 import { db } from "./db";
+import { asJsonObject } from "./jsonb";
 
 type RequestRow = {
   id: string;
@@ -167,6 +168,8 @@ export async function revertScheduleRequest(id: string, branchId: string): Promi
     [id, branchId],
   );
   const row = r.rows[0];
+  // 운영에서는 jsonb 가 문자열로 온다(lib/jsonb.ts) — 스냅샷도 읽기 전에 정규화한다.
+  if (row) row.prev_snapshot = asJsonObject(row.prev_snapshot) as RuleSnapshot | null;
   if (!row) throw new Error("승인된 신청이 아닙니다");
 
   if (row.req_kind === "rule_edit") {

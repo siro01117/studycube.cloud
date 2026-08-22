@@ -3,6 +3,7 @@
 // 신청·설문 응답 조회 — 설문마다 payload 구조가 다르므로 키·값 표로 범용 렌더.
 import { useState, useTransition } from "react";
 import { setSubmissionStatus } from "./actions";
+import { asJsonObject } from "@/lib/jsonb";
 
 export type SubmissionRow = {
   id: string;
@@ -73,9 +74,11 @@ export default function SubmissionList({
 
 function SubmissionCard({ row, isOpen, onToggle, canManage }: { row: SubmissionRow; isOpen: boolean; onToggle: () => void; canManage: boolean }) {
   const [pending, start] = useTransition();
-  const slug = typeof row.payload?._slug === "string" ? row.payload._slug : null;
-  const isTest = row.payload?._test === true; // 허브 "테스트로 건너뛰기"(개발 전용)로 만들어진 제출
-  const entries = Object.entries(row.payload || {}).filter(([k]) => k !== "_slug" && k !== "_test");
+  // 운영에서는 jsonb 가 문자열로 온다(lib/jsonb.ts) — 정규화한 뒤 읽는다.
+  const payload = asJsonObject(row.payload) ?? {};
+  const slug = typeof payload._slug === "string" ? payload._slug : null;
+  const isTest = payload._test === true; // 허브 "테스트로 건너뛰기"(개발 전용)로 만들어진 제출
+  const entries = Object.entries(payload).filter(([k]) => k !== "_slug" && k !== "_test");
   const who = row.student_name ?? row.submitter_name ?? "익명";
 
   const setStatus = (status: string) => {
