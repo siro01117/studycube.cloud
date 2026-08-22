@@ -117,7 +117,7 @@ const BOOT_LOCK =
 
 // 스키마·시드 내용이 바뀌면 이 값을 올린다. 그때만 DDL 이 다시 돈다.
 // (schema.modules.ts / CORE_SQL / PERMISSIONS / MODULES 를 수정하면 반드시 갱신)
-const SCHEMA_VERSION = "2026-08-22.2"; // 스케쥴 입력 개방을 1회용 활성화로 단순화(schedule_grant.consumed_at)
+const SCHEMA_VERSION = "2026-08-22.3"; // 도시락 테이블(lunch_month/closure/order/meal) 이관 — 학생 신청 폼
 
 /** 이미 이 버전으로 부팅된 DB인지 한 번의 쿼리로 판정 */
 async function alreadyBooted(): Promise<boolean> {

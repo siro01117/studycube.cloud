@@ -4,6 +4,7 @@ import type { ComponentType } from "react";
 import type { FormDef } from "../../registry";
 import SurveySample from "./svq82fk1";
 import ScheduleForm from "./sch9m2vt";
+import LunchForm from "./lch4k9wp";
 import ScheduleRequestForm from "./exr8k3mq";
 import MyScheduleView from "./myts7fq2";
 import MyAttendanceView from "./myat4wkd";
@@ -12,6 +13,7 @@ import MyPenaltyView from "./mypt9rxb";
 export const FORM_COMPONENTS: Record<string, ComponentType<{ def: FormDef }>> = {
   svq82fk1: SurveySample,
   sch9m2vt: ScheduleForm,
+  lch4k9wp: LunchForm,
   exr8k3mq: ScheduleRequestForm,
   myts7fq2: MyScheduleView,
   myat4wkd: MyAttendanceView,

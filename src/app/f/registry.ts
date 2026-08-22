@@ -28,9 +28,9 @@ export const FORMS: FormDef[] = [
     slug: "lch4k9wp",
     type: "lunch",
     title: "도시락 신청",
-    desc: "한 달 치 식사를 신청합니다",
+    desc: "이번 달·다음 달 중식·석식을 날짜별로 신청해요",
     requiresStudent: true,
-    open: false, // 폼 화면 아직 없음 — 만들어지면 true 로만 바꾸면 열림
+    open: true, // 도시락은 항상 열린 메뉴(스케쥴 입력의 활성화 게이트와 무관)
     hub: true,
     order: 1,
   },

@@ -379,4 +379,55 @@ create table if not exists branch_setting(
   updated_at timestamptz not null default now(),
   primary key(branch_id, key)
 );
+
+-- ================= 도시락 (월 단위 선신청제) — 기존 도시락앱 체계 이식 =================
+-- 월별 설정(중/석식 라벨·가격·공지) + 휴무일 + 학생 주문(끼니 날짜들) + 선불 결제.
+create table if not exists lunch_month(
+  id           uuid primary key default gen_random_uuid(),
+  branch_id    uuid not null references branch(id) on delete cascade,
+  year         int  not null,
+  month        int  not null check (month between 1 and 12),
+  lunch_label  text not null default '중식',
+  lunch_price  int  not null default 0,
+  dinner_label text not null default '석식',
+  dinner_price int  not null default 0,
+  notice       text,
+  created_at   timestamptz not null default now(),
+  unique(branch_id, year, month)
+);
+
+-- 휴무일: 그날 중/석식 신청 차단(공휴일은 코드 상수로 자동, 이건 수동 지정분).
+create table if not exists lunch_closure(
+  month_id     uuid not null references lunch_month(id) on delete cascade,
+  date         date not null,
+  lunch_closed  boolean not null default true,
+  dinner_closed boolean not null default true,
+  label        text,
+  primary key(month_id, date)
+);
+
+-- 학생 주문(월×학생 1행) — 선불 결제 추적 포함.
+create table if not exists lunch_order(
+  id          uuid primary key default gen_random_uuid(),
+  branch_id   uuid not null references branch(id) on delete cascade,
+  month_id    uuid not null references lunch_month(id) on delete cascade,
+  student_id  uuid not null references student(id) on delete cascade,
+  paid        boolean not null default false,
+  paid_amount int not null default 0,
+  paid_date   date,
+  memo        text,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  unique(month_id, student_id)
+);
+create index if not exists idx_lunch_order_month on lunch_order(month_id);
+
+-- 주문한 끼니(날짜×중/석식). 발주 집계는 여기서.
+create table if not exists lunch_meal(
+  order_id   uuid not null references lunch_order(id) on delete cascade,
+  date       date not null,
+  meal_type  text not null check (meal_type in ('lunch','dinner')),
+  primary key(order_id, date, meal_type)
+);
+create index if not exists idx_lunch_meal_date on lunch_meal(date);
 `;
