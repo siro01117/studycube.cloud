@@ -401,16 +401,10 @@ export default function SubmissionsView() {
                           <td style={{ ...td, fontVariantNumeric: "tabular-nums", color: "var(--sub)" }}>{sub.createdLabel}</td>
                           <td style={{ ...td, fontVariantNumeric: "tabular-nums", color: "var(--faint)" }}>{sub.firstSubmittedLabel ?? "-"}</td>
                           <td style={td}>
-                            {!row.parseOk ? (
-                              // 사유를 title(호버 툴팁)에만 두지 않고 바로 옆에 텍스트로 보여준다 — 안 그러면
-                              // "형식 오류"만 보이고 왜 안 되는지 알려면 마우스를 올려야 해서 놓치기 쉽다.
-                              // 진짜 형식 문제일 때만 이 메시지를 쓴다 — 테스트 제출·미연결 제출은 형식은
-                              // 멀쩡하므로 아래 별도 분기에서 각자의 사유를 보여준다.
-                              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--danger)" }}>
-                                <IconAlertCircle />
-                                <span>형식 오류{row.parseError ? `: ${row.parseError}` : ""}</span>
-                              </span>
-                            ) : row.isTest ? (
+                            {/* 판정 순서가 중요하다 — 테스트·미연결 제출은 학생이 붙지 않아 파싱 단계에서도
+                                실패하므로, parseOk 를 먼저 보면 전부 "형식 오류"로 뭉뚱그려진다.
+                                그래서 사유가 분명한 쪽(테스트 → 미연결)을 먼저 판정하고, 형식 오류는 마지막에 둔다. */}
+                            {row.isTest ? (
                               <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--faint)" }}>
                                 <Chip {...testChip} />
                                 <span>테스트 신원으로 낸 제출이라 반영할 수 없어요</span>
@@ -419,6 +413,13 @@ export default function SubmissionsView() {
                               <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--warn)" }}>
                                 <Chip {...unlinkedChip} />
                                 <span>학생 정보와 연결되지 않아 반영할 수 없어요</span>
+                              </span>
+                            ) : !row.parseOk ? (
+                              // 사유를 title(호버 툴팁)에만 두지 않고 바로 옆에 텍스트로 보여준다 — 안 그러면
+                              // "형식 오류"만 보이고 왜 안 되는지 알려면 마우스를 올려야 해서 놓치기 쉽다.
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--danger)" }}>
+                                <IconAlertCircle />
+                                <span>형식 오류{row.parseError ? `: ${row.parseError}` : ""}</span>
                               </span>
                             ) : (
                               summaryOf(row.hours, row.academies, row.restDays)
