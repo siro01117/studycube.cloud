@@ -5,6 +5,7 @@ import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
 import { todayKey } from "@/lib/date";
 import ScheduleDemo, { type SStudent } from "./ScheduleDemo";
+import PageHeader from "../_shared/PageHeader";
 import type { Period } from "./actions";
 
 export const runtime = "nodejs";
@@ -51,20 +52,20 @@ export default async function SchedulePage({
 
   return (
     <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-      <header style={{ borderBottom: "1px solid var(--line)", background: "var(--card)", flex: "none" }}>
-        <div className="px-5 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/home" className="chip" style={{ textDecoration: "none" }}>‹ 홈</Link>
-            <span style={{ fontWeight: 700 }}>학생 스케쥴러</span>
-          </div>
+      <PageHeader
+        backHref="/home"
+        backLabel="홈"
+        title="학생 스케쥴러"
+        flexNone
+        right={
           <div className="flex items-center gap-3">
             <Link href="/m/schedule/import" className="chip" style={{ textDecoration: "none" }}>JSON 일괄 반영</Link>
             <div className="hide-mobile" style={{ fontSize: 12.5, color: "var(--dim)" }}>
               학생 {students.length}명
             </div>
           </div>
-        </div>
-      </header>
+        }
+      />
 
       <ScheduleDemo students={students} today={todayKey()} initialPeriods={initialPeriods} initialStudentId={initialStudentId} />
     </main>

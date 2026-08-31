@@ -49,7 +49,3 @@ export const PATROL_STATES: PatrolState[] = [
 export const PATROL_BY_KEY: Record<string, PatrolState> = Object.fromEntries(
   PATROL_STATES.map((s) => [s.key, s]),
 );
-
-export function patrolPoints(key: string): number {
-  return PATROL_BY_KEY[key]?.points ?? 0;
-}

@@ -133,55 +133,6 @@ export async function saveSeatPositions(formData: FormData) {
   revalidatePath("/m/seat");
 }
 
-// 격자 한 칸에 좌석 생성 (생성 순 자동번호)
-export async function placeSeat(formData: FormData) {
-  const me = await guard("seat.manage");
-  const roomId = s(formData.get("roomId"));
-  const gx = parseInt(String(formData.get("gridX") ?? ""), 10);
-  const gy = parseInt(String(formData.get("gridY") ?? ""), 10);
-  if (!roomId || !Number.isFinite(gx) || !Number.isFinite(gy)) return;
-  const number = await nextNumber(roomId);
-  await db.query(
-    `insert into seat(branch_id,room_id,grid_x,grid_y,number,label,status)
-     values ($1,$2,$3,$4,$5,$6,'empty')`,
-    [me.activeBranchId, roomId, gx, gy, number, String(number)],
-  );
-  revalidatePath("/m/seat");
-}
-
-// 한 방에 N개 대량 생성 — 빈 칸을 행 우선으로 채움, startNumber부터
-export async function bulkCreateSeats(formData: FormData) {
-  const me = await guard("seat.manage");
-  const roomId = s(formData.get("roomId"));
-  const count = Math.min(Math.max(parseInt(String(formData.get("count") ?? ""), 10) || 0, 1), 200);
-  if (!roomId) return;
-  const room = await db.query<{ cols: number; rows: number }>(`select cols, rows from room where id=$1`, [roomId]);
-  if (!room.rows[0]) throw new Error("방 없음");
-  const existing = await db.query<{ grid_x: number; grid_y: number }>(
-    `select grid_x, grid_y from seat where room_id=$1`,
-    [roomId],
-  );
-  const taken = new Set(existing.rows.map((r) => `${r.grid_x},${r.grid_y}`));
-  const startRaw = parseInt(String(formData.get("startNumber") ?? ""), 10);
-  let number = Number.isFinite(startRaw) ? startRaw : await nextNumber(roomId);
-
-  let made = 0;
-  for (let y = 0; y < room.rows[0].rows && made < count; y++) {
-    for (let x = 0; x < room.rows[0].cols && made < count; x++) {
-      const px = ORIGIN_X + x * GAP_X, py = ORIGIN_Y + y * GAP_Y; // 셀 → 픽셀(격자)
-      if (taken.has(`${px},${py}`)) continue;
-      await db.query(
-        `insert into seat(branch_id,room_id,grid_x,grid_y,number,label,status)
-         values ($1,$2,$3,$4,$5,$6,'empty')`,
-        [me.activeBranchId, roomId, px, py, number, String(number)],
-      );
-      number++;
-      made++;
-    }
-  }
-  revalidatePath("/m/seat");
-}
-
 export async function updateSeat(formData: FormData) {
   const me = await guard("seat.manage");
   const seatId = s(formData.get("seatId"));

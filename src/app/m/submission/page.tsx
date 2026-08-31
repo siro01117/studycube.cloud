@@ -1,10 +1,10 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { getMe, can } from "@/lib/auth";
 import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
 import { dateTimeLabel, todayKey } from "@/lib/date";
 import SubmissionList, { type SubmissionRow } from "./SubmissionList";
+import PageHeader from "../_shared/PageHeader";
 
 export const runtime = "nodejs";
 
@@ -63,15 +63,13 @@ export default async function SubmissionPage({
 
   return (
     <main style={{ minHeight: "100dvh" }}>
-      <header style={{ borderBottom: "1px solid var(--line)", background: "var(--card)" }}>
-        <div className="mx-auto max-w-[1080px] px-5 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/home" className="chip" style={{ textDecoration: "none" }}>‹ 홈</Link>
-            <span style={{ fontWeight: 700 }}>신청·설문 응답</span>
-          </div>
-          <div style={{ fontSize: 12.5, color: "var(--sub)" }}>최근 {list.length}건</div>
-        </div>
-      </header>
+      <PageHeader
+        backHref="/home"
+        backLabel="홈"
+        title="신청·설문 응답"
+        maxWidth
+        right={<div style={{ fontSize: 12.5, color: "var(--sub)" }}>최근 {list.length}건</div>}
+      />
       <div className="mx-auto max-w-[1080px] px-5 py-5">
         <SubmissionList
           rows={list}

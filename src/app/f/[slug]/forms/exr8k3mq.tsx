@@ -17,11 +17,10 @@
 // e.currentTarget.value 를 읽어서, 포커스 시 select(), 자동 포커스 이동은 커밋(리렌더) 이후인
 // useEffect 에서(sch9m2vt.tsx/ScheduleDemo.tsx 와 같은 패턴).
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import FormShell from "../../_shared/FormShell";
 import IdentityExpired from "../../_shared/IdentityExpired";
-import { useIdentity, type StoredIdentity } from "../../_shared/useIdentity";
+import { useIdentity, useRedirectIfNoIdentity, type StoredIdentity } from "../../_shared/useIdentity";
 import { useScrollFocusOn } from "../../_shared/useScrollFocus";
 import { getHubSlug } from "../../registry";
 import type { FormDef } from "../../registry";
@@ -72,12 +71,8 @@ const statusChip: Record<MyRequestRow["status"], { label: string; fg: string; bg
 
 export default function ScheduleRequestForm({ def }: { def: FormDef }) {
   const { identity, hydrated, clear } = useIdentity();
-  const router = useRouter();
   const hubSlug = getHubSlug();
-
-  useEffect(() => {
-    if (hydrated && !identity) router.replace(`/f/${hubSlug}`);
-  }, [hydrated, identity, router, hubSlug]);
+  useRedirectIfNoIdentity(hydrated, identity, hubSlug);
 
   const [expired, setExpired] = useState(false);
   // 신청 갈래(reqKind)를 고르거나 카드에 뭔가 입력했으면 true — 상단 "‹ 홈" 확인 여부에 쓰인다.

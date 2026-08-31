@@ -157,22 +157,6 @@ export async function removePatrolEvent(formData: FormData) {
   revalidatePath("/seat");
 }
 
-// 마지막 순찰 기록 취소 (오탭 정정)
-export async function undoLastPatrol(formData: FormData) {
-  const me = await guard("patrol.manage");
-  const id = s(formData.get("studentId"));
-  if (!id) return;
-  await db.query(
-    `delete from patrol_event
-      where id = (select id from patrol_event
-                   where student_id=$1 and branch_id=$2 and date=$3
-                   order by at desc limit 1)`,
-    [id, me.activeBranchId, todayStr()],
-  );
-  revalidatePath("/m/seat");
-  revalidatePath("/seat");
-}
-
 // 순찰 시작 — 세션 행 생성(시작 시각 기록). id 는 클라가 생성해 patrol_event 와 매칭.
 export async function startPatrol(formData: FormData) {
   const me = await guard("patrol.manage");
@@ -443,17 +427,4 @@ export async function getOpenPatrolSession(): Promise<OpenPatrolSession | null> 
     timeLabel: time,
     lastLabel: row.last_at_kst ? row.last_at_kst.slice(11, 16) : null,
   };
-}
-
-// 특정 학생·날짜 순찰 기록 (팝업용)
-export async function getPatrolEvents(studentId: string, date: string) {
-  const me = await guard("patrol.view");
-  const r = await db.query<{ state: string; points: number; at: string }>(
-    `select state, points, at::text as at
-       from patrol_event
-      where student_id=$1 and branch_id=$2 and date=$3
-      order by at`,
-    [studentId, me.activeBranchId, date],
-  );
-  return r.rows;
 }

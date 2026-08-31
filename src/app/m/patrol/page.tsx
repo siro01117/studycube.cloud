@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { getPatrolSessions, getPatrolDates } from "../seat/patrolActions";
 import { todayKey } from "@/lib/date";
 import PatrolBoard, { type PSeat, type PRoom, type PStudent } from "./PatrolBoard";
+import PageHeader from "../_shared/PageHeader";
 
 export const runtime = "nodejs";
 
@@ -32,18 +33,18 @@ export default async function PatrolPage() {
   return (
     <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <PhoneRedirect to="/records" />
-      <header style={{ borderBottom: "1px solid var(--line)", background: "var(--card)", flex: "none" }}>
-        <div className="px-5 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/m/seat" className="chip" style={{ textDecoration: "none" }}>‹ 좌석</Link>
-            <span style={{ fontWeight: 700 }}>순찰 기록</span>
-          </div>
+      <PageHeader
+        backHref="/m/seat"
+        backLabel="좌석"
+        title="순찰 기록"
+        flexNone
+        right={
           <div className="flex items-center gap-3">
             <Link href="/patrol" className="chip mobile-only" style={{ textDecoration: "none", color: "var(--accent)", fontWeight: 700 }}>순찰 시작 →</Link>
             <span className="hide-mobile" style={{ fontSize: 12.5, color: "var(--dim)" }}>오늘 순찰 {sessions.length}회</span>
           </div>
-        </div>
-      </header>
+        }
+      />
 
       <PatrolBoard
         rooms={rooms.rows}

@@ -16,7 +16,3 @@ export function verifyPin(pin: string, stored: string): boolean {
   return calc.length === want.length && timingSafeEqual(calc, want);
 }
 
-// 6자리 숫자 PIN 자동 생성
-export function genPin(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
-}

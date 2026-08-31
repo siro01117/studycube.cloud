@@ -5,6 +5,7 @@ import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
 import FloorEditor, { type Room, type Seat, type Student, type ScheduleInfo } from "./FloorEditor";
 import PhoneRedirect from "../_shared/PhoneRedirect";
+import PageHeader from "../_shared/PageHeader";
 import { todayKey as todayStr, weekdayOf, minuteOfKST } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
 import type { DaySlot, Period, ActualAttendance } from "@/lib/schedule";
 import { getOpenPatrolSession } from "./patrolActions";
@@ -146,19 +147,18 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
   return (
     <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <PhoneRedirect to="/seat" />
-      <header style={{ borderBottom: "1px solid var(--line)", background: "var(--card)" }}>
-        <div className="px-5 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/home" className="chip" style={{ textDecoration: "none" }}>‹ 홈</Link>
-            <span style={{ fontWeight: 700 }}>좌석 배치도</span>
-            {branchName && <span className="chip">{branchName}</span>}
-          </div>
+      <PageHeader
+        backHref="/home"
+        backLabel="홈"
+        title="좌석 배치도"
+        titleExtra={branchName && <span className="chip">{branchName}</span>}
+        right={
           <div className="flex items-center gap-3">
             {canPatrol && <Link href="/patrol" className="chip mobile-only" style={{ textDecoration: "none", color: "var(--accent)", fontWeight: 700 }}>순찰 시작 →</Link>}
             <span className="hide-mobile" style={{ fontSize: 12.5, color: "var(--dim)" }}>{rooms.rows.length}개 방 · 좌석 {seats.rows.length}</span>
           </div>
-        </div>
-      </header>
+        }
+      />
 
       <FloorEditor
         key={initialRoomId ?? "none"}

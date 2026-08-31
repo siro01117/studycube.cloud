@@ -40,5 +40,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# 로컬 개발 DB
-.pglite/
+# 로컬 개발 DB (.pglite.broken* 잔해 포함)
+.pglite*
+
+# 로컬 개발 로그
+dev.log

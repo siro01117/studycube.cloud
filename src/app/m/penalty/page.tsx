@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { getMe, can } from "@/lib/auth";
 import PhoneRedirect from "../_shared/PhoneRedirect";
 import { ready } from "@/lib/bootstrap";
@@ -8,6 +7,7 @@ import { weekStartLabel, PENALTY_BY_KEY } from "@/lib/penalty";
 import { weekStartKey, todayKey } from "@/lib/date";
 import { PATROL_BY_KEY } from "@/lib/patrol";
 import PenaltyView, { type PRoom, type PSeat, type PStudent, type Breakdown } from "./PenaltyView";
+import PageHeader from "../_shared/PageHeader";
 
 export const runtime = "nodejs";
 
@@ -70,15 +70,13 @@ export default async function PenaltyPage() {
   return (
     <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <PhoneRedirect to="/penalty" />
-      <header style={{ borderBottom: "1px solid var(--line)", background: "var(--card)", flex: "none" }}>
-        <div className="px-5 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/m/seat" className="chip" style={{ textDecoration: "none" }}>‹ 좌석</Link>
-            <span style={{ fontWeight: 700 }}>벌점</span>
-          </div>
-          <div style={{ fontSize: 12.5, color: "var(--dim)" }}>이번 주 {wsLabel} ~ · 월요일 리셋</div>
-        </div>
-      </header>
+      <PageHeader
+        backHref="/m/seat"
+        backLabel="좌석"
+        title="벌점"
+        flexNone
+        right={<div style={{ fontSize: 12.5, color: "var(--dim)" }}>이번 주 {wsLabel} ~ · 월요일 리셋</div>}
+      />
 
       <PenaltyView
         rooms={rooms.rows}

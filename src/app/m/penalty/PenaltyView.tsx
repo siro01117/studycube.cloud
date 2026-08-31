@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { CSSProperties } from "react";
 import ContextMenu, { type MenuItem } from "../_shared/ContextMenu";
+import Modal from "../_shared/Modal";
 import { levelLabel } from "../student/util";
 import { PENALTY_REASONS, penaltyHeat, PENALTY_WARN } from "@/lib/penalty";
 import { weekDays } from "@/lib/date";
@@ -244,9 +245,13 @@ export default function PenaltyView({
 
       {/* 학생 벌점 상세 */}
       {detailStudent && (
-        <>
-          <div onClick={() => setDetailId(null)} style={{ position: "fixed", inset: 0, background: "rgba(20,22,30,.45)", zIndex: 55 }} />
-          <div style={{ position: "fixed", left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: 440, maxWidth: "calc(100vw - 32px)", maxHeight: "calc(100dvh - 60px)", overflow: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 20, boxShadow: "0 24px 70px rgba(20,22,30,.35)", zIndex: 56, display: "flex", flexDirection: "column" }}>
+        <Modal
+          onClose={() => setDetailId(null)}
+          backdropBackground="rgba(20,22,30,.45)"
+          backdropZIndex={55}
+          panelZIndex={56}
+          panelStyle={{ width: 440, maxWidth: "calc(100vw - 32px)", maxHeight: "calc(100dvh - 60px)", overflow: "hidden", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 20, boxShadow: "0 24px 70px rgba(20,22,30,.35)", display: "flex", flexDirection: "column" }}
+        >
             <div className="flex items-center justify-between" style={{ padding: "18px 22px", borderBottom: "1px solid var(--line)", flex: "none" }}>
               <div>
                 <div style={{ fontSize: 17, fontWeight: 800 }}>{detailStudent.name} <span style={{ fontSize: 12.5, color: "var(--dim)", fontWeight: 600 }}>{levelLabel(detailStudent)}</span></div>
@@ -315,8 +320,7 @@ export default function PenaltyView({
                 </div>
               );
             })()}
-          </div>
-        </>
+        </Modal>
       )}
     </div>
   );

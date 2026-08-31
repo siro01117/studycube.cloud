@@ -271,24 +271,12 @@ export function summarizeAttendance(days: AttendanceDay[], hasSchedule: boolean)
 
 // ================= B. 순찰 기록 =================
 export type PatrolRow = { date: string; at: string; state: string; points: number; note: string | null; hour: number };
-export type PatrolListItem = { date: string; time: string; label: string; dot: string; points: number; note: string | null };
 
 // 이 화면(학생 인사이트)의 "위반" 판정 단일 기준 — 점수(points)가 0보다 큰 순찰 기록만 위반으로 센다.
 // 입석·학원·원내 수업·주간 상담(points=0)은 위반이 아니다(lib/patrol.ts PATROL_STATES 정의 그대로).
 // 순찰 히트맵(buildPatrolCalendar)·시간대 이벤트 합산(combinePointEvents) 양쪽이 이 함수 하나만 참조한다.
 export function isPatrolViolation(row: Pick<PatrolRow, "points">): boolean {
   return row.points > 0;
-}
-
-export function buildPatrolList(rows: PatrolRow[]): PatrolListItem[] {
-  return rows.map((r) => {
-    const cfg = PATROL_BY_KEY[r.state];
-    return {
-      date: shortDateLabel(r.date), time: timeLabel(r.at),
-      label: cfg?.label ?? r.state, dot: cfg?.dot ?? "var(--faint)",
-      points: r.points, note: r.note,
-    };
-  });
 }
 
 export type PatrolStateCount = { key: string; label: string; dot: string; count: number };
@@ -299,21 +287,6 @@ export function patrolStateCounts(rows: PatrolRow[]): PatrolStateCount[] {
     .filter((st) => counts.has(st.key))
     .map((st) => ({ key: st.key, label: st.label, dot: st.dot, count: counts.get(st.key)! }))
     .sort((a, b) => b.count - a.count);
-}
-
-// 자리 문제(수면·딴짓·자리비움)가 잦은 시간대 히스토그램. 07~익일02시(순찰 활동 범위)를 1시간 단위로.
-const PROBLEM_STATES = new Set(["sleep", "distract", "away"]);
-export type HourBucket = { label: string; count: number };
-export function problemHourHistogram(rows: PatrolRow[]): HourBucket[] {
-  const counts = new Map<number, number>();
-  for (const r of rows) {
-    if (!PROBLEM_STATES.has(r.state)) continue;
-    const h = r.hour < 6 ? r.hour + 24 : r.hour; // 새벽 0~5시는 전날 연장으로 취급
-    counts.set(h, (counts.get(h) ?? 0) + 1);
-  }
-  const buckets: HourBucket[] = [];
-  for (let h = 7; h <= 26; h++) buckets.push({ label: `${h % 24}시`, count: counts.get(h) ?? 0 });
-  return buckets;
 }
 
 // ================= B-2. 순찰 히트맵(달력, 학습 태도) =================
@@ -506,16 +479,6 @@ export function buildPenaltyReasonBars(events: PointEvent[]): PenaltyReasonBar[]
     .sort((a, b) => b.count - a.count);
   const max = list.length ? list[0].count : 1;
   return list.map((r) => ({ ...r, pct: Math.round((r.count / max) * 100) }));
-}
-
-// ---- C-4. 최근 내역(최근 10건만) ----
-export type PenaltyRecentItem = { date: string; time: string; label: string; points: number; note: string | null; dot: string };
-export function buildPenaltyRecent(events: PointEvent[]): PenaltyRecentItem[] {
-  return events
-    .slice()
-    .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
-    .slice(0, 10)
-    .map((e) => ({ date: shortDateLabel(e.date), time: timeLabel(e.at), label: e.label, points: e.points, note: e.note, dot: e.dot }));
 }
 
 // ================= D. 통계 신뢰도(카드 제목 옆 물음표 배지) =================

@@ -7,6 +7,7 @@
 // 렌더 중 sessionStorage 접근 금지(서버/클라 첫 렌더 불일치 방지) — 반드시 useEffect 에서
 // 읽고 상태로 반영한다. hydrated 가 true 가 되기 전에는 identity 를 항상 null 로 취급할 것.
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { StudentIdentity } from "./StudentGate";
 
 const STORAGE_KEY = "f:identity";
@@ -60,4 +61,14 @@ export function useIdentity() {
   }, []);
 
   return { identity, hydrated, save, clear };
+}
+
+/** 신원 없이(=허브를 거치지 않고) 폼 주소로 바로 들어온 경우 허브로 보낸다. 폼 7개가 복붙하던 4줄짜리
+ * useEffect를 여기로 모았다 — 호출부는 자기 useIdentity() 결과의 hydrated/identity를 그대로 넘기면 된다
+ * (여기서 useIdentity()를 다시 부르면 상태 인스턴스가 둘로 갈라지므로 일부러 그렇게 하지 않았다). */
+export function useRedirectIfNoIdentity(hydrated: boolean, identity: StoredIdentity | null, hubSlug: string) {
+  const router = useRouter();
+  useEffect(() => {
+    if (hydrated && !identity) router.replace(`/f/${hubSlug}`);
+  }, [hydrated, identity, router, hubSlug]);
 }

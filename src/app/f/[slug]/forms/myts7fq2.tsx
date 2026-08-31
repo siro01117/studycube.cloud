@@ -3,12 +3,8 @@
 // 내 시간표(읽기 전용) — 요일별 등·하원 + 정기 일정 + 승인된 임시 일정(이번 주·다음 주)을 한 화면에서
 // 확인한다. 쓰기 동작 없음 — 전부 student-info-actions.ts getMyScheduleOverview 하나로 조회.
 // 흐름은 다른 공개 폼과 동일: 신원 없이 바로 들어오면 허브로, 화면 진입 시 한 번만 서버에 묻는다.
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import FormShell from "../../_shared/FormShell";
-import IdentityExpired from "../../_shared/IdentityExpired";
-import { useIdentity } from "../../_shared/useIdentity";
-import { getHubSlug } from "../../registry";
+// 신원 가드/로딩·에러 스위치/빈 상태 안내는 공용 셸 ReadOnlyInfoShell(../../_shared/ReadOnlyInfoShell.tsx)이 맡는다.
+import ReadOnlyInfoShell, { Section, EmptySection } from "../../_shared/ReadOnlyInfoShell";
 import type { FormDef } from "../../registry";
 import { blockStyleOf } from "@/lib/schedule";
 import {
@@ -21,71 +17,14 @@ import type { MyHoursRow, MyRuleRow } from "./schedule-request-actions";
 const DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"];
 
 export default function MyScheduleView({ def }: { def: FormDef }) {
-  const { identity, hydrated, clear } = useIdentity();
-  const router = useRouter();
-  const hubSlug = getHubSlug();
-
-  useEffect(() => {
-    if (hydrated && !identity) router.replace(`/f/${hubSlug}`);
-  }, [hydrated, identity, router, hubSlug]);
-
-  const [result, setResult] = useState<MyScheduleOverviewResult | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [expired, setExpired] = useState(false);
-
-  useEffect(() => {
-    if (!hydrated || !identity) return;
-    let alive = true;
-    setLoading(true);
-    const fd = new FormData();
-    fd.set("slug", def.slug);
-    fd.set("name", identity.name);
-    fd.set("code", identity.code);
-    if (identity._test) fd.set("test", "1");
-    getMyScheduleOverview(fd).then((r) => {
-      if (!alive) return;
-      if (!r.ok && r.kind === "identity") {
-        clear();
-        setExpired(true);
-      } else {
-        setResult(r);
-      }
-      setLoading(false);
-    });
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated, identity?.name, identity?.code, def.slug]);
-
   return (
-    <FormShell title={def.title} subtitle={def.desc} maxWidth={480} backHref={`/f/${hubSlug}`}>
-      {!hydrated || !identity ? null : expired ? (
-        <IdentityExpired hubSlug={hubSlug} />
-      ) : loading || !result ? (
-        <div style={{ fontSize: 15, color: "var(--dim)", textAlign: "center", padding: "24px 4px" }}>불러오는 중…</div>
-      ) : !result.ok ? (
-        <div style={{ fontSize: 15, color: "var(--danger)", fontWeight: 600, textAlign: "center", padding: "24px 4px" }}>{result.error}</div>
-      ) : result.testBypass ? (
-        <NoDataNotice />
-      ) : (
-        <Content result={result} />
-      )}
-    </FormShell>
-  );
-}
-
-function NoDataNotice() {
-  return (
-    <div style={{ textAlign: "center", padding: "28px 4px 8px" }}>
-      <div style={{ width: 48, height: 48, borderRadius: "50%", background: "var(--panel2)", color: "var(--dim)", display: "grid", placeItems: "center", margin: "0 auto 14px" }}>
-        <InfoIcon />
-      </div>
-      <div style={{ fontSize: 15.5, fontWeight: 800, marginBottom: 8 }}>테스트 신원에는 데이터가 없어요</div>
-      <div style={{ fontSize: 15, color: "var(--dim)", lineHeight: 1.6 }}>
-        실제 학생 코드로 확인하면 시간표를 볼 수 있어요.
-      </div>
-    </div>
+    <ReadOnlyInfoShell<Extract<MyScheduleOverviewResult, { ok: true }>>
+      def={def}
+      fetchResult={getMyScheduleOverview}
+      noDataText="실제 학생 코드로 확인하면 시간표를 볼 수 있어요."
+    >
+      {(result) => <Content result={result} />}
+    </ReadOnlyInfoShell>
   );
 }
 
@@ -171,22 +110,6 @@ function Content({ result }: { result: Extract<MyScheduleOverviewResult, { ok: t
         </>
       )}
     </div>
-  );
-}
-
-function Section({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div style={{ fontSize: 15.5, fontWeight: 800, marginBottom: desc ? 2 : 10 }}>{title}</div>
-      {desc && <div style={{ fontSize: 12, color: "var(--faint)", marginBottom: 10 }}>{desc}</div>}
-      {children}
-    </div>
-  );
-}
-
-function EmptySection({ text }: { text: string }) {
-  return (
-    <div style={{ fontSize: 15, color: "var(--faint)", padding: "12px 4px" }}>{text}</div>
   );
 }
 
@@ -338,14 +261,4 @@ function parseClockLabel(label: string): number | null {
   const m = label.trim().match(/^(\d{2}):(\d{2})$/);
   if (!m) return null;
   return Number(m[1]) * 60 + Number(m[2]);
-}
-
-function InfoIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="9" />
-      <line x1="12" y1="11" x2="12" y2="16" />
-      <line x1="12" y1="8" x2="12.01" y2="8" />
-    </svg>
-  );
 }

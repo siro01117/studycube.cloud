@@ -5,6 +5,7 @@ import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
 import StudentList from "./StudentList";
 import type { Student } from "./util";
+import PageHeader from "../_shared/PageHeader";
 
 export const runtime = "nodejs";
 
@@ -32,18 +33,19 @@ export default async function StudentPage() {
 
   return (
     <main style={{ minHeight: "100dvh" }}>
-      <header style={{ borderBottom: "1px solid var(--line)", background: "var(--card)" }}>
-        <div className="mx-auto max-w-[1080px] px-5 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/home" className="chip" style={{ cursor: "pointer" }}>‹ 홈</Link>
-            <span style={{ fontWeight: 700 }}>학생 관리</span>
-          </div>
+      <PageHeader
+        backHref="/home"
+        backLabel="홈"
+        backLinkStyle={{ cursor: "pointer" }}
+        title="학생 관리"
+        maxWidth
+        right={
           <div className="flex items-center gap-3">
             <Link href="/m/submission" className="chip" style={{ cursor: "pointer" }}>신청·설문 응답 →</Link>
             <div style={{ fontSize: 12.5, color: "var(--sub)" }}>재원 {enrolled} · 전체 {rows.length}</div>
           </div>
-        </div>
-      </header>
+        }
+      />
 
       <div className="mx-auto max-w-[1080px] px-5 py-5">
         <StudentList students={rows} canEdit={canEdit} canAttend={canAttend} canManageSeat={canManageSeat} />

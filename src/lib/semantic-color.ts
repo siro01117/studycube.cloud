@@ -32,16 +32,21 @@ export function solid(key: SemanticKey): string {
   return SEMANTIC[key];
 }
 
+// tint/ghostTint 둘 다 "기준색을 var(--card) 에 pct% 섞는다"는 같은 계산 — 기본 pct 만 다르다.
+function cardMix(key: SemanticKey, pct: number): string {
+  return `color-mix(in srgb, ${SEMANTIC[key]} ${pct}%, var(--card))`;
+}
+
 /** 옅은 배경 채움. pct 는 기준색을 섞는 비율(%) — 기본 16(스케쥴 확정 블록 기준),
  * 순찰 마크처럼 "채워진 느낌"이 더 필요하면 호출부에서 20~26 정도로 올려 쓴다. */
 export function tint(key: SemanticKey, pct = 16): string {
-  return `color-mix(in srgb, ${SEMANTIC[key]} ${pct}%, var(--card))`;
+  return cardMix(key, pct);
 }
 
 /** tint 보다 한 단계 더 옅은 배경 — 아직 확정 안 된 예상(고스트)에 쓴다. 기본 12,
  * 가장 흔한 자습/입석은 호출부에서 더 낮은 pct(예: 4~5)를 넘겨 "가장 옅게" 만든다. */
 export function ghostTint(key: SemanticKey, pct = 12): string {
-  return `color-mix(in srgb, ${SEMANTIC[key]} ${pct}%, var(--card))`;
+  return cardMix(key, pct);
 }
 
 /** 옅은 배경 위에서도 대비가 나오는 어두운 글자색(검정을 섞어 눌러줌). */

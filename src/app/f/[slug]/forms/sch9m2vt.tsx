@@ -7,11 +7,10 @@
 // blur 에서 e.currentTarget.value 를 읽어서, 포커스 시 select(), 자동 포커스 이동은
 // 커밋(리렌더) 이후인 useEffect 에서(src/app/m/schedule/ScheduleDemo.tsx 의 Inp 패턴과 동일).
 import { useEffect, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import FormShell from "../../_shared/FormShell";
 import IdentityExpired from "../../_shared/IdentityExpired";
-import { useIdentity, type StoredIdentity } from "../../_shared/useIdentity";
+import { useIdentity, useRedirectIfNoIdentity, type StoredIdentity } from "../../_shared/useIdentity";
 import { useScrollFocusOn } from "../../_shared/useScrollFocus";
 import { submitForm } from "../../actions";
 import { getHubSlug } from "../../registry";
@@ -81,16 +80,12 @@ function scheduleBannerText(state: Extract<EditState, { open: true }>): string {
 
 export default function ScheduleForm({ def }: { def: FormDef }) {
   const { identity, hydrated, clear } = useIdentity();
-  const router = useRouter();
   const hubSlug = getHubSlug();
+  // 신원 없이(=허브를 거치지 않고) 폼 주소로 바로 들어온 경우 허브로 보낸다.
+  useRedirectIfNoIdentity(hydrated, identity, hubSlug);
   // 위저드가 입력 중인 내용을 갖고 있는지(Wizard 가 onDirtyChange 로 올려준다) — 상단 "‹ 홈" 을
   // 누를 때 확인을 띄울지 결정한다. 완료·잠김·확인 중 화면에서는 false 로 남아 바로 이동한다.
   const [dirty, setDirty] = useState(false);
-
-  // 신원 없이(=허브를 거치지 않고) 폼 주소로 바로 들어온 경우 허브로 보낸다.
-  useEffect(() => {
-    if (hydrated && !identity) router.replace(`/f/${hubSlug}`);
-  }, [hydrated, identity, router, hubSlug]);
 
   // 입력 기간(열림/잠김) 판정 — 화면 진입 시 한 번만 서버에 묻는다(submitForm 은 제출 시 다시 재판정하므로
   // 여기서 매 렌더마다 다시 물을 필요는 없다). 실패(본인확인 만료)면 세션 신원을 지우고 안내 화면으로.

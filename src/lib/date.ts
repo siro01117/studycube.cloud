@@ -42,41 +42,35 @@ export function weekDays(weekStart: string): { key: string; wd: string; dayNum: 
   });
 }
 
+/** timestamptz 문자열 → en-GB KST 부품(get(type))으로 뽑는 공용 헬퍼. timeLabel/dateTimeLabel/
+ * minuteOfKST 가 각자 반복하던 Intl.DateTimeFormat(...).formatToParts() + find() 패턴을 여기 하나로
+ * 합친다. opts 만 다르고 나머지(로케일 en-GB, timeZone KST)는 항상 같다. */
+function kstParts(at: string, opts: Intl.DateTimeFormatOptions): (type: string) => string | undefined {
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: KST, ...opts }).formatToParts(new Date(at));
+  return (type: string) => parts.find((p) => p.type === type)?.value;
+}
+
 /** timestamptz 문자열 → KST 기준 "HH:MM"(24시간제). 서버에서 미리 포맷해 클라로 내려주기 위함
  * (클라 렌더에서 new Date()/toLocale* 호출 금지 — 좌석 배치도의 "순찰 20:12 · 자리비움" 같은 title 용). */
 export function timeLabel(at: string): string {
-  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: KST, hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(at));
-  const h = parts.find((p) => p.type === "hour")?.value ?? "00";
-  const m = parts.find((p) => p.type === "minute")?.value ?? "00";
-  return `${h}:${m}`;
+  const get = kstParts(at, { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${get("hour") ?? "00"}:${get("minute") ?? "00"}`;
 }
 
 /** timestamptz 문자열 → KST 기준 "M월 D일 HH:MM"(제출 목록 등에서 날짜+시각을 함께 보일 때).
  *  클라 렌더에서 new Date()/toLocale* 호출 금지 원칙 — 서버에서 미리 문자열로 내려준다. */
 export function dateTimeLabel(at: string): string {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: KST, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
-  }).formatToParts(new Date(at));
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-  return `${get("month")}월 ${get("day")}일 ${get("hour")}:${get("minute")}`;
-}
-
-/** timestamptz 문자열 → KST 기준 "M월 D일"(시각 없이 날짜만). 스케쥴 입력 기간의 "다음 입력 기간:
- *  8월 20일부터" 처럼 날짜만 필요할 때(src/lib/schedule-window.ts). 클라 렌더에서 new Date() 호출 금지
- *  원칙 — 반드시 서버에서만 호출. */
-export function dateOnlyLabel(at: string): string {
-  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: KST, month: "numeric", day: "numeric" }).formatToParts(new Date(at));
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-  return `${get("month")}월 ${get("day")}일`;
+  const get = kstParts(at, { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${get("month") ?? ""}월 ${get("day") ?? ""}일 ${get("hour") ?? ""}:${get("minute") ?? ""}`;
 }
 
 /** timestamptz 문자열 → KST 기준 자정부터의 경과분(0..1439). schedule.ts statusAt() 에 실제 출결
  * (firstInMin/lastOutMin)을 넘기기 전 서버에서 변환하는 용도(클라 렌더에서 new Date() 호출 금지 원칙 —
  * 이 값은 반드시 서버 컴포넌트/서버 액션에서만 계산해 내려준다). */
 export function minuteOfKST(at: string): number {
-  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: KST, hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(at));
-  const h = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
-  const m = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  const get = kstParts(at, { hour: "2-digit", minute: "2-digit", hour12: false });
+  const h = Number(get("hour") ?? "0");
+  const m = Number(get("minute") ?? "0");
   return h * 60 + m;
 }
 
@@ -92,17 +86,6 @@ export function dayLabel(key: string, today: string): string {
   if (key === today) return "오늘";
   const [, m, d] = key.split("-").map(Number);
   return `${m}월 ${d}일`;
-}
-
-/** Date → KST 기준 datetime-local 입력값("YYYY-MM-DDTHH:mm", 초 없음). 관리 화면의 시작·종료 일시
- *  입력에 "오늘"을 기본값으로 채워줄 때 쓴다 — 클라에서 new Date()(무인자)로 만들면 서버가 KST 가
- *  아닌 환경(UTC 등)에서 날짜가 하루 밀릴 수 있으므로 반드시 서버에서 계산해 문자열로 내려준다. */
-export function kstDateTimeLocal(at: Date = new Date()): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: KST, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
-  }).formatToParts(at);
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
-  return `${get("year")}-${get("month")}-${get("day")}T${get("hour")}:${get("minute")}`;
 }
 
 /** 주 시작 라벨 "7월 20일 (월)" — KST 날짜 문자열 기준. */

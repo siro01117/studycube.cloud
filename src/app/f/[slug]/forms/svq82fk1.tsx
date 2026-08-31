@@ -7,11 +7,10 @@
 // 3) 제출은 ../../actions.ts 의 submitForm(FormData) 하나로 통일 — slug/payload(JSON)/name+code 를 담아 호출.
 // 4) forms/index.ts 의 FORM_COMPONENTS 에 { 슬러그: 컴포넌트 } 매핑을 추가하면 끝.
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import FormShell from "../../_shared/FormShell";
 import IdentityExpired from "../../_shared/IdentityExpired";
-import { useIdentity, type StoredIdentity } from "../../_shared/useIdentity";
+import { useIdentity, useRedirectIfNoIdentity, type StoredIdentity } from "../../_shared/useIdentity";
 import { submitForm } from "../../actions";
 import { getHubSlug } from "../../registry";
 import type { FormDef } from "../../registry";
@@ -20,15 +19,11 @@ const CHOICES = ["매우 만족", "만족", "보통", "불만족"];
 
 export default function SurveySample({ def }: { def: FormDef }) {
   const { identity, hydrated, clear } = useIdentity();
-  const router = useRouter();
   const hubSlug = getHubSlug();
+  // 신원 없이(=허브를 거치지 않고) 폼 주소로 바로 들어온 경우 허브로 보낸다.
+  useRedirectIfNoIdentity(hydrated, identity, hubSlug);
   // 답변 중인 내용이 있는지(SurveyBody 가 onDirtyChange 로 올려준다) — 상단 "‹ 홈" 확인 여부에 쓰인다.
   const [dirty, setDirty] = useState(false);
-
-  // 신원 없이(=허브를 거치지 않고) 폼 주소로 바로 들어온 경우 허브로 보낸다.
-  useEffect(() => {
-    if (hydrated && !identity) router.replace(`/f/${hubSlug}`);
-  }, [hydrated, identity, router, hubSlug]);
 
   return (
     <FormShell title={def.title} subtitle={def.intro} backHref={`/f/${hubSlug}`} confirmLeave={dirty}>

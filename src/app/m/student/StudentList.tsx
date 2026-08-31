@@ -11,6 +11,7 @@ import StudentPopup, { ReleaseSeatIcon } from "../_shared/StudentPopup";
 import ContextMenu, { type MenuItem } from "../_shared/ContextMenu";
 import { useLongPress } from "../_shared/useLongPress";
 import { useSort, SortPicker, type SortColumn } from "../_shared/sort";
+import Modal from "../_shared/Modal";
 
 // 정렬 가능한 속성: 좌석번호 / 이름 / 구분(학년·N수) / 상태(재원·휴원) / 등록일 / 코드 발급 여부.
 const SORT_COLUMNS: SortColumn<Student>[] = [
@@ -250,13 +251,16 @@ export default function StudentList({
 
       {/* 학생 상세 팝업 (좌석 배치도와 동일) */}
       {open && (
-        <>
-          <div onClick={() => openStudent(null)} style={{ position: "fixed", inset: 0, background: "rgba(20,22,30,.45)", zIndex: 55 }} />
-          <div style={{
-            position: "fixed", left: "50%", top: "50%", transform: "translate(-50%,-50%)",
+        <Modal
+          onClose={() => openStudent(null)}
+          backdropBackground="rgba(20,22,30,.45)"
+          backdropZIndex={55}
+          panelZIndex={56}
+          panelStyle={{
             width: 720, maxWidth: "calc(100vw - 32px)", maxHeight: "calc(100dvh - 60px)", overflowY: "auto",
-            background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 20, boxShadow: "0 24px 70px rgba(20,22,30,.35)", zIndex: 56,
-          }}>
+            background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 20, boxShadow: "0 24px 70px rgba(20,22,30,.35)",
+          }}
+        >
             <StudentPopup
               student={open}
               seatLabel={open.seat_number != null ? `${open.seat_number}번` : null}
@@ -301,19 +305,21 @@ export default function StudentList({
                 )}
               </>}
             />
-          </div>
-        </>
+        </Modal>
       )}
 
       {/* 학생 추가 팝업 */}
       {addOpen && canEdit && (
-        <>
-          <div onClick={() => setAddOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(20,22,30,.45)", zIndex: 60 }} />
-          <div style={{
-            position: "fixed", left: "50%", top: "50%", transform: "translate(-50%,-50%)",
+        <Modal
+          onClose={() => setAddOpen(false)}
+          backdropBackground="rgba(20,22,30,.45)"
+          backdropZIndex={60}
+          panelZIndex={61}
+          panelStyle={{
             width: 440, maxWidth: "calc(100vw - 32px)", maxHeight: "calc(100dvh - 60px)", overflowY: "auto",
-            background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 20, boxShadow: "0 24px 70px rgba(20,22,30,.35)", zIndex: 61,
-          }}>
+            background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 20, boxShadow: "0 24px 70px rgba(20,22,30,.35)",
+          }}
+        >
             <div className="flex items-center justify-between" style={{ padding: "18px 22px", borderBottom: "1px solid var(--line)" }}>
               <div style={{ fontSize: 17, fontWeight: 800 }}>학생 추가</div>
               <button onClick={() => setAddOpen(false)} className="chip" style={{ height: 30, width: 30, padding: 0, justifyContent: "center", cursor: "pointer" }}>✕</button>
@@ -375,8 +381,7 @@ export default function StudentList({
               </div>
               <button className="btn btn-accent" style={{ height: 44, marginTop: 4 }}>추가</button>
             </form>
-          </div>
-        </>
+        </Modal>
       )}
     </div>
   );

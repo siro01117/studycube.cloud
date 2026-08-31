@@ -11,6 +11,7 @@ import { blockStyleOf, SCHEDULE_REASONS, reasonOf } from "@/lib/schedule";
 import WindowView from "./WindowView";
 import RequestsView from "./RequestsView";
 import SubmissionsView from "./SubmissionsView";
+import Modal from "../_shared/Modal";
 
 // hoursCount: 등하원(schedule_hours) 행 개수 — page.tsx 에서 지점 전체를 한 번에 집계해 내려준다.
 export type SStudent = { id: string; name: string; seat_number: number | null; hoursCount: number };
@@ -1362,9 +1363,13 @@ export default function ScheduleDemo({
 
       {/* 겹침 모달 */}
       {conflictModal && (
-        <>
-          <div onClick={() => setConflictModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(10,12,18,.4)", zIndex: 55 }} />
-          <div style={{ position: "fixed", zIndex: 56, left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: 440, background: "var(--card)", border: "1px solid var(--line)", borderRadius: 16, boxShadow: "var(--shadow-lg)", padding: 20 }}>
+        <Modal
+          onClose={() => setConflictModal(null)}
+          backdropBackground="rgba(10,12,18,.4)"
+          backdropZIndex={55}
+          panelZIndex={56}
+          panelStyle={{ width: 440, background: "var(--card)", border: "1px solid var(--line)", borderRadius: 16, boxShadow: "var(--shadow-lg)", padding: 20 }}
+        >
             <div style={{ fontSize: 15, fontWeight: 800, marginBottom: 12 }}>겹치는 일정이 있습니다</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16, maxHeight: 220, overflowY: "auto" }}>
               {conflictModal.conflicts.map((c, i) => {
@@ -1387,8 +1392,7 @@ export default function ScheduleDemo({
               <button className="btn" onClick={applyOverlap} style={{ flex: 1, height: 42, fontSize: 12.5 }}>겹쳐서 추가</button>
               <button className="btn" onClick={() => setConflictModal(null)} style={{ flex: 1, height: 42, fontSize: 12.5 }}>취소</button>
             </div>
-          </div>
-        </>
+        </Modal>
       )}
 
       {/* 블록 팝오버 */}
