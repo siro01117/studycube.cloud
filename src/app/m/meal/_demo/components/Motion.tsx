@@ -14,7 +14,7 @@ export const PillButton = forwardRef<HTMLButtonElement, PillButtonProps>(
   ({ children, variant = 'secondary', icon, size = 'md', className, ...rest }, ref) => {
     const sizeCls = { sm: 'h-8 px-3 text-[12px]', md: 'h-10 px-4 text-[13px]', lg: 'h-11 px-6 text-[14px]' }[size]
     const styleCls = {
-      primary: 'bg-ink-900 text-white hover:bg-ink-800 border border-ink-900',
+      primary: 'bg-accent text-white hover:bg-accent-strong border border-accent',
       secondary: 'bg-white text-ink-900 hover:bg-surface border border-ink-200 shadow-sm2',
       ghost: 'bg-transparent text-ink-600 hover:bg-surface hover:text-ink-900 border border-transparent',
       danger: 'bg-white text-red-600 hover:bg-red-50 border border-red-200'

@@ -1,22 +1,27 @@
 import { useEffect, useState } from 'react'
 import clsx from 'clsx'
 import { Modal } from '../components/Modal'
-import { PillButton, spring } from '../components/Motion'
-import { motion } from 'framer-motion'
-import type { ClosureInfo, Month } from '../types'
+import { PillButton } from '../components/Motion'
+import { Search, X, Check } from 'lucide-react'
+import { useDialog } from '../components/Dialog'
+import type { ClosureInfo, Month, StudentCandidate } from '../types'
 import { monthGrid, isoDate, effectiveClosure } from '../lib/calendar'
+import { holidayLabel } from '@/lib/holidays'
 
 const DAYS = ['월', '화', '수', '목', '금', '토']
 
 interface Props {
-  open: boolean; appId: number | null; year: number; month: number
+  open: boolean; year: number; month: number
   monthRow: Month; onClose: () => void; onSaved: () => void
 }
 
-export function ApplicationDialog({ open, appId, year, month, monthRow, onClose, onSaved }: Props) {
-  const [name, setName] = useState('')
-  const [seat, setSeat] = useState('')
-  const [floor, setFloor] = useState<4 | 5>(4)
+export function ApplicationDialog({ open, year, month, monthRow, onClose, onSaved }: Props) {
+  const { toast } = useDialog()
+  // 학생 검색 선택 — 재원생만, 이미 이 달에 신청서가 있으면 검색 결과에서 걸러진다.
+  const [student, setStudent] = useState<{ id: string; name: string; seat: string | null; floor: number | null } | null>(null)
+  const [query, setQuery] = useState('')
+  const [candidates, setCandidates] = useState<StudentCandidate[]>([])
+
   const [paidAmount, setPaidAmount] = useState(0)
   const [paidDate, setPaidDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [memo, setMemo] = useState('')
@@ -34,26 +39,26 @@ export function ApplicationDialog({ open, appId, year, month, monthRow, onClose,
       for (const row of grid) for (const d of row) {
         if (!d) continue
         const iso = isoDate(d.getFullYear(), d.getMonth() + 1, d.getDate())
-        const lbl = await window.api.holidayLabel(iso)
+        const lbl = holidayLabel(iso) // 순수 함수 — 날짜마다 서버 왕복(42회) 돌지 않는다
         if (lbl) hh[iso] = lbl
       }
       setHolidays(hh)
-      if (appId) {
-        const a = await window.api.getApp(appId)
-        if (a) {
-          setName(a.name); setSeat(a.seat || '')
-          setFloor((a.floor === 5 ? 5 : 4) as 4 | 5)
-          setPaidAmount(a.paid_amount || 0)
-          setPaidDate(a.paid_date || new Date().toISOString().slice(0, 10))
-          setMemo(a.memo || '')
-          setMeals(new Set(a.meals.map((m) => `${m.date}|${m.meal_type}`)))
-        }
-      } else {
-        setName(''); setSeat(''); setFloor(4); setPaidAmount(0)
-        setPaidDate(new Date().toISOString().slice(0, 10)); setMemo(''); setMeals(new Set())
-      }
+      setStudent(null); setQuery(''); setCandidates([]); setPaidAmount(0)
+      setPaidDate(new Date().toISOString().slice(0, 10)); setMemo(''); setMeals(new Set())
     })()
-  }, [open, appId, year, month, monthRow.id])
+  }, [open, year, month, monthRow.id])
+
+  // 학생 검색 — 이미 학생을 고른 뒤엔 검색하지 않는다. onChange는 필터(state)만, 조회는
+  // debounce된 쿼리로만 나간다(11→01 같은 조기 정규화 버그를 피하려는 이 레포의 확립된 규칙과 같은 맥락).
+  useEffect(() => {
+    if (!open || student) { setCandidates([]); return }
+    const q = query.trim()
+    if (!q) { setCandidates([]); return }
+    const t = setTimeout(async () => {
+      setCandidates(await window.api.searchStudents(monthRow.id, q))
+    }, 200)
+    return () => clearTimeout(t)
+  }, [open, student, query, monthRow.id])
 
   const toggle = (iso: string, type: 'lunch' | 'dinner') => {
     const key = `${iso}|${type}`
@@ -70,19 +75,23 @@ export function ApplicationDialog({ open, appId, year, month, monthRow, onClose,
   })()
 
   const save = async () => {
-    if (!name.trim()) { alert('이름을 입력해주세요.'); return }
-    await window.api.upsertApp({
-      id: appId ?? null, monthId: monthRow.id, name: name.trim(), seat: seat.trim(),
-      floor, paid: paidAmount >= total, paidAmount, paidDate, memo,
-      meals: Array.from(meals).map((k) => { const [date, meal_type] = k.split('|'); return { date, meal_type } })
-    })
-    onSaved()
+    if (!student) { alert('학생을 선택해주세요.'); return }
+    try {
+      await window.api.createApp({
+        monthId: monthRow.id, studentId: student.id,
+        paidAmount, paidDate, memo,
+        meals: Array.from(meals).map((k) => { const [date, meal_type] = k.split('|'); return { date, meal_type: meal_type as 'lunch' | 'dinner' } })
+      })
+      onSaved()
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '저장하지 못했습니다.', 'error')
+    }
   }
 
   const grid = monthGrid(year, month)
 
   return (
-    <Modal open={open} onClose={onClose} title={appId ? '신청서 수정' : '신청서 추가'} width="max-w-5xl"
+    <Modal open={open} onClose={onClose} title="신청서 추가" width="max-w-5xl"
       footer={<>
         <PillButton variant="ghost" onClick={onClose}>취소</PillButton>
         <PillButton variant="primary" onClick={save}>저장</PillButton>
@@ -92,17 +101,43 @@ export function ApplicationDialog({ open, appId, year, month, monthRow, onClose,
         {/* Left */}
         <div className="flex flex-col gap-3">
           <Sec title="학생 정보">
-            <Fld label="이름"><input className={inp} value={name} onChange={(e) => setName(e.target.value)} placeholder="홍길동" /></Fld>
-            <Fld label="좌석 번호"><input className={inp} value={seat} onChange={(e) => setSeat(e.target.value)} placeholder="A-12" /></Fld>
-            <Fld label="층수">
-              <div className="flex gap-2">
-                {([4, 5] as const).map((f) => (
-                  <motion.button key={f} whileTap={{ scale: 0.93 }} transition={spring} onClick={() => setFloor(f)}
-                    className={clsx('flex-1 h-8 rounded-full text-[13px] font-semibold transition-colors',
-                      floor === f ? 'bg-ink-900 text-white' : 'bg-surface text-ink-700 hover:bg-ink-100 border border-ink-200')}>{f}층</motion.button>
-                ))}
+            {student ? (
+              <div className="flex items-center gap-2 bg-surface rounded-lg border border-ink-200 px-3 h-9">
+                <span className="text-[13px] font-semibold truncate">{student.name}</span>
+                <span className="text-[11px] text-ink-400 ml-auto shrink-0">{student.seat || '좌석 미배정'}</span>
+                <button onClick={() => { setStudent(null); setQuery('') }}
+                  className="w-5 h-5 rounded-full flex items-center justify-center hover:bg-ink-100 text-ink-400 shrink-0">
+                  <X size={12} />
+                </button>
               </div>
-            </Fld>
+            ) : (
+              <div className="relative">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-400 pointer-events-none" />
+                <input
+                  className={clsx(inp, 'pl-8')}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="이름으로 검색"
+                  autoFocus
+                />
+                {candidates.length > 0 && (
+                  <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white rounded-lg border border-ink-200 shadow-pop max-h-56 overflow-auto">
+                    {candidates.map((c) => (
+                      <button key={c.id} disabled={c.alreadyApplied}
+                        onClick={() => { setStudent({ id: c.id, name: c.name, seat: c.seat, floor: c.floor }); setQuery('') }}
+                        className={clsx('w-full flex items-center gap-2 px-3 py-2 text-left text-[12.5px] transition-colors',
+                          c.alreadyApplied ? 'text-ink-300 cursor-not-allowed' : 'hover:bg-surface text-ink-800')}
+                      >
+                        <span className="font-medium truncate flex-1">{c.name}</span>
+                        <span className="text-[11px] text-ink-400 shrink-0">{c.seat || '좌석 미배정'}</span>
+                        {c.alreadyApplied && <span className="text-[10px] text-ink-400 shrink-0">이미 신청</span>}
+                        {!c.alreadyApplied && <Check size={12} className="text-ink-300 shrink-0" />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </Sec>
 
           <Sec title="납입">
@@ -133,7 +168,8 @@ export function ApplicationDialog({ open, appId, year, month, monthRow, onClose,
         </div>
 
         {/* Right: Excel-style meal grid */}
-        <div className="border border-ink-300 rounded-xl overflow-hidden text-[12px] self-start">
+        <div className="flex flex-col gap-2 self-start min-w-0 flex-1">
+          <div className="border border-ink-300 rounded-xl overflow-hidden text-[12px]">
           {/* header row */}
           <div className="grid grid-cols-[50px_36px_repeat(6,1fr)] bg-ink-50 border-b border-ink-300">
             <div className="px-2 py-2 font-semibold text-ink-600 border-r border-ink-300 text-center text-[11px]">주차</div>
@@ -190,7 +226,7 @@ export function ApplicationDialog({ open, appId, year, month, monthRow, onClose,
                           !lClosed && 'cursor-pointer hover:bg-ink-50')}
                         onClick={() => !lClosed && toggle(iso, 'lunch')}
                       >
-                        {lClosed ? <Diag /> : lOn ? <span className="block w-4 h-4 rounded-full border-[2.5px] border-ink-900" /> : null}
+                        {lClosed ? <Diag /> : lOn ? <span className="block w-4 h-4 rounded-full border-[2.5px] border-accent" /> : null}
                       </div>
                       {/* dinner */}
                       <div
@@ -198,7 +234,7 @@ export function ApplicationDialog({ open, appId, year, month, monthRow, onClose,
                           !dClosed && 'cursor-pointer hover:bg-ink-50')}
                         onClick={() => !dClosed && toggle(iso, 'dinner')}
                       >
-                        {dClosed ? <Diag /> : dOn ? <span className="block w-4 h-4 rounded-full border-[2.5px] border-ink-900" /> : null}
+                        {dClosed ? <Diag /> : dOn ? <span className="block w-4 h-4 rounded-full border-[2.5px] border-accent" /> : null}
                       </div>
                     </div>
                   )
@@ -209,12 +245,13 @@ export function ApplicationDialog({ open, appId, year, month, monthRow, onClose,
 
           {/* legend */}
           <div className="border-t border-ink-200 bg-ink-50 px-3 py-2 flex gap-4 text-[10px] text-ink-500">
-            <span className="flex items-center gap-1.5"><span className="text-[12px] text-ink-900">●</span> 신청 (클릭 토글)</span>
+            <span className="flex items-center gap-1.5"><span className="text-[12px] text-accent">●</span> 신청 (클릭 토글)</span>
             <span className="flex items-center gap-1.5">
               <span className="w-4 h-3 inline-block relative border border-ink-300 rounded-sm overflow-hidden">
                 <Diag />
               </span> 휴무
             </span>
+          </div>
           </div>
         </div>
       </div>
@@ -255,8 +292,7 @@ function Diag() {
   return (
     <div className="absolute inset-0 pointer-events-none"
       style={{
-        backgroundImage: 'repeating-linear-gradient(-45deg, transparent 0px, transparent 9px, #bbb 9px, #bbb 10.5px)',
-        backgroundAttachment: 'fixed',
+        backgroundImage: 'linear-gradient(to top right, transparent calc(50% - 0.75px), #adb4c2 calc(50% - 0.75px), #adb4c2 calc(50% + 0.75px), transparent calc(50% + 0.75px))',
       }} />
   )
 }

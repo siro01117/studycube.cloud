@@ -6,11 +6,13 @@
   --card: #ffffff;
   --ink: #171a22;
   --sub: #565d6e;
-  --faint: #98a2b3;
+  --faint: #838da0; /* 장식·placeholder·비활성 전용. 읽어야 하는 보조 텍스트(학교/학년/시각/좌석번호 등)는 --sub 사용 */
   --line: #e4e6ee;
   --accent: #4f46e5;
   --accent-soft: #eef0ff;
   --danger: #d75590;
+  --danger-strong: #e5484d;      /* 진짜 '위험' 빨강. --danger(자주)는 배지·보조 강조용, --danger-strong은 경고 텍스트/아이콘/강한 강조용 */
+  --danger-strong-ink: #c92a2f;  /* --danger-strong의 더 진한 변형 (호버/강조 텍스트 등, 기존 하드코딩 #c92a2f 자리를 대체) */
   --shadow: 0 1px 2px rgba(20, 22, 30, 0.05);
 
   /* A(구 레포)에서 이식한 컴포넌트가 참조하는 별칭·추가 토큰 — 같은 팔레트로 매핑 */
@@ -78,6 +80,12 @@ button:active:not(:disabled) { transform: scale(.97); }
   -webkit-user-select: none;
   user-select: none;
 }
+/* 키보드 포커스 시에만 보이는 아웃라인(마우스 클릭으로는 안 뜸) — 좌석/터치 카드는 배경·테두리가
+   빽빽하게 붙어 있어 채도 높은 accent 색으로 뚜렷하게 표시한다. 기존 배경/테두리 규칙은 건드리지 않음. */
+.seatbox:focus-visible, .touchable:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 button, .chip, [role="button"] { touch-action: manipulation; }
 .input {
   width: 100%; height: 46px; padding: 0 14px; border-radius: 12px;
@@ -92,7 +100,8 @@ button, .chip, [role="button"] { touch-action: manipulation; }
   font-size: 12px; color: var(--sub); transition: background .12s, border-color .12s, transform .08s ease;
 }
 .chip:active { transform: scale(.94); }
-.label { font-size: 12px; color: var(--faint); letter-spacing: .02em; margin-bottom: 6px; display: block; }
+/* 폼 필드 이름 — 읽어야 하는 텍스트라 --sub(6.59:1). --faint(3.35:1)는 AA 미달이라 여기 쓰지 않는다 */
+.label { font-size: 12px; color: var(--sub); letter-spacing: .02em; margin-bottom: 6px; display: block; }
 
 /* 도시락 격자(MealGrid) 클릭 가능 셀 — 상태색(휴무/신청/마감)은 인라인으로 얹으므로 기본 hover만 여기서 처리 */
 .mg-cell { border: none; background: var(--card); cursor: pointer; }
@@ -194,26 +203,31 @@ button, .chip, [role="button"] { touch-action: manipulation; }
    이식한 TSX 쪽 클래스명은 한 글자도 바꾸지 않았다 — 래퍼가 .dsk 라서 그대로 맞는다.
    ══════════════════════════════════════════════════════════════════════════ */
 @theme {
-  --color-surface: #F4F4F4;
+  --color-surface: #F6F7F9;
   --color-surface-card: #FFFFFF;
-  --color-surface-border: #E0E0E0;
-  --color-surface-hover: #F0F0F0;
-  --color-surface-muted: #F9F9F9;
+  --color-surface-border: #E4E6EE;
+  --color-surface-hover: #F1F3F7;
+  --color-surface-muted: #F8F9FB;
 
-  --color-ink-900: #111111;
-  --color-ink-800: #222222;
-  --color-ink-700: #333333;
-  --color-ink-600: #555555;
-  --color-ink-500: #777777;
-  --color-ink-400: #999999;
-  --color-ink-300: #C0C0C0;
-  --color-ink-200: #DEDEDE;
-  --color-ink-100: #EEEEEE;
-  --color-ink-50: #F6F6F6;
+  --color-ink-900: #171A22;
+  --color-ink-800: #262A36;
+  --color-ink-700: #353A49;
+  --color-ink-600: #565D6E;
+  --color-ink-500: #6B7284;
+  --color-ink-400: #838DA0;
+  --color-ink-300: #ADB4C2;
+  --color-ink-200: #E4E6EE;
+  --color-ink-100: #EEF0F5;
+  --color-ink-50: #F6F7F9;
 
-  --shadow-card: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-pop: 0 8px 24px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.06);
-  --shadow-sm2: 0 1px 4px rgba(0,0,0,0.08);
+  /* 인디고 강조 — 스터디큐브 --accent/--accent-soft 를 그대로 참조 */
+  --color-accent: #4F46E5;
+  --color-accent-soft: #EEF0FF;
+  --color-accent-strong: #4338CA;
+
+  --shadow-card: 0 1px 2px rgba(20,22,30,0.05), 0 1px 1px rgba(20,22,30,0.03);
+  --shadow-pop: 0 8px 24px rgba(20,22,30,0.12), 0 2px 6px rgba(20,22,30,0.06);
+  --shadow-sm2: 0 1px 4px rgba(20,22,30,0.06);
 
   --radius-4xl: 2rem;
   --radius-5xl: 2.5rem;
@@ -222,18 +236,18 @@ button, .chip, [role="button"] { touch-action: manipulation; }
 /* 원본 index.css 의 html/body/#root 배경·색·overflow 규칙 — .dsk 래퍼 자체에 적용 */
 .dsk {
   font-family: 'Pretendard', 'Malgun Gothic', system-ui, sans-serif;
-  background: #F4F4F4;
-  color: #111111;
+  background: #F6F7F9;
+  color: #171A22;
   overflow: hidden;
 }
 
 .dsk ::-webkit-scrollbar { width: 6px; height: 6px; }
 .dsk ::-webkit-scrollbar-track { background: transparent; }
-.dsk ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 3px; }
-.dsk ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.28); }
+.dsk ::-webkit-scrollbar-thumb { background: rgba(23,26,34,0.15); border-radius: 3px; }
+.dsk ::-webkit-scrollbar-thumb:hover { background: rgba(23,26,34,0.28); }
 
-.dsk .card { background: #FFFFFF; border: 1px solid #E0E0E0; border-radius: 20px; }
-.dsk .card-sm { background: #FFFFFF; border: 1px solid #E0E0E0; border-radius: 14px; }
+.dsk .card { background: #FFFFFF; border: 1px solid #E4E6EE; border-radius: 20px; }
+.dsk .card-sm { background: #FFFFFF; border: 1px solid #E4E6EE; border-radius: 14px; }
 
 .dsk .titlebar-drag { -webkit-app-region: drag; }
 .dsk .titlebar-nodrag { -webkit-app-region: no-drag; }

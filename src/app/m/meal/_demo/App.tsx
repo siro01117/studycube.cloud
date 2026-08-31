@@ -7,7 +7,6 @@ import clsx from 'clsx'
 import { Dashboard } from './pages/Dashboard'
 import { MonthSettings } from './pages/MonthSettings'
 import { Students } from './pages/Students'
-import { Splash } from './components/Splash'
 import { DialogProvider } from './components/Dialog'
 import { spring } from './components/Motion'
 
@@ -24,12 +23,9 @@ export default function App() {
   const [month, setMonth] = useState(today.getMonth() + 1)
   const [tab, setTab] = useState<Tab>('dashboard')
   const [refreshKey, setRefreshKey] = useState(0)
-  const [showSplash, setShowSplash] = useState(true)
 
   return (
     <DialogProvider>
-      <AnimatePresence>{showSplash && <Splash onDone={() => setShowSplash(false)} />}</AnimatePresence>
-
       <div className="h-full flex flex-col bg-surface text-ink-900">
         <div className="h-9 titlebar-drag flex items-center px-5 text-[11px] text-ink-500 select-none">도시락 신청 관리</div>
 
@@ -56,7 +52,7 @@ export default function App() {
                       active ? 'text-ink-900' : 'text-ink-500 hover:text-ink-900 hover:bg-surface')}
                   >
                     {active && (
-                      <motion.div layoutId="tab-bg" className="absolute inset-0 bg-ink-900 rounded-xl"
+                      <motion.div layoutId="tab-bg" className="absolute inset-0 bg-accent rounded-xl"
                         transition={{ type: 'spring', stiffness: 500, damping: 40 }} />
                     )}
                     <Icon size={16} className={clsx('relative z-10', active && 'text-white')} />

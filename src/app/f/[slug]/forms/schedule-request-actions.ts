@@ -449,9 +449,18 @@ async function createTempRequests(branch: string, studentId: string, items: Reco
     params.push(c.date, c.kind, c.reason, c.title || null, c.start, c.end, c.skipRuleId, c.reqType);
     return `($1,$2,$${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},'temp')`;
   });
+  // 위에서 이미 select 로 pending/approved 중복을 걸렀지만, 그 select 와 이 insert 사이에 두 번째
+  // 탭/기기의 동시 요청이 끼어들면 완전히 같은 (날짜,시작,종료) 가 두 번 들어갈 수 있었다 —
+  // schema.modules.ts uq_schedule_request_active_dedup(부분 유니크: status in pending/approved) 로
+  // 막고, 여기서는 on conflict do nothing 으로 조용히 건너뛴다(새로 insert 되는 행은 항상
+  // status 기본값 'pending' 이라 인덱스 조건과 항상 일치, 충돌 대상 표현식도 인덱스와 동일해야 매칭됨).
+  // 걸러진 행은 returning 에 안 나오므로 inserted.rows.length 가 clean.length 보다 작을 수 있다 —
+  // 호출부는 이미 rows 개수를 가정하지 않고 그대로 반환하므로 별도 처리 불필요.
   const inserted = await db.query<RequestDbRow>(
     `insert into schedule_request(branch_id, student_id, date, kind, reason, title, start_min, end_min, skip_rule_id, req_type, req_kind)
      values ${values.join(",")}
+     on conflict (branch_id, student_id, date, start_min, end_min) where status in ('pending','approved')
+     do nothing
      returning ${REQUEST_ROW_COLS}`,
     params,
   );

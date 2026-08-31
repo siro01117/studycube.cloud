@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { FileText, Save, Plus, X, ChevronDown } from 'lucide-react'
+import { Save, Plus, X, ChevronDown, UtensilsCrossed, Moon } from 'lucide-react'
 import clsx from 'clsx'
 import { PillButton, spring } from '../components/Motion'
 import { useDialog } from '../components/Dialog'
 import { monthGrid, isoDate, effectiveClosure } from '../lib/calendar'
+import { holidayLabel } from '@/lib/holidays'
 import type { ClosureInfo, Month } from '../types'
-import { buildMonthPdfHtml } from '../lib/pdfHtml'
 
 const DAYS_KR = ['월', '화', '수', '목', '금', '토', '일']
 
@@ -39,7 +39,7 @@ export function MonthSettings({ year, month, onYearMonthChange, onChange }: {
       for (const row of grid) for (const d of row) {
         if (!d) continue
         const iso = isoDate(d.getFullYear(), d.getMonth() + 1, d.getDate())
-        const lbl = await window.api.holidayLabel(iso)
+        const lbl = holidayLabel(iso) // 순수 함수 — 날짜마다 서버 왕복(42회) 돌지 않는다
         if (lbl) hh[iso] = lbl
       }
       setHolidays(hh); setClosures(cls); setM(monthRow)
@@ -69,18 +69,11 @@ export function MonthSettings({ year, month, onYearMonthChange, onChange }: {
     setClosures({ ...closures, [iso]: { lunch_closed: newLc, dinner_closed: newDc, label: eff?.label ?? '' } })
   }
 
-  const exportPdf = async () => {
-    if (dirty) await save()
-    const notice = noticeLines.filter((l) => l.trim()).join('\n')
-    await window.api.exportPdf(buildMonthPdfHtml({ year, month, m: { ...m, notice }, closures, holidays, application: null }),
-      `${year}년 ${month}월 도시락 신청서.pdf`)
-  }
-
   const grid = monthGrid(year, month)
 
   return (
     <div className="h-full overflow-auto">
-      <div className="flex items-end justify-between mb-5">
+      <div className="max-w-[950px] mx-auto flex items-end justify-between mb-5">
         <div className="relative" ref={pickerRef}>
           <div className="text-[11px] uppercase tracking-[0.18em] font-semibold text-ink-400">신청서 제작</div>
           <button onClick={() => setShowPicker(!showPicker)} className="flex items-center gap-1.5 mt-0.5 group">
@@ -99,7 +92,7 @@ export function MonthSettings({ year, month, onYearMonthChange, onChange }: {
                     {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 1 + i).map((y) => (
                       <button key={y} onClick={() => { onYearMonthChange(y, month); setShowPicker(false) }}
                         className={clsx('w-16 h-8 rounded-full text-[13px] font-medium transition-colors',
-                          y === year ? 'bg-ink-900 text-white' : 'hover:bg-surface text-ink-700')}>{y}</button>
+                          y === year ? 'bg-accent text-white' : 'hover:bg-surface text-ink-700')}>{y}</button>
                     ))}
                   </div>
                 </div>
@@ -109,7 +102,7 @@ export function MonthSettings({ year, month, onYearMonthChange, onChange }: {
                     {Array.from({ length: 12 }, (_, i) => i + 1).map((mo) => (
                       <button key={mo} onClick={() => { onYearMonthChange(year, mo); setShowPicker(false) }}
                         className={clsx('w-10 h-8 rounded-full text-[13px] font-medium transition-colors',
-                          mo === month ? 'bg-ink-900 text-white' : 'hover:bg-surface text-ink-700')}>{mo}월</button>
+                          mo === month ? 'bg-accent text-white' : 'hover:bg-surface text-ink-700')}>{mo}월</button>
                     ))}
                   </div>
                 </div>
@@ -121,19 +114,19 @@ export function MonthSettings({ year, month, onYearMonthChange, onChange }: {
           <PillButton variant={dirty ? 'primary' : 'secondary'} icon={<Save size={15} />} onClick={save}>
             {dirty ? '변경사항 저장' : '저장'}
           </PillButton>
-          <PillButton variant="primary" icon={<FileText size={15} />} onClick={exportPdf}>빈 신청서 PDF</PillButton>
         </div>
       </div>
 
-      <div className="grid grid-cols-[1fr_330px] gap-4">
+      <div className="max-w-[950px] mx-auto grid grid-cols-[1fr_330px] gap-4">
         {/* Calendar */}
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={spring} className="card p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-[15px] font-semibold">휴무일 설정</h2>
             <div className="flex gap-3 text-[11px] text-ink-500">
               <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-white border border-ink-300 inline-block" />영업</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-ink-400 inline-block" />일부휴무</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-ink-900 inline-block" />전체휴무</span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-sm border border-ink-300 inline-block relative overflow-hidden"><Hatch /></span>휴무
+              </span>
             </div>
           </div>
           <div className="grid grid-cols-7 gap-1.5 mb-1.5">
@@ -147,15 +140,13 @@ export function MonthSettings({ year, month, onYearMonthChange, onChange }: {
               if (!d) return <div key={i} style={{ height: 80 }} />
               const eff = effectiveClosure(d, closures, holidays)
               const lc = eff?.lunch_closed ?? false; const dc = eff?.dinner_closed ?? false
-              const both = lc && dc; const partial = lc || dc
+              const both = lc && dc
               const label = eff?.label ?? ''
               const dow = d.getDay(); const isSun = dow === 0
 
               return (
                 <div key={i} style={{ height: 80 }} className={clsx('rounded-xl border relative overflow-hidden flex flex-col',
-                  both ? 'bg-ink-900 border-ink-900' : partial ? 'bg-ink-200 border-ink-300' : 'bg-white border-ink-200')}>
-                  {both && <div className="absolute inset-0 pointer-events-none"
-                    style={{ background: 'linear-gradient(to bottom right,transparent calc(50% - 0.5px),rgba(255,255,255,0.18) calc(50% - 0.5px),rgba(255,255,255,0.18) calc(50% + 0.5px),transparent calc(50% + 0.5px))' }} />}
+                  both ? 'bg-white border-ink-300' : 'bg-white border-ink-200')}>
 
                   {/* date area — compact */}
                   <button onClick={() => {
@@ -163,28 +154,33 @@ export function MonthSettings({ year, month, onYearMonthChange, onChange }: {
                     const newBoth = !(lc && dc)
                     window.api.setClosure(m.id, iso, newBoth, newBoth, label)
                       .then(() => setClosures((c) => ({ ...c, [iso]: { lunch_closed: newBoth, dinner_closed: newBoth, label } })))
-                  }} className="px-1.5 pt-1.5 pb-0.5 text-left flex-shrink-0">
+                  }} className="px-1.5 pt-1.5 pb-0.5 text-center flex-shrink-0 relative">
                     <span className={clsx('text-[13px] font-bold leading-none block',
-                      both ? 'text-white/80' : isSun ? 'text-red-400' : dow === 6 ? 'text-blue-400' : 'text-ink-900')}>
+                      isSun ? 'text-red-400' : dow === 6 ? 'text-blue-400' : 'text-ink-900')}>
                       {d.getDate()}
                     </span>
-                    {label && <span className={clsx('text-[8px] leading-tight block truncate mt-0.5',
-                      both ? 'text-white/50' : 'text-ink-500')}>{label}</span>}
+                    {label && <span className="text-[8px] leading-tight block truncate mt-0.5 text-center text-ink-500">{label}</span>}
                   </button>
 
-                  {/* meal buttons — take remaining space */}
-                  {!isSun ? (
-                    <div className="flex flex-col flex-1 border-t border-black/8 min-h-0">
-                      <button onClick={() => toggleMeal(d, 'lunch')}
-                        className={clsx('flex-1 text-[10px] font-bold transition-colors flex items-center justify-center',
-                          lc ? 'bg-ink-700 text-white' : 'text-ink-400 hover:bg-ink-50')}>중</button>
-                      <button onClick={() => toggleMeal(d, 'dinner')}
-                        className={clsx('flex-1 text-[10px] font-bold transition-colors flex items-center justify-center border-t border-black/8',
-                          dc ? 'bg-ink-900 text-white' : 'text-ink-400 hover:bg-ink-50')}>석</button>
-                    </div>
-                  ) : (
-                    <div className="flex-1" />
-                  )}
+                  {/* meal buttons — take remaining space.
+                      휴무 표시는 날짜 영역까지 번지지 않고 해당 끼니 칸에만 긋는다(둘 다 휴무면 각각 한 줄씩).
+                      휴무인 칸은 글자를 감추고 선만 남긴다 — 선과 글자가 겹치면 지저분하다.
+                      일요일도 기본 휴무일 뿐 고정이 아니다(오버라이드가 기본값을 이긴다) — 다른 요일과
+                      똑같이 눌러서 열 수 있어야 하므로 끼니 칸을 똑같이 그린다. */}
+                  <div className="flex flex-col flex-1 border-t border-black/8 min-h-0">
+                    <button onClick={() => toggleMeal(d, 'lunch')}
+                      aria-label={`${d.getDate()}일 중식 ${lc ? '휴무 해제' : '휴무로 지정'}`}
+                      className={clsx('relative overflow-hidden flex-1 text-[10px] font-bold transition-colors flex items-center justify-center',
+                        lc ? 'text-ink-600' : 'text-ink-400 hover:bg-ink-50')}>
+                      {lc ? <Hatch /> : <span className="relative">중</span>}
+                    </button>
+                    <button onClick={() => toggleMeal(d, 'dinner')}
+                      aria-label={`${d.getDate()}일 석식 ${dc ? '휴무 해제' : '휴무로 지정'}`}
+                      className={clsx('relative overflow-hidden flex-1 text-[10px] font-bold transition-colors flex items-center justify-center border-t border-black/8',
+                        dc ? 'text-ink-600' : 'text-ink-400 hover:bg-ink-50')}>
+                      {dc ? <Hatch /> : <span className="relative">석</span>}
+                    </button>
+                  </div>
                 </div>
               )
             })}
@@ -195,10 +191,10 @@ export function MonthSettings({ year, month, onYearMonthChange, onChange }: {
         <div className="flex flex-col gap-3">
           <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ ...spring, delay: 0.04 }} className="card p-4">
             <h3 className="text-[14px] font-semibold mb-3">가격</h3>
-            <MealRow emoji="🍱" label="중식" name={m.lunch_label} price={m.lunch_price}
+            <MealRow icon={<UtensilsCrossed size={16} />} label="중식" name={m.lunch_label} price={m.lunch_price}
               onName={(v) => update('lunch_label', v)} onPrice={(v) => update('lunch_price', v)} />
             <div className="border-t border-ink-100 my-3" />
-            <MealRow emoji="🌙" label="석식" name={m.dinner_label} price={m.dinner_price}
+            <MealRow icon={<Moon size={16} />} label="석식" name={m.dinner_label} price={m.dinner_price}
               onName={(v) => update('dinner_label', v)} onPrice={(v) => update('dinner_price', v)} />
           </motion.div>
 
@@ -237,12 +233,12 @@ export function MonthSettings({ year, month, onYearMonthChange, onChange }: {
   )
 }
 
-function MealRow({ emoji, label, name, price, onName, onPrice }: {
-  emoji: string; label: string; name: string; price: number; onName: (v: string) => void; onPrice: (v: number) => void
+function MealRow({ icon, label, name, price, onName, onPrice }: {
+  icon: React.ReactNode; label: string; name: string; price: number; onName: (v: string) => void; onPrice: (v: number) => void
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-lg shrink-0">{emoji}</span>
+      <span className="text-ink-500 shrink-0 flex items-center">{icon}</span>
       <span className="text-[12px] font-semibold w-7 text-ink-600 shrink-0">{label}</span>
       <input className="flex-1 min-w-0 bg-surface rounded-full h-8 px-3 text-[12px] border border-ink-200 outline-none"
         value={name} onChange={(e) => onName(e.target.value)} placeholder="메뉴명" />
@@ -252,5 +248,20 @@ function MealRow({ emoji, label, name, price, onName, onPrice }: {
         <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-400 text-[11px]">원</span>
       </div>
     </div>
+  )
+}
+
+// 휴무 표시 — ApplicationDialog의 Diag, MealGrid의 HatchSwatch와 같은 대각선 빗금 시각 언어.
+// 휴무 = 대각선 한 줄(모서리→모서리). 줄무늬로 채우면 격자가 답답해진다.
+// style 로 top/bottom 을 잘라 휴무인 구간만 덮는다(칩마다 따로 그리면 원점이 달라 줄이 어긋난다).
+function Hatch() {
+  return (
+    <div
+      className="absolute inset-0 pointer-events-none"
+      style={{
+        backgroundImage:
+          'linear-gradient(to top right, transparent calc(50% - 0.75px), var(--color-ink-300) calc(50% - 0.75px), var(--color-ink-300) calc(50% + 0.75px), transparent calc(50% + 0.75px))',
+      }}
+    />
   )
 }

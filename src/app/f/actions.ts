@@ -194,24 +194,23 @@ export async function submitForm(formData: FormData): Promise<SubmitResult> {
   const payloadJson = JSON.stringify({ ...payload, _slug: slug, ...(testBypass ? { _test: true } : {}) });
 
   // 같은 학생 + 같은 슬러그 재제출 → 기본은 기존 행 갱신(폼 정의에 multiple:true 면 새로 쌓음).
+  // select-then-insert 였던 예전 방식은 두 탭/기기가 거의 동시에 첫 제출을 하면 "기존 행 없음"을
+  // 각자 보고 둘 다 insert 해 중복 행이 생겼다(schema.modules.ts uq_submission_student_type_slug
+  // 참고) — insert...on conflict...do update 로 원자적으로 통일한다(forms/lunch-actions.ts 의
+  // lunch_order upsert 와 같은 패턴). on conflict 대상은 그 유니크 인덱스와 정확히 같은 표현식이어야
+  // 매칭된다: (branch_id, student_id, type, (payload->>'_slug')).
   let submissionId: string | null = null;
   if (studentId && !def.multiple) {
-    const existing = await db.query<{ id: string }>(
-      `select id from submission
-        where branch_id=$1 and student_id=$2 and type=$3 and payload->>'_slug'=$4
-        order by created_at desc limit 1`,
-      [branch, studentId, def.type, slug],
+    const up = await db.query<{ id: string }>(
+      `insert into submission(branch_id, type, student_id, submitter_name, submitter_phone, payload, status, first_submitted_at)
+       values ($1,$2,$3,$4,$5,$6::jsonb,'pending',now())
+       on conflict (branch_id, student_id, type, (payload->>'_slug')) where student_id is not null
+       do update set payload=excluded.payload, submitter_name=excluded.submitter_name,
+                     submitter_phone=excluded.submitter_phone, status='pending', note=null, created_at=now()
+       returning id`,
+      [branch, def.type, studentId, submitterName, submitterPhone, payloadJson],
     );
-    if (existing.rows[0]) {
-      submissionId = existing.rows[0].id;
-      await db.query(
-        `update submission
-            set payload=$1::jsonb, submitter_name=$2, submitter_phone=$3,
-                status='pending', note=null, created_at=now()
-          where id=$4`,
-        [payloadJson, submitterName, submitterPhone, submissionId],
-      );
-    }
+    submissionId = up.rows[0]?.id ?? null;
   }
 
   if (submissionId == null) {

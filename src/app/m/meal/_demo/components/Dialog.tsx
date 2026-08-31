@@ -102,7 +102,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                   <motion.button
                     whileTap={{ scale: 0.96 }} transition={spring}
                     onClick={() => resolve(true)}
-                    className={`h-9 px-4 rounded-full text-[13px] font-medium text-white transition-colors ${confirmState.danger ? 'bg-red-600 hover:bg-red-700' : 'bg-ink-900 hover:bg-ink-800'}`}
+                    className={`h-9 px-4 rounded-full text-[13px] font-medium text-white transition-colors ${confirmState.danger ? 'bg-red-600 hover:bg-red-700' : 'bg-accent hover:bg-accent-strong'}`}
                   >{confirmState.confirmLabel || '확인'}</motion.button>
                 </div>
               </motion.div>

@@ -6,13 +6,13 @@
 // 부모(../MealDemo.tsx)에서 next/dynamic(ssr:false)로만 로드되어 항상 클라이언트에서만 실행된다.
 import { useEffect, useState } from "react";
 import App from "./App";
-import { installDemoApi } from "./api";
+import { installMealApi } from "./api";
 
 export default function Client() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    installDemoApi();
+    installMealApi();
     setReady(true);
   }, []);
 

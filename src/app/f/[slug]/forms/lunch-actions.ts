@@ -156,6 +156,26 @@ export async function saveLunchOrder(formData: FormData): Promise<SaveLunchResul
   const month = await getOrCreateMonth(branch, ym.year, ym.month);
   const closures = await listClosures(month.id);
   const closureBy = new Map(closures.map((c) => [c.date, c]));
+  const todayEditable = nowMin < 8 * 60;
+
+  // 결함 4: 가격 미설정 달(중식·석식 가격 모두 0) — 신청이 "늘어나는" 경우만 거부한다. 원래
+  // meals.length > 0 이면 무조건 거부해서 전부 취소는 되는데 일부만 취소하는 건 막히는 모순이
+  // 있었다(취소는 언제나 가능해야 한다) — 이 함수가 교체 대상으로 삼는 "아직 마감 안된" 구간의
+  // 기존 개수와 비교해 늘어날 때만 막는다. 클라(lch4k9wp.tsx)와 같은 판정 기준을 쓴다.
+  const priceUnset = month.lunch_price === 0 && month.dinner_price === 0;
+  if (priceUnset && meals.length > 0) {
+    const existingCountRes = await db.query<{ cnt: string }>(
+      `select count(*)::text as cnt
+         from lunch_meal lm
+         join lunch_order o on o.id = lm.order_id
+        where o.month_id=$1 and o.student_id=$2 and (lm.date > $3 or ($4 and lm.date = $3))`,
+      [month.id, studentId, today, todayEditable],
+    );
+    const existingCount = Number(existingCountRes.rows[0]?.cnt ?? 0);
+    if (meals.length > existingCount) {
+      return { ok: false, error: "이 달은 아직 가격이 정해지지 않았어요. 카운터에 문의해주세요." };
+    }
+  }
 
   // 서버 재검증 — 클라가 잠긴(마감된) 끼니나 휴무일 끼니를 하나라도 보내면, 그 항목만 걸러내지 않고
   // 요청 전체를 거부한다(클라·서버 판정이 어긋났다는 신호이므로 조용히 잘라내지 않는다).
@@ -168,9 +188,10 @@ export async function saveLunchOrder(formData: FormData): Promise<SaveLunchResul
     }
   }
 
-  // 주문(월×학생) 확보.
+  // 주문(월×학생) 확보. source는 최초 생성 시점에만 정해진다 — 이미 있는 행(관리자가 먼저 만든
+  // staff 신청)을 학생이 고치더라도 source 는 바뀌지 않는다(do update 절에 source 를 넣지 않음).
   const ord = await db.query<{ id: string }>(
-    `insert into lunch_order(branch_id, month_id, student_id) values ($1,$2,$3)
+    `insert into lunch_order(branch_id, month_id, student_id, source) values ($1,$2,$3,'student')
      on conflict (month_id, student_id) do update set updated_at=now()
      returning id`,
     [branch, month.id, studentId],
@@ -179,8 +200,8 @@ export async function saveLunchOrder(formData: FormData): Promise<SaveLunchResul
 
   // "아직 마감되지 않은 끼니" 구간(date > today, 또는 오늘이면서 아직 8시 전)만 원자적으로 교체한다.
   // 이 범위 밖(마감된 과거·오늘 8시 이후 신청분)은 delete/insert 어느 쪽 대상도 아니므로 그대로 보존된다
-  // — src/app/apply/actions.ts submitLunchOrder 의 CTE 원자 교체 패턴에 마감 조건을 추가한 버전.
-  const todayEditable = nowMin < 8 * 60;
+  // (CTE 한 방으로 delete+insert 를 묶어, 중간에 실패해도 반쪽만 반영되는 일이 없게 한다). todayEditable
+  // 은 위에서(가격 가드) 이미 계산해뒀다.
   if (meals.length === 0) {
     await db.query(
       `delete from lunch_meal where order_id=$1 and (date > $2 or ($3 and date = $2))`,

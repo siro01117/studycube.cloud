@@ -41,28 +41,49 @@ export default function MealGrid({
 }: MealGridProps) {
   const rows = monthGrid(year, month).filter((row) => row.some(Boolean));
   const interactive = !!onMealClick;
-  const cols = "34px 44px repeat(6, minmax(56px, 1fr))";
 
   return (
     <div>
-      <div style={{ border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden" }}>
+      {/* 좁은 화면: 라벨 열 폭 축소·셀 확대. 축약형 background/border 와 개별 속성을 같은 요소에서
+          섞지 않도록, 이 반응형 규칙은 전부 별도 클래스로 옮기고 나머지는 인라인 스타일 그대로 둔다. */}
+      <style>{`
+        .mg-row { display: grid; grid-template-columns: 34px 44px repeat(6, minmax(56px, 1fr)); }
+        .mg-wrap { --mg-col1: 34px; }
+        .mg-sticky-1 { position: sticky; left: 0; z-index: 2; }
+        .mg-sticky-2 { position: sticky; left: var(--mg-col1); z-index: 2; }
+        .mg-cellbox { height: 34px; min-height: 34px; }
+        .mg-inner { min-width: ${34 + 44 + 6 * 56}px; }
+        .mg-fade { display: none; }
+        @media (max-width: 480px) {
+          .mg-row { grid-template-columns: 22px 30px repeat(6, minmax(46px, 1fr)); }
+          .mg-wrap { --mg-col1: 22px; }
+          .mg-cellbox { height: 44px; min-height: 44px; }
+          .mg-inner { min-width: ${22 + 30 + 6 * 46}px; }
+          .mg-fade { display: block; }
+        }
+      `}</style>
+      <div className="mg-wrap" style={{ position: "relative", border: "1px solid var(--line)", borderRadius: 12, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
-          <div style={{ minWidth: 34 + 44 + 6 * 56 }}>
-            <div style={{ display: "grid", gridTemplateColumns: cols, background: "var(--panel2)", borderBottom: "1px solid var(--line)" }}>
-              <HeadCell>주차</HeadCell>
-              <HeadCell>구분</HeadCell>
+          <div className="mg-inner">
+            <div className="mg-row" style={{ background: "var(--panel2)", borderBottom: "1px solid var(--line)" }}>
+              <div className="mg-sticky-1" style={{ background: "var(--panel2)" }}>
+                <HeadCell>주차</HeadCell>
+              </div>
+              <div className="mg-sticky-2" style={{ background: "var(--panel2)" }}>
+                <HeadCell>구분</HeadCell>
+              </div>
               {DAY_LABELS.map((l) => (
                 <HeadCell key={l}>{l}</HeadCell>
               ))}
             </div>
             {rows.map((row, ri) => (
-              <div key={ri} style={{ display: "grid", gridTemplateColumns: cols, borderTop: ri === 0 ? "none" : "1px solid var(--line)" }}>
-                <div style={{ display: "flex", flexDirection: "column", borderRight: "1px solid var(--line)", background: "var(--panel2)" }}>
+              <div key={ri} className="mg-row" style={{ borderTop: ri === 0 ? "none" : "1px solid var(--line)" }}>
+                <div className="mg-sticky-1" style={{ display: "flex", flexDirection: "column", borderRight: "1px solid var(--line)", background: "var(--panel2)" }}>
                   <RowLabelCell strong>{ri + 1}주</RowLabelCell>
                   <RowLabelCell>중</RowLabelCell>
                   <RowLabelCell>석</RowLabelCell>
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", borderRight: "1px solid var(--line)" }}>
+                <div className="mg-sticky-2" style={{ display: "flex", flexDirection: "column", borderRight: "1px solid var(--line)", background: "var(--card)" }}>
                   <RowLabelCell />
                   <RowLabelCell>중식</RowLabelCell>
                   <RowLabelCell>석식</RowLabelCell>
@@ -108,6 +129,14 @@ export default function MealGrid({
             ))}
           </div>
         </div>
+        <div
+          aria-hidden="true"
+          className="mg-fade"
+          style={{
+            position: "absolute", top: 0, right: 0, bottom: 0, width: 18, pointerEvents: "none",
+            backgroundImage: "linear-gradient(to right, transparent, var(--panel2))",
+          }}
+        />
       </div>
       {!hideLegend && (
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8, fontSize: 11, color: "var(--faint)", flexWrap: "wrap" }}>
@@ -181,7 +210,7 @@ function MealCell({
         : `${label}`;
 
   const common: React.CSSProperties = {
-    position: "relative", height: 34, minHeight: 34, display: "flex", alignItems: "center", justifyContent: "center",
+    position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
     borderBottom: borderBottom ? "1px solid var(--line)" : "none", padding: 0, width: "100%",
   };
 
@@ -197,7 +226,7 @@ function MealCell({
 
   if (!interactive) {
     return (
-      <div style={{ ...common, background: bg ?? "var(--card)" }} title={title}>
+      <div className="mg-cellbox" style={{ ...common, background: bg ?? "var(--card)" }} title={title}>
         {content}
       </div>
     );
@@ -206,7 +235,7 @@ function MealCell({
   return (
     <button
       type="button"
-      className="mg-cell"
+      className="mg-cell mg-cellbox"
       style={{ ...common, ...(bg ? { background: bg } : null) }}
       title={title}
       disabled={disabled}
@@ -229,7 +258,8 @@ function DotIcon({ color }: { color: string }) {
 
 /** 대각선 빗금 — 휴무 상태 기호. 셀 전체를 덮는 용도(full)와 범례용 작은 스와치 둘 다 지원. */
 function HatchSwatch({ full }: { full?: boolean }) {
-  const hatchBg = "repeating-linear-gradient(-45deg, transparent 0px, transparent 4px, var(--line) 4px, var(--line) 5.5px)";
+  // 휴무 = 대각선 한 줄(모서리→모서리). 촘촘한 줄무늬는 격자가 답답해 보여 쓰지 않는다.
+  const hatchBg = "linear-gradient(to top right, transparent calc(50% - 0.75px), var(--line) calc(50% - 0.75px), var(--line) calc(50% + 0.75px), transparent calc(50% + 0.75px))";
   if (full) {
     return <div aria-hidden="true" style={{ position: "absolute", inset: 0, backgroundImage: hatchBg }} />;
   }

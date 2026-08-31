@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, FileText, Pencil, Trash2, CheckCircle2, Circle, Search, X, ChevronDown } from 'lucide-react'
+import { Plus, Trash2, CheckCircle2, Circle, Search, X, ChevronDown } from 'lucide-react'
 import clsx from 'clsx'
 import { PillButton, spring } from '../components/Motion'
 import { useDialog } from '../components/Dialog'
 import { ApplicationDialog } from './ApplicationDialog'
 import type { Application, Month } from '../types'
-import { buildMonthPdfHtml } from '../lib/pdfHtml'
-import { monthGrid, isoDate } from '../lib/calendar'
 
 type PayFilter = 'all' | 'unpaid' | 'paid'
 
@@ -17,10 +15,10 @@ export function Students({ year: initYear, month: initMonth, onChange }: { year:
   const [month, setMonth] = useState(initMonth)
   const [m, setM] = useState<Month | null>(null)
   const [apps, setApps] = useState<Application[]>([])
-  const [editId, setEditId] = useState<number | null | undefined>(undefined)
+  const [adding, setAdding] = useState(false)
   const [filter, setFilter] = useState('')
   const [payFilter, setPayFilter] = useState<PayFilter>('all')
-  const [payPopup, setPayPopup] = useState<{ id: number; anchor: DOMRect } | null>(null)
+  const [payPopup, setPayPopup] = useState<{ id: string; anchor: DOMRect } | null>(null)
   const [showMonthPicker, setShowMonthPicker] = useState(false)
   const pickerRef = useRef<HTMLDivElement>(null)
 
@@ -43,27 +41,17 @@ export function Students({ year: initYear, month: initMonth, onChange }: { year:
   useEffect(() => { load() }, [year, month])
   if (!m) return null
 
-  const onSaved = async () => { setEditId(undefined); await load(); onChange() }
+  const onSaved = async () => { setAdding(false); await load(); onChange() }
 
-  const onDelete = async (id: number) => {
+  const onDelete = async (id: string) => {
     const ok = await confirm({ title: '신청서 삭제', message: '정말로 삭제할까요? 이 작업은 되돌릴 수 없습니다.', confirmLabel: '삭제', danger: true })
     if (!ok) return
-    await window.api.deleteApp(id); await load(); onChange()
-    toast('삭제되었습니다.')
-  }
-
-  const exportApp = async (a: Application) => {
-    const closures = await window.api.listClosures(m.id)
-    const grid = monthGrid(year, month)
-    const holidays: Record<string, string> = {}
-    for (const row of grid) for (const d of row) {
-      if (!d) continue
-      const iso = isoDate(d.getFullYear(), d.getMonth() + 1, d.getDate())
-      const lbl = await window.api.holidayLabel(iso)
-      if (lbl) holidays[iso] = lbl
+    try {
+      await window.api.deleteApp(id); await load(); onChange()
+      toast('삭제되었습니다.')
+    } catch (e) {
+      toast(e instanceof Error ? e.message : '삭제하지 못했습니다.', 'error')
     }
-    await window.api.exportPdf(buildMonthPdfHtml({ year, month, m, closures, holidays, application: a }),
-      `${year}년 ${month}월 ${a.name}.pdf`)
   }
 
   const getStats = (a: Application) => {
@@ -85,7 +73,7 @@ export function Students({ year: initYear, month: initMonth, onChange }: { year:
 
   return (
     <div className="h-full overflow-auto" onClick={() => setPayPopup(null)}>
-      <div className="flex items-end justify-between mb-5">
+      <div className="max-w-[1080px] mx-auto flex items-end justify-between mb-5">
         <div className="relative" ref={pickerRef}>
           <div className="text-[11px] uppercase tracking-[0.18em] font-semibold text-ink-400">Students</div>
           <button onClick={() => setShowMonthPicker(!showMonthPicker)} className="flex items-center gap-1.5 mt-0.5 group">
@@ -106,7 +94,7 @@ export function Students({ year: initYear, month: initMonth, onChange }: { year:
                     {Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 1 + i).map((y) => (
                       <button key={y} onClick={() => { setYear(y); setShowMonthPicker(false) }}
                         className={clsx('w-16 h-8 rounded-full text-[13px] font-medium transition-colors',
-                          y === year ? 'bg-ink-900 text-white' : 'hover:bg-surface text-ink-700')}>{y}</button>
+                          y === year ? 'bg-accent text-white' : 'hover:bg-surface text-ink-700')}>{y}</button>
                     ))}
                   </div>
                 </div>
@@ -116,7 +104,7 @@ export function Students({ year: initYear, month: initMonth, onChange }: { year:
                     {Array.from({ length: 12 }, (_, i) => i + 1).map((mo) => (
                       <button key={mo} onClick={() => { setMonth(mo); setShowMonthPicker(false) }}
                         className={clsx('w-10 h-8 rounded-full text-[13px] font-medium transition-colors',
-                          mo === month ? 'bg-ink-900 text-white' : 'hover:bg-surface text-ink-700')}>{mo}월</button>
+                          mo === month ? 'bg-accent text-white' : 'hover:bg-surface text-ink-700')}>{mo}월</button>
                     ))}
                   </div>
                 </div>
@@ -137,17 +125,17 @@ export function Students({ year: initYear, month: initMonth, onChange }: { year:
               <button key={f}
                 onClick={() => setPayFilter(f)}
                 className={clsx('h-9 px-3.5 text-[12px] font-medium transition-colors',
-                  payFilter === f ? 'bg-ink-900 text-white' : 'text-ink-600 hover:bg-surface')}>
+                  payFilter === f ? 'bg-accent text-white' : 'text-ink-600 hover:bg-surface')}>
                 {f === 'all' ? '전체' : f === 'unpaid' ? `미납 (${unpaidCount})` : '완납'}
               </button>
             ))}
           </div>
 
-          <PillButton variant="primary" icon={<Plus size={15} />} onClick={() => setEditId(null)}>신청서 추가</PillButton>
+          <PillButton variant="primary" icon={<Plus size={15} />} onClick={() => setAdding(true)}>신청서 추가</PillButton>
         </div>
       </div>
 
-      <div className="card p-3">
+      <div className="max-w-[1080px] mx-auto card p-3">
         <div className="grid grid-cols-[1.6fr_56px_70px_56px_56px_1.2fr_110px_90px] gap-3 px-3 py-2 text-[11px] uppercase tracking-[0.12em] font-semibold text-ink-400">
           <span>이름</span><span className="text-center">층</span><span className="text-center">좌석</span>
           <span className="text-center">중식</span><span className="text-center">석식</span>
@@ -159,7 +147,7 @@ export function Students({ year: initYear, month: initMonth, onChange }: { year:
             {allFiltered.length === 0 && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                 className="text-center py-14 text-ink-400 text-[13px]">
-                {payFilter === 'unpaid' ? '미납자가 없습니다. 👍' : '신청서를 추가해주세요.'}
+                {payFilter === 'unpaid' ? '미납자가 없습니다.' : '신청서를 추가해주세요.'}
               </motion.div>
             )}
             {allFiltered.map((a, i) => {
@@ -177,7 +165,13 @@ export function Students({ year: initYear, month: initMonth, onChange }: { year:
                       {a.name.slice(0, 1)}
                     </div>
                     <div className="min-w-0">
-                      <div className="font-semibold text-[13px] truncate">{a.name}</div>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="font-semibold text-[13px] truncate">{a.name}</span>
+                        <span className={clsx('shrink-0 rounded-full px-1.5 py-[1px] text-[10px] font-medium',
+                          a.source === 'student' ? 'bg-ink-100 text-ink-500' : 'bg-emerald-50 text-emerald-600')}>
+                          {a.source === 'student' ? '학생 제출' : '카운터 등록'}
+                        </span>
+                      </div>
                       {a.memo && <div className="text-[11px] text-ink-400 truncate">{a.memo}</div>}
                     </div>
                   </div>
@@ -207,9 +201,11 @@ export function Students({ year: initYear, month: initMonth, onChange }: { year:
                     {a.paid_date && <div className="text-[10px] text-ink-400 mt-0.5">{a.paid_date}</div>}
                   </div>
                   <div className="flex justify-end gap-1">
-                    <IBtn onClick={() => exportApp(a)} title="PDF"><FileText size={13} /></IBtn>
-                    <IBtn onClick={() => setEditId(a.id)} title="수정"><Pencil size={13} /></IBtn>
-                    <IBtn onClick={() => onDelete(a.id)} title="삭제" danger><Trash2 size={13} /></IBtn>
+                    {a.source === 'student' ? (
+                      <IBtn onClick={() => {}} title="학생이 직접 신청한 신청서는 삭제할 수 없습니다" disabled><Trash2 size={13} /></IBtn>
+                    ) : (
+                      <IBtn onClick={() => onDelete(a.id)} title="삭제" danger><Trash2 size={13} /></IBtn>
+                    )}
                   </div>
                 </motion.div>
               )
@@ -230,11 +226,10 @@ export function Students({ year: initYear, month: initMonth, onChange }: { year:
       )}
 
       <ApplicationDialog
-        open={editId !== undefined}
-        appId={editId === null ? null : (editId as number | null)}
+        open={adding}
         year={year} month={month} monthRow={m}
-        onClose={() => setEditId(undefined)}
-        onSaved={async () => { setEditId(undefined); await load(); onChange(); toast('신청서가 저장되었습니다.', 'success') }}
+        onClose={() => setAdding(false)}
+        onSaved={async () => { setAdding(false); await load(); onChange(); toast('신청서가 저장되었습니다.', 'success') }}
       />
     </div>
   )
@@ -253,10 +248,7 @@ function PayPopup({ app, anchor, monthRow, onClose, onSaved }: {
   const remaining = total - amount
 
   const save = async () => {
-    await window.api.upsertApp({
-      id: app.id, monthId: app.month_id, name: app.name, seat: app.seat || '',
-      floor: app.floor || 0, paid: amount >= total, paidAmount: amount, paidDate, memo, meals: app.meals
-    })
+    await window.api.updatePayment({ orderId: app.id, paidAmount: amount, paidDate, memo })
     onSaved()
   }
 
@@ -308,7 +300,7 @@ function PayPopup({ app, anchor, monthRow, onClose, onSaved }: {
         <div className="flex gap-2 mt-3">
           <button onClick={onClose} className="flex-1 h-8 rounded-full text-[12px] font-medium bg-surface border border-ink-200 hover:bg-ink-100 transition-colors">취소</button>
           <motion.button whileTap={{ scale: 0.96 }} transition={spring} onClick={save}
-            className="flex-1 h-8 rounded-full bg-ink-900 text-white text-[12px] font-medium hover:bg-ink-800 transition-colors">저장</motion.button>
+            className="flex-1 h-8 rounded-full bg-accent text-white text-[12px] font-medium hover:bg-accent-strong transition-colors">저장</motion.button>
         </div>
       </motion.div>
     </>
@@ -324,11 +316,12 @@ function Fld({ label, children }: { label: string; children: React.ReactNode }) 
   )
 }
 
-function IBtn({ children, onClick, title, danger }: { children: React.ReactNode; onClick: () => void; title: string; danger?: boolean }) {
+function IBtn({ children, onClick, title, danger, disabled }: { children: React.ReactNode; onClick: () => void; title: string; danger?: boolean; disabled?: boolean }) {
   return (
-    <motion.button whileHover={{ y: -1 }} whileTap={{ scale: 0.9 }} transition={spring} title={title} onClick={onClick}
+    <motion.button whileHover={disabled ? undefined : { y: -1 }} whileTap={disabled ? undefined : { scale: 0.9 }} transition={spring}
+      title={title} onClick={disabled ? undefined : onClick} disabled={disabled}
       className={clsx('w-7 h-7 rounded-full flex items-center justify-center transition-colors',
-        danger ? 'hover:bg-red-50 text-ink-400 hover:text-red-500' : 'hover:bg-ink-100 text-ink-500')}>
+        disabled ? 'text-ink-300 cursor-not-allowed' : danger ? 'hover:bg-red-50 text-ink-400 hover:text-red-500' : 'hover:bg-ink-100 text-ink-500')}>
       {children}
     </motion.button>
   )

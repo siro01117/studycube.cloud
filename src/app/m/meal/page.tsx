@@ -6,9 +6,9 @@ import PageHeader from "../_shared/PageHeader";
 
 export const runtime = "nodejs";
 
-// 도시락 관리 — 원본 Electron 앱("도시락앱")의 렌더러를 글자 그대로 이식한 데모 화면이다
-// (src/app/m/meal/_demo/**, 원본: OneDrive/작업/도시락앱/src/renderer/src/**). 실제 DB 대신
-// 브라우저 localStorage 어댑터(_demo/api.ts)로 동작하므로 서버에서 넘겨줄 연/월 데이터가 없다 —
+// 도시락 관리 — 원본 Electron 앱("도시락앱")의 렌더러를 글자 그대로 이식한 화면이다
+// (src/app/m/meal/_demo/**, 원본: OneDrive/작업/도시락앱/src/renderer/src/**). 서버 액션
+// (../actions.ts)을 호출하는 실 DB 어댑터(_demo/api.ts)로 동작하므로 서버에서 넘겨줄 연/월 데이터가 없다 —
 // 권한 가드만 서버에서 확인하고 본문은 클라이언트 전용(next/dynamic ssr:false)으로 마운트한다.
 // 구 미완성 화면(MealAdmin/OrderingTab/StatusTab/PaymentTab/SettingsTab, 커밋 안 됨)은 이 재작업으로 대체되어 삭제했다.
 export default async function MealAdminPage() {
