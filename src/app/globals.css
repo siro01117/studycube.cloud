@@ -94,6 +94,11 @@ button, .chip, [role="button"] { touch-action: manipulation; }
 .chip:active { transform: scale(.94); }
 .label { font-size: 12px; color: var(--faint); letter-spacing: .02em; margin-bottom: 6px; display: block; }
 
+/* 도시락 격자(MealGrid) 클릭 가능 셀 — 상태색(휴무/신청/마감)은 인라인으로 얹으므로 기본 hover만 여기서 처리 */
+.mg-cell { border: none; background: var(--card); cursor: pointer; }
+.mg-cell:hover:not(:disabled) { background: var(--panel2); }
+.mg-cell:disabled { cursor: default; }
+
 /* 휴대폰 보관함 — 존재하지 않는 좌석 번호 입력 시 살짝 흔들리는 에러 피드백 */
 @keyframes phonebox-shake {
   10%, 90% { transform: translateX(-1px); }
@@ -180,3 +185,55 @@ button, .chip, [role="button"] { touch-action: manipulation; }
     border-right: none !important; border-bottom: 1px solid var(--line);
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   도시락 관리 데모(/m/meal, src/app/m/meal/_demo/**) — 원본 Electron 앱("도시락앱")
+   렌더러를 글자 그대로 이식했다. 원본 tailwind.config.js 커스텀 테마를 Tailwind v4
+   @theme 로 매핑(아래)하고, 원본 src/renderer/src/index.css 의 커스텀 클래스는 기존
+   스터디큐브 클래스(.card 등, 위 54행)와 충돌하지 않도록 .dsk 하위로만 스코프한다.
+   이식한 TSX 쪽 클래스명은 한 글자도 바꾸지 않았다 — 래퍼가 .dsk 라서 그대로 맞는다.
+   ══════════════════════════════════════════════════════════════════════════ */
+@theme {
+  --color-surface: #F4F4F4;
+  --color-surface-card: #FFFFFF;
+  --color-surface-border: #E0E0E0;
+  --color-surface-hover: #F0F0F0;
+  --color-surface-muted: #F9F9F9;
+
+  --color-ink-900: #111111;
+  --color-ink-800: #222222;
+  --color-ink-700: #333333;
+  --color-ink-600: #555555;
+  --color-ink-500: #777777;
+  --color-ink-400: #999999;
+  --color-ink-300: #C0C0C0;
+  --color-ink-200: #DEDEDE;
+  --color-ink-100: #EEEEEE;
+  --color-ink-50: #F6F6F6;
+
+  --shadow-card: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-pop: 0 8px 24px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.06);
+  --shadow-sm2: 0 1px 4px rgba(0,0,0,0.08);
+
+  --radius-4xl: 2rem;
+  --radius-5xl: 2.5rem;
+}
+
+/* 원본 index.css 의 html/body/#root 배경·색·overflow 규칙 — .dsk 래퍼 자체에 적용 */
+.dsk {
+  font-family: 'Pretendard', 'Malgun Gothic', system-ui, sans-serif;
+  background: #F4F4F4;
+  color: #111111;
+  overflow: hidden;
+}
+
+.dsk ::-webkit-scrollbar { width: 6px; height: 6px; }
+.dsk ::-webkit-scrollbar-track { background: transparent; }
+.dsk ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 3px; }
+.dsk ::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.28); }
+
+.dsk .card { background: #FFFFFF; border: 1px solid #E0E0E0; border-radius: 20px; }
+.dsk .card-sm { background: #FFFFFF; border: 1px solid #E0E0E0; border-radius: 14px; }
+
+.dsk .titlebar-drag { -webkit-app-region: drag; }
+.dsk .titlebar-nodrag { -webkit-app-region: no-drag; }

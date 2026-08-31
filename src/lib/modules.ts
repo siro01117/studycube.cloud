@@ -16,6 +16,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   patrol: "/m/patrol",
   penalty: "/m/penalty",
   schedule: "/m/schedule",
+  lunch: "/m/meal",
 };
 
 export const MODULES: ModuleDef[] = [
@@ -26,7 +27,7 @@ export const MODULES: ModuleDef[] = [
   { key: "penalty", label: "벌점", requires: ["penalty.view"], ord: 50, mvp: true },
   { key: "schedule", label: "학생 스케쥴러", requires: ["schedule.view"], ord: 60, mvp: true },
   { key: "payment", label: "결제·재무", requires: ["billing.view"], ord: 70, mvp: true },
-  { key: "lunch", label: "도시락", requires: ["lunch.view"], ord: 80 },
+  { key: "lunch", label: "도시락", requires: ["lunch.view"], ord: 80, mvp: true },
   { key: "grade", label: "성적 관리", requires: ["grade.view"], ord: 90 },
   { key: "planner", label: "학습 플래너", requires: ["planner.view"], ord: 95 },
   { key: "counsel", label: "주간 상담일지", requires: ["counsel.view"], ord: 100 },

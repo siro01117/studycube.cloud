@@ -117,7 +117,7 @@ const BOOT_LOCK =
 
 // 스키마·시드 내용이 바뀌면 이 값을 올린다. 그때만 DDL 이 다시 돈다.
 // (schema.modules.ts / CORE_SQL / PERMISSIONS / MODULES 를 수정하면 반드시 갱신)
-const SCHEMA_VERSION = "2026-08-22.3"; // 도시락 테이블(lunch_month/closure/order/meal) 이관 — 학생 신청 폼
+const SCHEMA_VERSION = "2026-08-22.4"; // 도시락 관리 화면(/m/meal) 이관 — lunch 모듈 활성화
 
 /** 이미 이 버전으로 부팅된 DB인지 한 번의 쿼리로 판정 */
 async function alreadyBooted(): Promise<boolean> {
@@ -141,6 +141,10 @@ async function boot() {
   await db.exec(BOOT_LOCK + MODULE_SQL); // 이식된 모듈 테이블
   // 상태 모델 변경(2026-07-20): 퇴원(withdrawn) 폐지 → 휴원(leave)로 통합
   await db.query(`update student set status='leave' where status='withdrawn'`);
+  // 도시락 관리 화면 이관(2026-08-31): 본점은 이미 branch_module 행이 있어 아래 mvp 시드의
+  // on conflict do nothing 으론 안 켜진다 — 명시적으로 켠다. 조건 없이 매 버전업마다 다시 도는
+  // 문장이라, 나중에 수동으로 꺼도 다음 SCHEMA_VERSION 을 올리면 다시 켜진다(지금은 의도적으로 "항상 켬").
+  await db.query(`update branch_module set enabled=true where module_key='lunch'`);
   // 자습은 더 이상 블록으로 저장하지 않는다(등하원 시각 + statusAt 파생 판정으로 대체). 구방식 잔여 행 정리.
   // 운영 DB 엔 해당 행이 없어 no-op 이지만 dev 와의 일관성을 위해 넣는다.
   await db.query(`delete from schedule_rule where kind='study'`);
