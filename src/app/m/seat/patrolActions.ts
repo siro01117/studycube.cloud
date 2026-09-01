@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { guard } from "@/lib/auth";
 import { PATROL_BY_KEY } from "@/lib/patrol";
-import { todayKey as todayStr } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
+import { todayKey as todayStr, elapsedLabel } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
 
 const s = (v: FormDataEntryValue | null): string | null => {
   const t = String(v ?? "").trim();
@@ -157,6 +157,31 @@ export async function removePatrolEvent(formData: FormData) {
   revalidatePath("/seat");
 }
 
+// removePatrolEvent/clearPatrolMark 로 지운 순찰 기록 실행취소 — 클라가 삭제 직전에 들고 있던 원본
+// 값(id·시각·좌석·세션·부여자 포함) 그대로 재기록한다. id 를 그대로 재사용한다.
+export async function restorePatrolEvent(formData: FormData) {
+  const me = await guard("patrol.manage");
+  const id = s(formData.get("id"));
+  const studentId = s(formData.get("studentId"));
+  const state = s(formData.get("state"));
+  const at = s(formData.get("at"));
+  const date = s(formData.get("date"));
+  const sessionId = s(formData.get("sessionId"));
+  const seatId = s(formData.get("seatId"));
+  const createdBy = s(formData.get("createdBy"));
+  const points = Number(formData.get("points"));
+  if (!id || !studentId || !state || !at || !date || !Number.isFinite(points)) return;
+  await db.query(
+    `insert into patrol_event(id, branch_id, student_id, state, points, session_id, seat_id, at, date, created_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [id, me.activeBranchId, studentId, state, points, sessionId, seatId, at, date, createdBy],
+  );
+  revalidatePath("/m/penalty");
+  revalidatePath("/m/patrol");
+  revalidatePath("/m/seat");
+  revalidatePath("/seat");
+}
+
 // 순찰 시작 — 세션 행 생성(시작 시각 기록). id 는 클라가 생성해 patrol_event 와 매칭.
 export async function startPatrol(formData: FormData) {
   const me = await guard("patrol.manage");
@@ -292,8 +317,10 @@ export async function getPatrolDates(): Promise<string[]> {
 // 한 순찰 세션의 학생별 기록 (student_id 포함 → 좌석 매핑·수정용)
 export async function getPatrolSessionDetail(sessionId: string) {
   const me = await guard("patrol.view");
-  const r = await db.query<{ student_id: string; seat_id: string | null; name: string; state: string; points: number; at: string }>(
-    `select pe.student_id, pe.seat_id, st.name, pe.state, pe.points, pe.at::text as at
+  // id/date/created_by 는 표시용이 아니라 clearPatrolMark 실행취소(restorePatrolEvent)가
+  // 원본 그대로 재기록할 때 필요해서 함께 내려준다.
+  const r = await db.query<{ id: string; student_id: string; seat_id: string | null; name: string; state: string; points: number; at: string; date: string; created_by: string | null }>(
+    `select pe.id, pe.student_id, pe.seat_id, st.name, pe.state, pe.points, pe.at::text as at, pe.date::text as date, pe.created_by
        from patrol_event pe join student st on st.id = pe.student_id
       where pe.session_id=$1 and pe.branch_id=$2
       order by pe.at`,
@@ -427,4 +454,28 @@ export async function getOpenPatrolSession(): Promise<OpenPatrolSession | null> 
     timeLabel: time,
     lastLabel: row.last_at_kst ? row.last_at_kst.slice(11, 16) : null,
   };
+}
+
+// 순찰 페이스 — "감으로 돌지 않게" 오늘 순찰 횟수 + 마지막 순찰 이후 경과 시간을 서버에서 계산해 내려준다
+// (순찰 화면에 상시 노출용, 클라 시각 계산 금지 원칙 — startPatrol 확인창의 line1 과 달리 이건 순찰
+// 시작 전에도 항상 보여야 해서 별도 액션으로 분리). 지점 기준(학생별 아님).
+// 지난 세션(가장 최근 시작된 것) 하나만 보면 되므로 학생 수·세션 수와 무관하게 쿼리 1회.
+export type PatrolPace = { todayCount: number; lastLabel: string | null };
+export async function getPatrolPace(): Promise<PatrolPace> {
+  const me = await guard("patrol.view");
+  const today = todayStr();
+  const r = await db.query<{ today_count: number; mins: number | null }>(
+    `with last_sess as (
+       select id, started_at from patrol_session where branch_id=$1 order by started_at desc limit 1
+     ), last_evt as (
+       select max(pe.at) as max_at from patrol_event pe join last_sess ls on pe.session_id = ls.id
+     )
+     select
+       (select count(*)::int from patrol_session where branch_id=$1 and date=$2) as today_count,
+       (select floor(extract(epoch from (now() - greatest(ls.started_at, coalesce(le.max_at, ls.started_at)))) / 60)::int
+          from last_sess ls, last_evt le) as mins`,
+    [me.activeBranchId, today],
+  );
+  const row = r.rows[0];
+  return { todayCount: row?.today_count ?? 0, lastLabel: row?.mins != null ? elapsedLabel(row.mins) : null };
 }

@@ -88,6 +88,21 @@ export function dayLabel(key: string, today: string): string {
   return `${m}월 ${d}일`;
 }
 
+/** 분 단위 경과 시간 → "방금 전"/"42분 전"/"2시간 15분 전" 라벨. 순수 포맷팅(Date 미사용) — 서버가
+ * (지금 - 마지막 순찰 시각)을 분으로 계산한 뒤 이 함수로 문자열화해 클라로 내려준다(순찰 화면 "감으로
+ * 돌지 않게" 안내용 — 클라에서 시각 계산 금지 원칙 유지). */
+export function elapsedLabel(minutes: number): string {
+  const m = Math.max(0, Math.floor(minutes));
+  if (m < 1) return "방금 전";
+  if (m < 60) return `${m}분 전`;
+  const h = Math.floor(m / 60), rem = m % 60;
+  // 하루를 넘으면 시간 단위는 읽히지 않는다("928시간 54분 전"). 일 단위로 올린다.
+  if (h < 24) return rem > 0 ? `${h}시간 ${rem}분 전` : `${h}시간 전`;
+  const d = Math.floor(h / 24), remH = h % 24;
+  if (d < 7) return remH > 0 ? `${d}일 ${remH}시간 전` : `${d}일 전`;
+  return `${d}일 전`;
+}
+
 /** 주 시작 라벨 "7월 20일 (월)" — KST 날짜 문자열 기준. */
 export function weekStartLabel(key: string): string {
   const [y, m, d] = key.split("-").map(Number);

@@ -41,11 +41,11 @@ const CARD: React.CSSProperties = { background: "var(--card)", border: "1px soli
 const CARD_TITLE: React.CSSProperties = { fontSize: 11.5, color: "var(--dim)", fontWeight: 700, marginBottom: 8, lineHeight: 1, cursor: "default" };
 // 카드 제목 옆 집계 기간 라벨(예: "30일" · "4주 누적" · "이번 주") — 서술형 문장 없이 짧게.
 const CARD_TITLE_ROW: React.CSSProperties = { ...CARD_TITLE, display: "flex", alignItems: "baseline", gap: 5 };
-const PERIOD_LABEL: React.CSSProperties = { fontSize: 11, color: "var(--faint)", fontWeight: 500 };
-const STAT_LABEL: React.CSSProperties = { fontSize: 10.5, color: "var(--faint)", fontWeight: 700 };
+const PERIOD_LABEL: React.CSSProperties = { fontSize: 11, color: "var(--sub)", fontWeight: 500 };
+const STAT_LABEL: React.CSSProperties = { fontSize: 10.5, color: "var(--sub)", fontWeight: 700 };
 const STAT_VALUE: React.CSSProperties = { fontSize: 23, fontWeight: 800, marginTop: 4, fontVariantNumeric: "tabular-nums" };
 const STAT_SUB: React.CSSProperties = { fontSize: 10.5, color: "var(--dim)", marginTop: 2, fontVariantNumeric: "tabular-nums" };
-const EMPTY: React.CSSProperties = { color: "var(--faint)", fontSize: 12.5, padding: "10px 2px", textAlign: "center", margin: "auto 0" };
+const EMPTY: React.CSSProperties = { color: "var(--sub)", fontSize: 12.5, padding: "10px 2px", textAlign: "center", margin: "auto 0" };
 
 type StudentHead = { id: string; name: string; seatLabel: string; statusLabel: string; isLeave: boolean };
 
@@ -138,7 +138,7 @@ function HeaderCard({ student, canEditSchedule }: { student: StudentHead; canEdi
         <span
           style={{
             fontSize: 11.5, fontWeight: 700, padding: "3px 9px", borderRadius: 999, flexShrink: 0,
-            color: student.isLeave ? "var(--faint)" : "var(--ok)",
+            color: student.isLeave ? "var(--sub)" : "var(--ok)",
             background: student.isLeave ? "var(--panel2)" : "var(--ok-soft)",
           }}
         >
@@ -166,7 +166,7 @@ function StatCard({ label, value, color, dim, title, sub, period, reliabilityTip
         {period && <span style={PERIOD_LABEL}>{period}</span>}
         <ReliabilityBadge tip={reliabilityTip ?? null} />
       </div>
-      <span style={{ ...STAT_VALUE, color: dim ? "var(--faint)" : color ?? "var(--ink)" }}>{value}</span>
+      <span style={{ ...STAT_VALUE, color: dim ? "var(--sub)" : color ?? "var(--ink)" }}>{value}</span>
       {sub && <span style={STAT_SUB}>{sub}</span>}
     </div>
   );
@@ -197,7 +197,7 @@ function CalendarHeatmapGrid({ heatmap, leftLabel, rightLabel }: { heatmap: Cale
         {/* 요일 머리글 */}
         <div style={{ ...calGridCols, marginBottom: 4 }}>
           {DAY_LABELS.map((wd) => (
-            <div key={wd} style={{ fontSize: 11.5, fontWeight: 700, color: "var(--faint)", textAlign: "center" }}>{wd}</div>
+            <div key={wd} style={{ fontSize: 11.5, fontWeight: 700, color: "var(--sub)", textAlign: "center" }}>{wd}</div>
           ))}
         </div>
 
@@ -222,7 +222,7 @@ function CalendarHeatmapGrid({ heatmap, leftLabel, rightLabel }: { heatmap: Cale
                             border: cell.isToday ? "1.5px solid var(--accent)" : cell.hasData ? "1px solid transparent" : "1px solid var(--line)",
                           }}
                         >
-                          <span style={{ fontSize: 11, color: "var(--faint)", lineHeight: 1, pointerEvents: "none" }}>{cell.dayNum}</span>
+                          <span style={{ fontSize: 11, color: "var(--sub)", lineHeight: 1, pointerEvents: "none" }}>{cell.dayNum}</span>
                         </div>
                         {cell.dot != null && (
                           <span style={{ position: "absolute", right: 2, top: 2, width: 3, height: 3, borderRadius: "50%", background: cell.dot, pointerEvents: "none" }} />
@@ -319,7 +319,7 @@ function PenaltyReasonCard({ bars, total30, reliabilityTip }: { bars: PenaltyRea
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
                 <span style={{ width: 7, height: 7, borderRadius: "50%", background: reasonColor(r.label, i), display: "inline-block", flexShrink: 0 }} />
                 <span style={{ fontSize: 12, color: "var(--dim)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</span>
-                <span style={{ fontSize: 12, color: "var(--faint)", fontWeight: 700, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{r.count}회</span>
+                <span style={{ fontSize: 12, color: "var(--sub)", fontWeight: 700, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{r.count}회</span>
                 <span style={{ fontSize: 10.5, color: "var(--dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{r.points}점</span>
               </div>
               <div style={{ height: 6, borderRadius: 3, background: "var(--panel2)", overflow: "hidden" }}>
@@ -403,7 +403,7 @@ function PenaltyHourlyCard({ hourly, reliabilityTip }: { hourly: PenaltyHourly; 
           <span style={PERIOD_LABEL}>4주 누적</span>
           <ReliabilityBadge tip={reliabilityTip} />
         </div>
-        {hourly.hasData && <span style={{ fontSize: 10, color: "var(--faint)", fontWeight: 700, marginBottom: 8 }}>최고 {maxCount}건</span>}
+        {hourly.hasData && <span style={{ fontSize: 10, color: "var(--sub)", fontWeight: 700, marginBottom: 8 }}>최고 {maxCount}건</span>}
       </div>
       {!hourly.hasData ? (
         <div style={{ position: "relative", width: "100%", height: PEN_H }}>
@@ -470,7 +470,7 @@ function PenaltyHourlyCard({ hourly, reliabilityTip }: { hourly: PenaltyHourly; 
                   key={p.b.hour}
                   style={{
                     position: "absolute", left: `${(p.x / PEN_W) * 100}%`, top: 0,
-                    transform: "translateX(-50%)", fontSize: 9, color: "var(--faint)", whiteSpace: "nowrap",
+                    transform: "translateX(-50%)", fontSize: 9, color: "var(--sub)", whiteSpace: "nowrap",
                   }}
                 >
                   {String(p.b.hour).padStart(2, "0")}
@@ -495,7 +495,7 @@ function MiniTimetable({ days }: { days: MiniDay[] }) {
     <div style={{ flex: 1, minHeight: MINI_MIN_HEIGHT, display: "flex", flexDirection: "column" }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 3 }}>
         {days.map((d) => (
-          <div key={d.day} style={{ fontSize: 9.5, fontWeight: 700, color: "var(--faint)", textAlign: "center" }}>{d.label}</div>
+          <div key={d.day} style={{ fontSize: 9.5, fontWeight: 700, color: "var(--sub)", textAlign: "center" }}>{d.label}</div>
         ))}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, flex: 1 }}>
@@ -548,7 +548,7 @@ function ScheduleCard({
       <div style={CARD_TITLE} title={tip}>시간표</div>
       {!hasSchedule ? (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, flex: 1, minHeight: MINI_MIN_HEIGHT }} title={tip}>
-          <span style={{ fontSize: 12.5, color: "var(--faint)", fontWeight: 700 }}>미설정</span>
+          <span style={{ fontSize: 12.5, color: "var(--sub)", fontWeight: 700 }}>미설정</span>
           {canEditSchedule && (
             <a href={`/m/schedule?student=${studentId}`} style={{ fontSize: 12, fontWeight: 700, color: "var(--accent)", textDecoration: "none" }}>편집 →</a>
           )}

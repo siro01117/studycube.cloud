@@ -5,7 +5,7 @@ import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
 import { todayKey, weekdayOf, minuteOfKST } from "@/lib/date";
 import type { DaySlot, Period } from "@/lib/schedule";
-import { getOpenPatrolSession } from "../m/seat/patrolActions";
+import { getOpenPatrolSession, getPatrolPace } from "../m/seat/patrolActions";
 import MobilePatrol, { type MRoom, type MSeat, type MStudent, type MScheduleInfo, type MActual } from "./MobilePatrol";
 
 export const runtime = "nodejs";
@@ -33,7 +33,7 @@ export default async function MobilePatrolPage() {
   const jsDow = weekdayOf(today);
   const dbDay = jsDow === 0 ? 7 : jsDow;
 
-  const [rooms, seats, students, att, openSession, hoursRows, ruleRows, excRows, periodRows] = await Promise.all([
+  const [rooms, seats, students, att, openSession, patrolPace, hoursRows, ruleRows, excRows, periodRows] = await Promise.all([
     db.query<MRoom>(`select id, name, floor from room where branch_id=$1 order by floor, name`, [branch]),
     db.query<MSeat>(
       `select id, room_id, grid_x, grid_y, number, label, current_student_id from seat where branch_id=$1`,
@@ -51,6 +51,8 @@ export default async function MobilePatrolPage() {
     ),
     // 미종료 순찰 세션 — 있으면 "이어하기"로 전환(액션 내부에서 12h 초과분은 자동 종료)
     getOpenPatrolSession(),
+    // 순찰 페이스(오늘 횟수·마지막 경과) — 감으로 돌지 않게 상시 안내(서버 계산, 클라 시각 계산 금지)
+    getPatrolPace(),
     // 스케쥴 고스트 소스 3쿼리 — 학생 수만큼 루프 쿼리하지 않고 지점 전체를 한 번에 읽어 memory join 한다.
     // 1) 오늘 요일의 학생별 등하원 시각
     db.query<{ student_id: string; arrive_min: number; leave_min: number }>(
@@ -116,6 +118,7 @@ export default async function MobilePatrolPage() {
       canManage={can(me, "patrol.manage")}
       branchKey={branch ?? "nobranch"}
       openSession={openSession}
+      patrolPace={patrolPace}
       scheduleMap={scheduleMap}
       periods={periods}
       actual={actual}

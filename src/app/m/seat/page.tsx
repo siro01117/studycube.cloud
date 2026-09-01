@@ -8,7 +8,7 @@ import PhoneRedirect from "../_shared/PhoneRedirect";
 import PageHeader from "../_shared/PageHeader";
 import { todayKey as todayStr, weekdayOf, minuteOfKST } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
 import type { DaySlot, Period, ActualAttendance } from "@/lib/schedule";
-import { getOpenPatrolSession } from "./patrolActions";
+import { getOpenPatrolSession, getPatrolPace } from "./patrolActions";
 import { buildOccupancy, type SeatOcc } from "@/lib/occupancy";
 
 export const runtime = "nodejs";
@@ -32,7 +32,7 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
   const jsDow = weekdayOf(today);
   const dbDay = jsDow === 0 ? 7 : jsDow;
 
-  const [rooms, students, seats, br, att, pat, lastPat, openSession, hoursRows, ruleRows, excRows, periodRows] = await Promise.all([
+  const [rooms, students, seats, br, att, pat, lastPat, openSession, patrolPace, hoursRows, ruleRows, excRows, periodRows] = await Promise.all([
     db.query<Room>(
       `select id, name, floor, cols, rows, pos_x, pos_y, door_side from room where branch_id=$1 order by floor, name`,
       [branch],
@@ -78,6 +78,8 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
     // getOpenPatrolSession 은 patrol.view 를 guard() 하므로 그 권한이 없는 사용자는 호출 자체를 건너뛴다
     // (그렇지 않으면 seat.view 만 있는 사용자가 이 페이지에서 예외로 터진다).
     canPatrolView ? getOpenPatrolSession() : Promise.resolve(null),
+    // 순찰 페이스(오늘 횟수·마지막 경과) — 순찰 화면 상시 안내용. patrol.view 권한 게이트는 getOpenPatrolSession 과 동일 이유.
+    canPatrolView ? getPatrolPace() : Promise.resolve(null),
     // 스케쥴 고스트 소스 3쿼리 — 학생 수만큼 루프 쿼리하지 않고 지점 전체를 한 번에 읽어 memory join 한다.
     // 1) 오늘 요일의 학생별 등하원 시각
     db.query<{ student_id: string; arrive_min: number; leave_min: number }>(
@@ -173,6 +175,7 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
         canPatrol={canPatrol}
         lastPatrolAt={lastPat.rows[0]?.last ?? null}
         openSession={openSession}
+        patrolPace={patrolPace}
         scheduleMap={scheduleMap}
         periods={periods}
         actual={actual}

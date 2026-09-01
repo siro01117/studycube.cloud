@@ -41,7 +41,7 @@ export default function PageHeader({
           <Link href={backHref} className="chip" style={backLinkStyle}>
             ‹ {backLabel}
           </Link>
-          <span style={{ fontWeight: 700 }}>{title}</span>
+          <h1 style={{ margin: 0, fontSize: "inherit", fontWeight: 700, lineHeight: "inherit", fontFamily: "inherit", color: "inherit" }}>{title}</h1>
           {titleExtra}
         </div>
         {right}

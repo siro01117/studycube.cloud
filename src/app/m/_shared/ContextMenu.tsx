@@ -68,7 +68,7 @@ export default function ContextMenu({
         }}
       >
         {header && (
-          <div style={{ padding: "5px 10px 8px", fontSize: 11.5, color: "var(--faint)", fontWeight: 700, borderBottom: "1px solid var(--line)", marginBottom: 4, whiteSpace: "nowrap" }}>
+          <div style={{ padding: "5px 10px 8px", fontSize: 11.5, color: "var(--sub)", fontWeight: 700, borderBottom: "1px solid var(--line)", marginBottom: 4, whiteSpace: "nowrap" }}>
             {header}
           </div>
         )}

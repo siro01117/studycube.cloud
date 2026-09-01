@@ -73,7 +73,7 @@ export default function SubmissionList({
       </form>
 
       {rows.length === 0 ? (
-        <div className="card" style={{ padding: 32, textAlign: "center", color: "var(--faint)", fontSize: 13.5 }}>조건에 맞는 응답이 없습니다.</div>
+        <div className="card" style={{ padding: 32, textAlign: "center", color: "var(--sub)", fontSize: 13.5 }}>조건에 맞는 응답이 없습니다.</div>
       ) : (
         <>
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
@@ -116,24 +116,24 @@ function SubmissionCard({ row, isOpen, onToggle, canManage }: { row: SubmissionR
         <ChevronIcon open={isOpen} />
         <span className="chip" style={{ background: "var(--panel2)", fontWeight: 700 }}>{row.type}</span>
         {isTest && <span className="chip" style={{ background: "var(--warn)", color: "#fff", fontWeight: 700 }}>테스트</span>}
-        {slug && <span style={{ fontSize: 11, color: "var(--faint)" }}>{slug}</span>}
+        {slug && <span style={{ fontSize: 11, color: "var(--sub)" }}>{slug}</span>}
         <span style={{ fontSize: 13.5, fontWeight: 600 }}>
           {who}
-          {row.seat_number != null && <span style={{ color: "var(--faint)", fontWeight: 500 }}> · {row.seat_number}번</span>}
+          {row.seat_number != null && <span style={{ color: "var(--sub)", fontWeight: 500 }}> · {row.seat_number}번</span>}
         </span>
         <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 11.5, color: "var(--faint)" }}>{row.created_at_label}</span>
-        <span style={{ fontSize: 11.5, fontWeight: 700, color: STATUS_COLOR[row.status] ?? "var(--faint)" }}>{STATUS_LABEL[row.status] ?? row.status}</span>
+        <span style={{ fontSize: 11.5, color: "var(--sub)" }}>{row.created_at_label}</span>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: STATUS_COLOR[row.status] ?? "var(--sub)" }}>{STATUS_LABEL[row.status] ?? row.status}</span>
       </button>
 
       {isOpen && (
         <div style={{ borderTop: "1px solid var(--line)", padding: 14 }}>
           {row.submitter_phone && <div style={{ fontSize: 12.5, color: "var(--sub)", marginBottom: 10 }}>연락처 {row.submitter_phone}</div>}
           <div style={{ display: "grid", gridTemplateColumns: "minmax(90px, 160px) 1fr", gap: "6px 12px", fontSize: 13 }}>
-            {entries.length === 0 && <div style={{ color: "var(--faint)" }}>내용 없음</div>}
+            {entries.length === 0 && <div style={{ color: "var(--sub)" }}>내용 없음</div>}
             {entries.map(([k, v]) => (
               <div key={k} style={{ display: "contents" }}>
-                <div style={{ color: "var(--faint)", fontWeight: 600 }}>{k}</div>
+                <div style={{ color: "var(--sub)", fontWeight: 600 }}>{k}</div>
                 <div style={{ color: "var(--ink)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{formatValue(v)}</div>
               </div>
             ))}

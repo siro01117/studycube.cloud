@@ -10,13 +10,13 @@ import { listActivationStatus, activateStudents, revokeActivation, type StudentA
 import type { SStudent } from "./ScheduleDemo";
 import { useSort, SortHeader, SortLabel, type SortColumn } from "../_shared/sort";
 
-const th: React.CSSProperties = { textAlign: "left", padding: "7px 10px", fontSize: 11.5, fontWeight: 700, color: "var(--faint)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
+const th: React.CSSProperties = { textAlign: "left", padding: "7px 10px", fontSize: 11.5, fontWeight: 700, color: "var(--sub)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
 const td: React.CSSProperties = { padding: "8px 10px", fontSize: 13, borderBottom: "1px solid var(--line)", verticalAlign: "middle" };
 
 const stateChip: Record<StudentActivationRow["state"], { label: string; fg: string; bg: string }> = {
   first: { label: "열림(첫 입력)", fg: "var(--accent)", bg: "var(--accent-soft)" },
   grant: { label: "열림(활성화됨)", fg: "var(--accent)", bg: "var(--accent-soft)" },
-  locked: { label: "잠김", fg: "var(--faint)", bg: "var(--panel2)" },
+  locked: { label: "잠김", fg: "var(--sub)", bg: "var(--panel2)" },
 };
 
 function StateChip({ state }: { state: StudentActivationRow["state"] }) {
@@ -151,10 +151,10 @@ export default function WindowView({ students }: { students: SStudent[] }) {
     <>
       <div className="card" style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", flexWrap: "wrap" }}>
         <span style={{ fontSize: 20, fontWeight: 700 }}>입력 활성화</span>
-        <span style={{ fontSize: 12, color: "var(--faint)" }}>학생이 언제 스케쥴을 고칠 수 있는지 관리합니다</span>
+        <span style={{ fontSize: 12, color: "var(--sub)" }}>학생이 언제 스케쥴을 고칠 수 있는지 관리합니다</span>
       </div>
       <div className="card" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "18px 18px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
-        <div style={{ fontSize: 12.5, color: "var(--faint)" }}>
+        <div style={{ fontSize: 12.5, color: "var(--sub)" }}>
           {rows == null ? (
             "불러오는 중…"
           ) : (
@@ -181,9 +181,9 @@ export default function WindowView({ students }: { students: SStudent[] }) {
         {err && <div style={{ fontSize: 12.5, color: "var(--danger)", fontWeight: 600 }}>{err}</div>}
 
         {filtered == null ? (
-          <div style={{ fontSize: 12.5, color: "var(--faint)" }}>불러오는 중…</div>
+          <div style={{ fontSize: 12.5, color: "var(--sub)" }}>불러오는 중…</div>
         ) : filtered.length === 0 ? (
-          <div style={{ fontSize: 12.5, color: "var(--faint)" }}>학생이 없습니다.</div>
+          <div style={{ fontSize: 12.5, color: "var(--sub)" }}>학생이 없습니다.</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -222,7 +222,7 @@ export default function WindowView({ students }: { students: SStudent[] }) {
                       </td>
                       <td style={{ ...td, fontWeight: 700 }}>
                         {r.studentName}
-                        {seat != null && <span style={{ marginLeft: 6, fontSize: 11.5, fontWeight: 600, color: "var(--faint)" }}>{seat}번</span>}
+                        {seat != null && <span style={{ marginLeft: 6, fontSize: 11.5, fontWeight: 600, color: "var(--sub)" }}>{seat}번</span>}
                       </td>
                       <td style={{ ...td, color: r.lastSubmittedLabel ? "var(--sub)" : "var(--warn)", fontWeight: r.lastSubmittedLabel ? 400 : 700, fontVariantNumeric: "tabular-nums" }}>
                         {r.lastSubmittedLabel ?? "미제출"}
@@ -242,7 +242,7 @@ export default function WindowView({ students }: { students: SStudent[] }) {
                           </button>
                         )}
                         {locked && (
-                          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--faint)" }}>
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--sub)" }}>
                             <IconUnlock />체크 후 활성화
                           </span>
                         )}

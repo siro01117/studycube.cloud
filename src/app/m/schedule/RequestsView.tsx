@@ -12,7 +12,7 @@ import {
 import { blockStyleOf, requestTypeOf, requestKindOf, REQUEST_KINDS, type RequestKind } from "@/lib/schedule";
 import { useSort, SortHeader, type SortColumn } from "../_shared/sort";
 
-const th: React.CSSProperties = { textAlign: "left", padding: "7px 10px", fontSize: 11.5, fontWeight: 700, color: "var(--faint)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
+const th: React.CSSProperties = { textAlign: "left", padding: "7px 10px", fontSize: 11.5, fontWeight: 700, color: "var(--sub)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
 const td: React.CSSProperties = { padding: "9px 10px", fontSize: 13, borderBottom: "1px solid var(--line)", verticalAlign: "middle" };
 
 const statusChip: Record<RequestRow["status"], { label: string; fg: string; bg: string }> = {
@@ -158,9 +158,9 @@ export default function RequestsView() {
 
       <div className="card" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "10px 12px 18px" }}>
         {data == null ? (
-          <div style={{ fontSize: 12.5, color: "var(--faint)", padding: "14px 4px" }}>불러오는 중…</div>
+          <div style={{ fontSize: 12.5, color: "var(--sub)", padding: "14px 4px" }}>불러오는 중…</div>
         ) : filteredRows.length === 0 ? (
-          <div style={{ fontSize: 12.5, color: "var(--faint)", padding: "14px 4px" }}>{data.rows.length === 0 ? "변경 신청이 없습니다." : "조건에 맞는 신청이 없습니다."}</div>
+          <div style={{ fontSize: 12.5, color: "var(--sub)", padding: "14px 4px" }}>{data.rows.length === 0 ? "변경 신청이 없습니다." : "조건에 맞는 신청이 없습니다."}</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -194,7 +194,7 @@ export default function RequestsView() {
 function FilterGroup<K extends string>({ label, options, value, onChange }: { label: string; options: { key: K; label: string }[]; value: K; onChange: (v: K) => void }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-      <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--faint)" }}>{label}</span>
+      <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--sub)" }}>{label}</span>
       <div style={{ display: "flex", gap: 4 }}>
         {options.map((o) => {
           const active = o.key === value;
@@ -267,20 +267,20 @@ function RequestRowItem({ row, onChanged }: { row: RequestRow; onChanged: () => 
         </td>
         <td style={{ ...td, fontWeight: 700 }}>
           {row.studentName}
-          {row.seatNumber != null && <span style={{ marginLeft: 6, fontSize: 11.5, fontWeight: 600, color: "var(--faint)" }}>{row.seatNumber}번</span>}
+          {row.seatNumber != null && <span style={{ marginLeft: 6, fontSize: 11.5, fontWeight: 600, color: "var(--sub)" }}>{row.seatNumber}번</span>}
         </td>
         <td style={td}>
           <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-start" }}>
             <KindChip reqKind={row.reqKind} />
-            {row.reqKind === "temp" && <span style={{ fontSize: 10.5, color: "var(--faint)" }}>{requestTypeOf(row.reqType).label}</span>}
+            {row.reqKind === "temp" && <span style={{ fontSize: 10.5, color: "var(--sub)" }}>{requestTypeOf(row.reqType).label}</span>}
           </div>
         </td>
-        <td style={{ ...td, fontVariantNumeric: "tabular-nums", color: row.dateLabel ? "var(--ink)" : "var(--faint)" }}>{row.dateLabel ?? "—"}</td>
-        <td style={td}><ReasonChip reason={row.reason} /> {row.mode === "replace" && row.reqKind === "temp" && <span style={{ fontSize: 10.5, color: "var(--faint)", marginLeft: 4 }}>대체</span>}</td>
+        <td style={{ ...td, fontVariantNumeric: "tabular-nums", color: row.dateLabel ? "var(--ink)" : "var(--sub)" }}>{row.dateLabel ?? "—"}</td>
+        <td style={td}><ReasonChip reason={row.reason} /> {row.mode === "replace" && row.reqKind === "temp" && <span style={{ fontSize: 10.5, color: "var(--sub)", marginLeft: 4 }}>대체</span>}</td>
         <td style={{ ...td, fontVariantNumeric: "tabular-nums" }}>{row.timeLabel}</td>
         <td style={{ ...td, color: "var(--sub)", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.title || "–"}</td>
         <td style={td}><StatusChip status={row.status} /></td>
-        <td style={{ ...td, fontVariantNumeric: "tabular-nums", color: "var(--faint)", whiteSpace: "nowrap" }}>{row.createdLabel}</td>
+        <td style={{ ...td, fontVariantNumeric: "tabular-nums", color: "var(--sub)", whiteSpace: "nowrap" }}>{row.createdLabel}</td>
         <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>
           {row.status === "pending" && !rejecting && (
             <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
@@ -354,30 +354,30 @@ function RuleCompareLine({ row }: { row: RuleCompareRow }) {
       <ReasonChip reason={row.reason} />
       <span style={{ color: "var(--sub)", fontWeight: 700 }}>{row.daysLabel || "요일 없음"}</span>
       <span style={{ color: "var(--sub)", fontVariantNumeric: "tabular-nums" }}>{fmtClock(row.start)}–{fmtLeave(row.end)}</span>
-      {row.title && <span style={{ color: "var(--faint)" }}>{row.title}</span>}
+      {row.title && <span style={{ color: "var(--sub)" }}>{row.title}</span>}
     </div>
   );
 }
 
 function DetailPanel({ row, detail }: { row: RequestRow; detail: RequestDetail | null }) {
-  if (!detail) return <div style={{ fontSize: 12, color: "var(--faint)" }}>불러오는 중…</div>;
+  if (!detail) return <div style={{ fontSize: 12, color: "var(--sub)" }}>불러오는 중…</div>;
 
   if (detail.reqKind === "rule_edit") {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "4px 2px" }}>
-        <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--faint)" }}>{row.studentName} 학생의 정기 일정 수정 신청</div>
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--sub)" }}>{row.studentName} 학생의 정기 일정 수정 신청</div>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--faint)" }}>현재</span>
-            {detail.current ? <RuleCompareLine row={detail.current} /> : <span style={{ fontSize: 12, color: "var(--faint)" }}>대상 정기 일정을 찾을 수 없어요(삭제됨).</span>}
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--sub)" }}>현재</span>
+            {detail.current ? <RuleCompareLine row={detail.current} /> : <span style={{ fontSize: 12, color: "var(--sub)" }}>대상 정기 일정을 찾을 수 없어요(삭제됨).</span>}
           </div>
           <IconArrowRight />
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--faint)" }}>신청</span>
+            <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--sub)" }}>신청</span>
             {detail.proposed && <RuleCompareLine row={detail.proposed} />}
           </div>
         </div>
-        <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 4 }}>
+        <div style={{ fontSize: 11, color: "var(--sub)", marginTop: 4 }}>
           신청 {row.createdLabel}
           {row.decidedLabel && ` · 처리 ${row.decidedLabel}${row.decidedByName ? ` (${row.decidedByName})` : " (자동)"}`}
         </div>
@@ -388,12 +388,12 @@ function DetailPanel({ row, detail }: { row: RequestRow; detail: RequestDetail |
   if (detail.reqKind === "rule_delete") {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "4px 2px" }}>
-        <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--faint)" }}>{row.studentName} 학생의 정기 일정 삭제 신청</div>
+        <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--sub)" }}>{row.studentName} 학생의 정기 일정 삭제 신청</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--danger)" }}>삭제될 일정</span>
-          {detail.current ? <RuleCompareLine row={detail.current} /> : <span style={{ fontSize: 12, color: "var(--faint)" }}>대상 정기 일정을 찾을 수 없어요(이미 삭제됨).</span>}
+          {detail.current ? <RuleCompareLine row={detail.current} /> : <span style={{ fontSize: 12, color: "var(--sub)" }}>대상 정기 일정을 찾을 수 없어요(이미 삭제됨).</span>}
         </div>
-        <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 4 }}>
+        <div style={{ fontSize: 11, color: "var(--sub)", marginTop: 4 }}>
           신청 {row.createdLabel}
           {row.decidedLabel && ` · 처리 ${row.decidedLabel}${row.decidedByName ? ` (${row.decidedByName})` : " (자동)"}`}
         </div>
@@ -403,26 +403,26 @@ function DetailPanel({ row, detail }: { row: RequestRow; detail: RequestDetail |
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "4px 2px" }}>
-      <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--faint)" }}>{row.dateLabel} · {row.studentName} 학생의 정기 일정</div>
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--sub)" }}>{row.dateLabel} · {row.studentName} 학생의 정기 일정</div>
       {detail.hours && (
         <div style={{ fontSize: 12.5, color: "var(--sub)" }}>등원~하원 {fmtClock(detail.hours.arrive)}–{fmtLeave(detail.hours.leave)}</div>
       )}
       {detail.rules.length === 0 ? (
-        <div style={{ fontSize: 12.5, color: "var(--faint)" }}>그 요일에 걸려 있는 정기 일정이 없어요.</div>
+        <div style={{ fontSize: 12.5, color: "var(--sub)" }}>그 요일에 걸려 있는 정기 일정이 없어요.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {detail.rules.map((r, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
               <ReasonChip reason={r.reason} />
               <span style={{ color: "var(--sub)", fontVariantNumeric: "tabular-nums" }}>{fmtClock(r.start)}–{fmtLeave(r.end)}</span>
-              {r.title && <span style={{ color: "var(--faint)" }}>{r.title}</span>}
+              {r.title && <span style={{ color: "var(--sub)" }}>{r.title}</span>}
             </div>
           ))}
         </div>
       )}
       {detail.existingExceptions.length > 0 && (
         <div style={{ marginTop: 4 }}>
-          <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--faint)", marginBottom: 4 }}>이미 확정된 예외</div>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--sub)", marginBottom: 4 }}>이미 확정된 예외</div>
           {detail.existingExceptions.map((r, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5 }}>
               <ReasonChip reason={r.reason} />
@@ -431,7 +431,7 @@ function DetailPanel({ row, detail }: { row: RequestRow; detail: RequestDetail |
           ))}
         </div>
       )}
-      <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 4 }}>
+      <div style={{ fontSize: 11, color: "var(--sub)", marginTop: 4 }}>
         신청 {row.createdLabel}
         {row.decidedLabel && ` · 처리 ${row.decidedLabel}${row.decidedByName ? ` (${row.decidedByName})` : " (자동)"}`}
       </div>

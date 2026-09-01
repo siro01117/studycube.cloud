@@ -63,7 +63,7 @@ function IconToggleOff() {
   );
 }
 
-const th: React.CSSProperties = { textAlign: "left", padding: "7px 10px", fontSize: 11.5, fontWeight: 700, color: "var(--faint)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
+const th: React.CSSProperties = { textAlign: "left", padding: "7px 10px", fontSize: 11.5, fontWeight: 700, color: "var(--sub)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
 const td: React.CSSProperties = { padding: "9px 10px", fontSize: 13, borderBottom: "1px solid var(--line)", verticalAlign: "middle" };
 
 const DAY_LABEL = ["", "월", "화", "수", "목", "금", "토", "일"];
@@ -74,13 +74,13 @@ const statusChip: Record<SubStatus, { label: string; fg: string; bg: string }> =
   rejected: { label: "반려", fg: "var(--danger)", bg: "color-mix(in srgb, var(--danger) 12%, transparent)" },
 };
 const diffChip: Record<DiffStatus | "n/a", { label: string; fg: string; bg: string }> = {
-  same: { label: "변경 없음", fg: "var(--faint)", bg: "var(--panel2)" },
+  same: { label: "변경 없음", fg: "var(--sub)", bg: "var(--panel2)" },
   new: { label: "새로 등록", fg: "var(--accent)", bg: "var(--accent-soft)" },
   changed: { label: "수정", fg: "var(--accent)", bg: "var(--accent-soft)" },
-  "n/a": { label: "-", fg: "var(--faint)", bg: "transparent" },
+  "n/a": { label: "-", fg: "var(--sub)", bg: "transparent" },
 };
 // 무채색 — 형식 오류(danger)·상태(warn/ok)와 헷갈리지 않도록 테스트 제출은 색을 아예 안 쓴다.
-const testChip = { label: "테스트", fg: "var(--faint)", bg: "var(--panel2)" };
+const testChip = { label: "테스트", fg: "var(--sub)", bg: "var(--panel2)" };
 const unlinkedChip = { label: "학생 미연결", fg: "var(--warn)", bg: "var(--warn-soft)" };
 
 /** submission.payload._test === true 인지 — f/actions.ts 의 개발용 "테스트로 건너뛰기" 우회로 만들어진
@@ -200,6 +200,11 @@ export default function SubmissionsView() {
   const [delSelected, setDelSelected] = useState<Set<string>>(new Set()); // 삭제 대상(처리 끝난 제출·테스트 제출)으로 고른 행
   const [deleting, setDeleting] = useState(false);
   const [deleteErr, setDeleteErr] = useState<string | null>(null);
+  // 제출 삭제는 연쇄 삭제라 되돌릴 수 없다 — window.confirm() 대신 이 화면 안 인라인 2단계 확인으로
+  // 통일한다(m/student/StudentList.tsx 의 confirmDel 패턴과 동일한 방식). confirmDeleteId = 행 단위,
+  // confirmBulkDelete = 선택 일괄 삭제 버튼용.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [autoBusy, setAutoBusy] = useState(false);
 
   const reload = () => {
@@ -219,6 +224,9 @@ export default function SubmissionsView() {
         // 삭제 선택도 새로 불러온 목록에 없는(또는 더 이상 삭제 가능하지 않은) id 는 정리한다.
         const stillDeletable = new Set(rows.filter((r) => r.deletable).map((r) => r.submission.id));
         setDelSelected((prev) => new Set([...prev].filter((id) => stillDeletable.has(id))));
+        // 목록이 바뀌면(삭제 완료 등) 인라인 확인 상태도 정리 — 사라진 행에 확인 버튼이 남아있지 않게.
+        setConfirmDeleteId((id) => (id && stillDeletable.has(id) ? id : null));
+        setConfirmBulkDelete(false);
       })
       .catch((e) => setLoadErr(e instanceof Error ? e.message : "불러오기에 실패했습니다"));
   };
@@ -293,7 +301,7 @@ export default function SubmissionsView() {
     });
 
   const doDeleteOne = async (id: string) => {
-    if (!window.confirm("이 제출을 삭제할까요? 되돌릴 수 없습니다.")) return;
+    setConfirmDeleteId(null);
     setRowBusy(id);
     setRowErr(null);
     try {
@@ -315,7 +323,7 @@ export default function SubmissionsView() {
 
   const doDeleteSelected = async () => {
     if (deleting || delSelected.size === 0) return;
-    if (!window.confirm(`선택한 제출 ${delSelected.size}건을 삭제할까요? 되돌릴 수 없습니다.`)) return;
+    setConfirmBulkDelete(false);
     setDeleting(true);
     setDeleteErr(null);
     try {
@@ -360,7 +368,7 @@ export default function SubmissionsView() {
       <div className="card" style={{ flex: "none", display: "flex", flexDirection: "column", gap: 4, padding: "12px 16px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <span style={{ fontSize: 20, fontWeight: 700 }}>제출 반영</span>
-          <span style={{ fontSize: 12, color: "var(--faint)" }}>학생이 공개 폼으로 낸 정기 스케쥴을 검토해 실제 시간표에 반영합니다</span>
+          <span style={{ fontSize: 12, color: "var(--sub)" }}>학생이 공개 폼으로 낸 정기 스케쥴을 검토해 실제 시간표에 반영합니다</span>
           {pendingCount > 0 && (
             <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--warn)", background: "var(--warn-soft)", borderRadius: 999, padding: "2px 10px" }}>
               대기 {pendingCount}건
@@ -376,12 +384,12 @@ export default function SubmissionsView() {
             {base?.autoApply ? <IconToggleOn /> : <IconToggleOff />}
           </button>
         </div>
-        <div style={{ fontSize: 11, color: "var(--faint)" }}>
+        <div style={{ fontSize: 11, color: "var(--sub)" }}>
           {base?.autoApply
             ? "제출 즉시 시간표에 반영됩니다 — 형식 오류·학생 미연결 등으로 실패하면 대기 상태로 남고 사유가 표시됩니다."
             : "학생 제출이 대기 상태로 쌓입니다 — 아래에서 검토 후 직접 반영하세요."}
         </div>
-        <div style={{ fontSize: 11, color: "var(--faint)" }}>
+        <div style={{ fontSize: 11, color: "var(--sub)" }}>
           실제 반영을 테스트하려면 학생 관리에서 코드를 발급한 뒤 그 이름+코드로 로그인해 제출하세요.
         </div>
       </div>
@@ -392,18 +400,18 @@ export default function SubmissionsView() {
             <IconAlertCircle />{loadErr}
           </div>
         ) : base == null ? (
-          <div style={{ fontSize: 12.5, color: "var(--faint)", padding: "14px 4px" }}>불러오는 중…</div>
+          <div style={{ fontSize: 12.5, color: "var(--sub)", padding: "14px 4px" }}>불러오는 중…</div>
         ) : rows.length === 0 ? (
-          <div style={{ fontSize: 12.5, color: "var(--faint)", padding: "14px 4px" }}>스케쥴 제출이 없습니다.</div>
+          <div style={{ fontSize: 12.5, color: "var(--sub)", padding: "14px 4px" }}>스케쥴 제출이 없습니다.</div>
         ) : (
           <>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12.5, color: "var(--faint)" }}>
+                <span style={{ fontSize: 12.5, color: "var(--sub)" }}>
                   전체 {visibleRows.length}건 · 대기 {pendingCount}건 · 선택됨 {selected.size}건
                 </span>
                 {testCount > 0 && (
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--faint)", cursor: "pointer" }}>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--sub)", cursor: "pointer" }}>
                     <input type="checkbox" checked={showTestRows} onChange={(e) => setShowTestRows(e.target.checked)} />
                     테스트 {testCount}건 {showTestRows ? "표시 중" : "숨김"}
                   </label>
@@ -425,11 +433,25 @@ export default function SubmissionsView() {
                     {`선택 ${selected.size}건 반영`}
                   </button>
                 )}
-                <button type="button"
-                  style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid var(--danger)", background: "var(--card)", color: "var(--danger)", fontSize: 11.5, fontWeight: 700, cursor: deleting || delSelected.size === 0 ? "default" : "pointer", opacity: deleting || delSelected.size === 0 ? 0.5 : 1 }}
-                  disabled={deleting || delSelected.size === 0} onClick={doDeleteSelected}>
-                  {deleting ? "삭제 중…" : `선택 ${delSelected.size}건 삭제`}
-                </button>
+                {confirmBulkDelete ? (
+                  <>
+                    <button type="button" disabled={deleting}
+                      style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid var(--danger)", background: "var(--danger)", color: "#fff", fontSize: 11.5, fontWeight: 700, cursor: deleting ? "default" : "pointer", opacity: deleting ? 0.6 : 1 }}
+                      onClick={doDeleteSelected}>
+                      {deleting ? "삭제 중…" : `정말 삭제 (${delSelected.size}건, 되돌릴 수 없습니다)`}
+                    </button>
+                    <button type="button" disabled={deleting} onClick={() => setConfirmBulkDelete(false)}
+                      style={{ height: 30, padding: "0 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--card)", color: "var(--sub)", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>
+                      취소
+                    </button>
+                  </>
+                ) : (
+                  <button type="button"
+                    style={{ height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid var(--danger)", background: "var(--card)", color: "var(--danger)", fontSize: 11.5, fontWeight: 700, cursor: delSelected.size === 0 ? "default" : "pointer", opacity: delSelected.size === 0 ? 0.5 : 1 }}
+                    disabled={delSelected.size === 0} onClick={() => setConfirmBulkDelete(true)}>
+                    {`선택 ${delSelected.size}건 삭제`}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -464,7 +486,7 @@ export default function SubmissionsView() {
             )}
 
             {visibleRows.length === 0 ? (
-              <div style={{ fontSize: 12.5, color: "var(--faint)", padding: "14px 4px" }}>
+              <div style={{ fontSize: 12.5, color: "var(--sub)", padding: "14px 4px" }}>
                 표시할 제출이 없습니다. 테스트 제출 {testCount}건은 위 체크박스로 볼 수 있습니다.
               </div>
             ) : (
@@ -504,16 +526,16 @@ export default function SubmissionsView() {
                           </td>
                           <td style={{ ...td, fontWeight: 700 }}>
                             {sub.studentName}
-                            {sub.seatNumber != null && <span style={{ marginLeft: 6, fontSize: 11.5, fontWeight: 600, color: "var(--faint)" }}>{sub.seatNumber}번</span>}
+                            {sub.seatNumber != null && <span style={{ marginLeft: 6, fontSize: 11.5, fontWeight: 600, color: "var(--sub)" }}>{sub.seatNumber}번</span>}
                           </td>
                           <td style={{ ...td, fontVariantNumeric: "tabular-nums", color: "var(--sub)" }}>{sub.createdLabel}</td>
-                          <td style={{ ...td, fontVariantNumeric: "tabular-nums", color: "var(--faint)" }}>{sub.firstSubmittedLabel ?? "-"}</td>
+                          <td style={{ ...td, fontVariantNumeric: "tabular-nums", color: "var(--sub)" }}>{sub.firstSubmittedLabel ?? "-"}</td>
                           <td style={td}>
                             {/* 판정 순서가 중요하다 — 테스트·미연결 제출은 학생이 붙지 않아 파싱 단계에서도
                                 실패하므로, parseOk 를 먼저 보면 전부 "형식 오류"로 뭉뚱그려진다.
                                 그래서 사유가 분명한 쪽(테스트 → 미연결)을 먼저 판정하고, 형식 오류는 마지막에 둔다. */}
                             {row.isTest ? (
-                              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--faint)" }}>
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--sub)" }}>
                                 <Chip {...testChip} />
                                 <span>테스트 신원으로 낸 제출이라 반영할 수 없어요</span>
                               </span>
@@ -549,10 +571,24 @@ export default function SubmissionsView() {
                                 </button>
                               )}
                               {row.deletable ? (
-                                <button type="button" disabled={rowBusy === sub.id} onClick={() => doDeleteOne(sub.id)}
-                                  style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid var(--danger)", background: "var(--card)", color: "var(--danger)", fontSize: 11.5, fontWeight: 700, cursor: rowBusy === sub.id ? "default" : "pointer", opacity: rowBusy === sub.id ? 0.6 : 1 }}>
-                                  삭제
-                                </button>
+                                confirmDeleteId === sub.id ? (
+                                  <>
+                                    <span style={{ fontSize: 11, color: "var(--danger)", alignSelf: "center" }}>되돌릴 수 없습니다</span>
+                                    <button type="button" disabled={rowBusy === sub.id} onClick={() => doDeleteOne(sub.id)}
+                                      style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid var(--danger)", background: "var(--danger)", color: "#fff", fontSize: 11.5, fontWeight: 700, cursor: rowBusy === sub.id ? "default" : "pointer", opacity: rowBusy === sub.id ? 0.6 : 1 }}>
+                                      정말 삭제
+                                    </button>
+                                    <button type="button" disabled={rowBusy === sub.id} onClick={() => setConfirmDeleteId(null)}
+                                      style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--card)", color: "var(--sub)", fontSize: 11.5, fontWeight: 700, cursor: "pointer" }}>
+                                      취소
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button type="button" disabled={rowBusy === sub.id} onClick={() => setConfirmDeleteId(sub.id)}
+                                    style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid var(--danger)", background: "var(--card)", color: "var(--danger)", fontSize: 11.5, fontWeight: 700, cursor: rowBusy === sub.id ? "default" : "pointer", opacity: rowBusy === sub.id ? 0.6 : 1 }}>
+                                    삭제
+                                  </button>
+                                )
                               ) : (
                                 <button type="button" disabled title="대기 중인 제출은 반려한 뒤 삭제할 수 있어요"
                                   style={{ height: 28, padding: "0 10px", borderRadius: 8, border: "1px solid var(--line)", background: "var(--card)", color: "var(--faint)", fontSize: 11.5, fontWeight: 700, cursor: "not-allowed", opacity: 0.6 }}>
@@ -590,13 +626,13 @@ export default function SubmissionsView() {
                                 <div style={{ fontSize: 12.5, color: "var(--danger)", marginBottom: 10 }}>반려 사유: {sub.note}</div>
                               )}
                               {sub.processedLabel && (
-                                <div style={{ fontSize: 11.5, color: "var(--faint)", marginBottom: 10 }}>
+                                <div style={{ fontSize: 11.5, color: "var(--sub)", marginBottom: 10 }}>
                                   처리 {sub.processedLabel}{sub.processedByName ? ` (${sub.processedByName})` : ""}
                                 </div>
                               )}
                               <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                                 <div style={{ flex: "1 1 260px", minWidth: 220 }}>
-                                  <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--faint)", marginBottom: 6 }}>제출 내용</div>
+                                  <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--sub)", marginBottom: 6 }}>제출 내용</div>
                                   {row.parseOk ? (
                                     <MiniTimetable hours={row.hours} restDays={row.restDays} academies={row.academies} />
                                   ) : (
@@ -604,11 +640,11 @@ export default function SubmissionsView() {
                                   )}
                                 </div>
                                 <div style={{ flex: "1 1 260px", minWidth: 220 }}>
-                                  <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--faint)", marginBottom: 6 }}>현재 시간표</div>
+                                  <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--sub)", marginBottom: 6 }}>현재 시간표</div>
                                   {sub.studentId ? (
                                     <MiniTimetable hours={row.existingHours} restDays={[]} academies={row.existingAcademies} />
                                   ) : (
-                                    <div style={{ fontSize: 12.5, color: "var(--faint)" }}>학생과 매칭되지 않아 비교할 수 없습니다.</div>
+                                    <div style={{ fontSize: 12.5, color: "var(--sub)" }}>학생과 매칭되지 않아 비교할 수 없습니다.</div>
                                   )}
                                 </div>
                               </div>
@@ -653,7 +689,7 @@ function MiniTimetable({ hours, restDays, academies }: { hours: ImportHours[]; r
   const academyStyle = blockStyleOf("외부 학원");
 
   if (hoursByDay.size === 0 && academies.length === 0) {
-    return <div style={{ fontSize: 12.5, color: "var(--faint)", padding: "8px 0" }}>내용 없음</div>;
+    return <div style={{ fontSize: 12.5, color: "var(--sub)", padding: "8px 0" }}>내용 없음</div>;
   }
 
   return (
@@ -673,7 +709,7 @@ function MiniTimetable({ hours, restDays, academies }: { hours: ImportHours[]; r
       <div style={{ display: "flex", height: TT_HEIGHT }}>
         <div style={{ width: TT_GUTTER, flex: "none", position: "relative" }}>
           {[7, 12, 18, 23].map((h) => (
-            <span key={h} style={{ position: "absolute", right: 4, top: yOf(h * 60) - 5, fontSize: 8.5, color: "var(--faint)", fontVariantNumeric: "tabular-nums" }}>
+            <span key={h} style={{ position: "absolute", right: 4, top: yOf(h * 60) - 5, fontSize: 8.5, color: "var(--sub)", fontVariantNumeric: "tabular-nums" }}>
               {String(h).padStart(2, "0")}
             </span>
           ))}

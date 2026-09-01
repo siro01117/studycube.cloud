@@ -179,7 +179,7 @@ export function SortPicker({
 }) {
   return (
     <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-      <span style={{ fontSize: 12, color: "var(--faint)", fontWeight: 600 }}>정렬</span>
+      <span style={{ fontSize: 12, color: "var(--sub)", fontWeight: 600 }}>정렬</span>
       <select
         aria-label={ariaLabel ?? "정렬 기준"}
         className="input"

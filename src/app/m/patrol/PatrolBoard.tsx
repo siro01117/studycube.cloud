@@ -7,14 +7,16 @@ import { PATROL_STATES, PATROL_BY_KEY } from "@/lib/patrol";
 import { weekdayOf } from "@/lib/date";
 import ContextMenu, { type MenuItem } from "../_shared/ContextMenu";
 import FitBox from "../_shared/FitBox";
-import { getPatrolSessions, getPatrolSessionDetail, setPatrolMark, clearPatrolMark, deletePatrolSession } from "../seat/patrolActions";
+import { getPatrolSessions, getPatrolSessionDetail, setPatrolMark, clearPatrolMark, restorePatrolEvent, deletePatrolSession } from "../seat/patrolActions";
+import { useUndoToast } from "../_shared/UndoToast";
 
 export type PRoom = { id: string; name: string; floor: number };
 export type PSeat = { id: string; room_id: string | null; grid_x: number | null; grid_y: number | null; number: number | null; label: string; current_student_id: string | null };
 export type PStudent = { id: string; name: string };
 type Session = { id: string; started_at: string; ended_at: string | null; marked: number; penalty: number };
-// 좌석 기준 마크(당시 그 자리에 찍힌 기록) — seat_id 로 매핑
-type SeatMark = { studentId: string; name: string; state: string; points: number };
+// 좌석 기준 마크(당시 그 자리에 찍힌 기록) — seat_id 로 매핑. id/date/createdBy 는 표시용이 아니라
+// clearMark 실행취소(restorePatrolEvent)가 원본 그대로 재기록할 때 필요해서 함께 들고 있는다.
+type SeatMark = { id: string; studentId: string; name: string; state: string; points: number; at: string; date: string; createdBy: string | null };
 
 const SW = 82, SH = 60, CELL_X = 100, CELL_Y = 80, ORIGIN = 40, PER_ROW = 6;
 const xyOf = (s: PSeat, i: number) => ({
@@ -84,7 +86,7 @@ function MonthCalendar({
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2, marginBottom: 3 }}>
         {WD_MON_SUN.map((wdLabel) => (
-          <div key={wdLabel} style={{ fontSize: 10.5, fontWeight: 700, color: "var(--faint)", textAlign: "center" }}>{wdLabel}</div>
+          <div key={wdLabel} style={{ fontSize: 10.5, fontWeight: 700, color: "var(--sub)", textAlign: "center" }}>{wdLabel}</div>
         ))}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 2 }}>
@@ -107,7 +109,7 @@ function MonthCalendar({
                 cursor: has ? "pointer" : "not-allowed",
                 border: isToday ? "1.5px solid var(--accent)" : "1px solid transparent",
                 background: isSel ? "var(--accent)" : has ? "var(--accent-soft)" : "transparent",
-                color: isSel ? "#fff" : has ? "var(--ink)" : "var(--faint)",
+                color: isSel ? "#fff" : has ? "var(--ink)" : "var(--sub)",
               }}
             >
               {dayNum}
@@ -138,6 +140,7 @@ export default function PatrolBoard({
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; seat: PSeat } | null>(null);
   const [, start] = useTransition();
+  const toast = useUndoToast();
 
   const nameOf = useMemo(() => { const m = new Map<string, string>(); for (const s of students) m.set(s.id, s.name); return m; }, [students]);
   const seatsByRoom = useMemo(() => {
@@ -170,7 +173,7 @@ export default function PatrolBoard({
     getPatrolSessionDetail(sid).then((rows) => {
       if (selRef.current !== sid) return;
       const m: Record<string, SeatMark> = {};
-      for (const r of rows) if (r.seat_id) m[r.seat_id] = { studentId: r.student_id, name: r.name, state: r.state, points: r.points };
+      for (const r of rows) if (r.seat_id) m[r.seat_id] = { id: r.id, studentId: r.student_id, name: r.name, state: r.state, points: r.points, at: r.at, date: r.date, createdBy: r.created_by };
       setMarks(m);
     }).catch(() => {});
   };
@@ -190,10 +193,31 @@ export default function PatrolBoard({
     const fd = new FormData(); fd.set("sessionId", selId); fd.set("studentId", studentId); fd.set("seatId", seatId); fd.set("state", state);
     start(async () => { await setPatrolMark(fd); reload(); });
   };
-  const clearMark = (studentId: string) => {
+  // 확인창 없이 즉시 지우는 대신, 삭제 전 마크 내용을 그대로 들고 있다가 토스트 "실행취소"로
+  // 같은 id·시각·좌석·세션으로 다시 기록한다(원래 시각이 보존돼야 순찰 이력이 어긋나지 않는다).
+  const clearMark = (studentId: string, seatId: string) => {
     if (!selId) return;
-    const fd = new FormData(); fd.set("sessionId", selId); fd.set("studentId", studentId);
-    start(async () => { await clearPatrolMark(fd); reload(); });
+    const mark = marks[seatId];
+    const sessionId = selId;
+    const fd = new FormData(); fd.set("sessionId", sessionId); fd.set("studentId", studentId);
+    start(async () => {
+      await clearPatrolMark(fd);
+      reload();
+      if (!mark) return;
+      toast.notify(`${mark.name} 순찰 기록 삭제됨`, () => {
+        const rfd = new FormData();
+        rfd.set("id", mark.id);
+        rfd.set("studentId", studentId);
+        rfd.set("state", mark.state);
+        rfd.set("at", mark.at);
+        rfd.set("date", mark.date);
+        rfd.set("points", String(mark.points));
+        rfd.set("sessionId", sessionId);
+        rfd.set("seatId", seatId);
+        rfd.set("createdBy", mark.createdBy ?? "");
+        start(async () => { await restorePatrolEvent(rfd); reload(); });
+      });
+    });
   };
   const delSession = (id: string) => {
     const fd = new FormData(); fd.set("sessionId", id);
@@ -223,7 +247,7 @@ export default function PatrolBoard({
       { label: "자리 비움", disabled: true },
       ...PATROL_STATES.filter((st) => !st.present).map(mk),
       { separator: true },
-      { label: "이 기록 지우기", onClick: () => clearMark(targetId), danger: true, disabled: !cur },
+      { label: "이 기록 지우기", onClick: () => clearMark(targetId, seat.id), danger: true, disabled: !cur },
     ];
   };
 
@@ -233,10 +257,10 @@ export default function PatrolBoard({
       <div className="split-side" style={{ flex: "none", width: 300, borderRight: "1px solid var(--line)", background: "var(--card)", overflowY: "auto", padding: 12 }}>
         <div style={{ marginBottom: 10, padding: 10, border: "1px solid var(--line)", borderRadius: 12, background: "var(--panel2)" }}>
           <MonthCalendar value={selDate} onChange={setSelDate} dates={dates} today={today} />
-          <div style={{ fontSize: 11.5, color: "var(--faint)", margin: "8px 2px 0" }}>{labelDate(selDate, today)} · 순찰 {visible.length}회</div>
+          <div style={{ fontSize: 11.5, color: "var(--sub)", margin: "8px 2px 0" }}>{labelDate(selDate, today)} · 순찰 {visible.length}회</div>
         </div>
         {visible.length === 0 ? (
-          <div style={{ padding: 20, textAlign: "center", color: "var(--faint)", fontSize: 13 }}>이 날은 순찰 기록이 없습니다.</div>
+          <div style={{ padding: 20, textAlign: "center", color: "var(--sub)", fontSize: 13 }}>이 날은 순찰 기록이 없습니다.</div>
         ) : visible.map((ps) => {
           const on = ps.id === selId;
           return (
@@ -245,7 +269,7 @@ export default function PatrolBoard({
                 <button onClick={() => setSelId(ps.id)} style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0, padding: "10px 12px", border: "none", background: "transparent", cursor: "pointer", textAlign: "left", color: "inherit" }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 13.5, fontWeight: 700 }}>{fmtTime(ps.started_at)}{ps.ended_at ? `–${fmtTime(ps.ended_at)}` : ""}</div>
-                    <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 2 }}>소요 {fmtDur(ps.started_at, ps.ended_at)} · 점검 {ps.marked}명</div>
+                    <div style={{ fontSize: 11, color: "var(--sub)", marginTop: 2 }}>소요 {fmtDur(ps.started_at, ps.ended_at)} · 점검 {ps.marked}명</div>
                   </div>
                   {ps.penalty > 0 && <span style={{ fontSize: 11.5, fontWeight: 800, color: "#fff", background: "#e5484d", borderRadius: 8, padding: "2px 7px" }}>{ps.penalty}</span>}
                 </button>
@@ -268,13 +292,13 @@ export default function PatrolBoard({
       {/* 오른쪽: 선택한 순찰의 좌석 표시 재현 */}
       <div className="pad-mobile" style={{ flex: 1, minWidth: 0, overflow: "auto", padding: 20 }}>
         {!sel ? (
-          <div style={{ color: "var(--faint)", fontSize: 14, paddingTop: 40, textAlign: "center" }}>목록에서 순찰을 선택하세요.</div>
+          <div style={{ color: "var(--sub)", fontSize: 14, paddingTop: 40, textAlign: "center" }}>목록에서 순찰을 선택하세요.</div>
         ) : (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6, flexWrap: "wrap" }}>
               <span style={{ fontSize: 15, fontWeight: 800 }}>{fmtDate(sel.started_at)} {fmtTime(sel.started_at)}{sel.ended_at ? `–${fmtTime(sel.ended_at)}` : ""}</span>
               <span style={{ fontSize: 12.5, color: "var(--dim)" }}>점검 {sel.marked}명 · 벌점 <b style={{ color: "#e5484d" }}>{sel.penalty}점</b></span>
-              {canManage && <span style={{ fontSize: 12, color: "var(--faint)" }}>좌석을 클릭해 상태를 수정할 수 있어요</span>}
+              {canManage && <span style={{ fontSize: 12, color: "var(--sub)" }}>좌석을 클릭해 상태를 수정할 수 있어요</span>}
             </div>
             {/* 범례 */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", marginBottom: 16 }}>
@@ -299,7 +323,7 @@ export default function PatrolBoard({
                         <div key={room.id} style={{ border: "1px solid var(--line)", borderRadius: 14, padding: 12, background: "var(--card)", minWidth: 0, flex: "1 1 auto" }}>
                           <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>{room.name}</div>
                           <FitBox w={w} h={h}>
-                          <div style={{ position: "relative", width: w, height: h }}>
+                          <div role="group" aria-label={`${room.name} 좌석 배치도`} style={{ position: "relative", width: w, height: h }}>
                             {pos.map(({ s, x, y }) => {
                               const mark = marks[s.id];                                   // 그 세션에 이 자리에 찍힌 기록(당시 학생)
                               const st = mark ? PATROL_BY_KEY[mark.state] : undefined;
@@ -313,21 +337,34 @@ export default function PatrolBoard({
                               };
                               if (st) { style.background = st.bg; style.borderColor = st.bd; }
                               else if (occupied) { style.borderColor = "rgba(120,130,150,.35)"; }
+                              const interactive = canManage && occupied;
+                              const seatLabel = `${s.number ?? s.label}번`;
+                              const statusLabel = st ? st.label : occupied ? "미점검" : "공석";
+                              const ariaLabel = `${seatLabel}${who ? ` ${who}` : ""}, ${statusLabel}${mark && mark.points > 0 ? ` +${mark.points}점` : ""}`;
                               return (
                                 <div
                                   key={s.id}
                                   className="touchable"
-                                  onClick={canManage && occupied ? (e) => setMenu({ x: e.clientX, y: e.clientY, seat: s }) : undefined}
+                                  onClick={interactive ? (e) => setMenu({ x: e.clientX, y: e.clientY, seat: s }) : undefined}
                                   style={style}
+                                  role={interactive ? "button" : undefined}
+                                  tabIndex={interactive ? 0 : undefined}
+                                  aria-label={interactive ? ariaLabel : undefined}
+                                  onKeyDown={interactive ? (e) => {
+                                    if (e.key !== "Enter" && e.key !== " ") return;
+                                    e.preventDefault();
+                                    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                    setMenu({ x: r.left + r.width / 2, y: r.top + r.height / 2, seat: s });
+                                  } : undefined}
                                 >
-                                  <span style={{ position: "absolute", top: 3, left: 6, fontSize: 9.5, fontWeight: 700, color: "var(--faint)" }}>{s.number ?? s.label}</span>
+                                  <span style={{ position: "absolute", top: 3, left: 6, fontSize: 9.5, fontWeight: 700, color: "var(--sub)" }}>{s.number ?? s.label}</span>
                                   {who ? (
                                     <>
                                       <span style={{ fontSize: 12.5, fontWeight: 700, maxWidth: SW - 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{who}</span>
-                                      <span style={{ fontSize: 10, fontWeight: 700, color: st ? st.dot : "var(--faint)" }}>{st ? st.label : "미점검"}</span>
+                                      <span style={{ fontSize: 10, fontWeight: 700, color: st ? st.dot : "var(--sub)" }}>{st ? st.label : "미점검"}</span>
                                     </>
                                   ) : (
-                                    <span style={{ fontSize: 11, color: "var(--faint)" }}>공석</span>
+                                    <span style={{ fontSize: 11, color: "var(--sub)" }}>공석</span>
                                   )}
                                   {mark && mark.points > 0 && (
                                     <span style={{ position: "absolute", bottom: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: "#fff", background: "#e5484d", borderRadius: 7, padding: "0 5px", lineHeight: "14px" }}>{mark.points}</span>
@@ -357,6 +394,8 @@ export default function PatrolBoard({
           onClose={() => setMenu(null)}
         />
       )}
+
+      {toast.element}
     </div>
   );
 }

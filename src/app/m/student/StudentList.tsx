@@ -146,19 +146,19 @@ export default function StudentList({
           );
         })}
         <SortPicker columns={SORT_COLUMNS} activeKey={sortKey} dir={sortDir} onSort={requestSort} ariaLabel="학생 목록 정렬 기준" />
-        <span style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--faint)" }}>
+        <span style={{ marginLeft: "auto", fontSize: 12.5, color: "var(--sub)" }}>
           {q ? `검색 ${list.length}명` : `${list.length}명`}
         </span>
       </div>
 
       {/* 컬럼 헤더 */}
-      <div style={{ display: "grid", gridTemplateColumns: "56px 1fr", gap: 10, padding: "0 6px 6px", fontSize: 11.5, color: "var(--faint)", fontWeight: 700 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "56px 1fr", gap: 10, padding: "0 6px 6px", fontSize: 11.5, color: "var(--sub)", fontWeight: 700 }}>
         <span>좌석</span>
         <span>이름 · 학년</span>
       </div>
 
       {list.length === 0 ? (
-        <div style={{ color: "var(--faint)", fontSize: 13, padding: 16, textAlign: "center" }}>
+        <div style={{ color: "var(--sub)", fontSize: 13, padding: 16, textAlign: "center" }}>
           {q
             ? "검색 결과가 없습니다."
             : tab === "leave"
@@ -192,7 +192,7 @@ export default function StudentList({
                 }}
               >
                 {/* 좌석 번호 */}
-                <span style={{ fontSize: 13, fontWeight: 800, color: s.seat_number != null ? "var(--accent)" : "var(--faint)" }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: s.seat_number != null ? "var(--accent)" : "var(--sub)" }}>
                   {s.seat_number != null ? s.seat_number : "—"}
                 </span>
 
@@ -201,10 +201,10 @@ export default function StudentList({
                   <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {s.name}
                     {lv && <span style={{ fontSize: 12, color: "var(--sub)", fontWeight: 500, marginLeft: 6 }}>{lv}</span>}
-                    {s.school && <span style={{ fontSize: 12, color: "var(--faint)", marginLeft: 6 }}>{s.school}</span>}
+                    {s.school && <span style={{ fontSize: 12, color: "var(--sub)", marginLeft: 6 }}>{s.school}</span>}
                   </div>
                   {(s.guardian_phone || s.student_phone) && (
-                    <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 2 }}>
+                    <div style={{ fontSize: 11.5, color: "var(--sub)", marginTop: 2 }}>
                       {s.student_phone && `학생 ${s.student_phone}`}
                       {s.student_phone && s.guardian_phone && " · "}
                       {s.guardian_phone && `보호자 ${s.guardian_phone}`}
@@ -289,7 +289,7 @@ export default function StudentList({
                       onClick={() => changeStatus(open.id, "leave")}
                       style={{ height: 40, fontSize: 13, gridColumn: "1 / -1" }}
                     >
-                      휴원 처리 {open.seat_number != null && <span style={{ color: "var(--faint)", fontWeight: 500 }}>· 좌석 비움</span>}
+                      휴원 처리 {open.seat_number != null && <span style={{ color: "var(--sub)", fontWeight: 500 }}>· 좌석 비움</span>}
                     </button>
                   )
                 )}
@@ -326,21 +326,21 @@ export default function StudentList({
             </div>
             <form action={addStudent} onSubmit={() => setAddOpen(false)} style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
               <div>
-                <label className="label">이름 *</label>
-                <input className="input" name="name" required placeholder="홍길동" style={{ height: 42 }} autoFocus />
+                <label className="label" htmlFor="add-student-name">이름 *</label>
+                <input id="add-student-name" className="input" name="name" required aria-required="true" placeholder="홍길동" style={{ height: 42 }} autoFocus />
               </div>
               <div className="flex gap-2">
                 <div style={{ flex: 1 }}>
-                  <label className="label">구분</label>
-                  <select className="input" name="level" defaultValue="high" style={{ height: 42 }} aria-label="구분">
+                  <label className="label" htmlFor="add-student-level">구분</label>
+                  <select id="add-student-level" className="input" name="level" defaultValue="high" style={{ height: 42 }}>
                     <option value="middle">중학생</option>
                     <option value="high">고등학생</option>
                     <option value="adult">성인</option>
                   </select>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label className="label">학년</label>
-                  <select className="input" name="grade" defaultValue="" style={{ height: 42 }} aria-label="학년">
+                  <label className="label" htmlFor="add-student-grade">학년</label>
+                  <select id="add-student-grade" className="input" name="grade" defaultValue="" style={{ height: 42 }}>
                     <option value="">–</option>
                     <option value="1">1학년</option>
                     <option value="2">2학년</option>
@@ -350,8 +350,8 @@ export default function StudentList({
               </div>
               <div className="flex gap-2">
                 <div style={{ flex: 1 }}>
-                  <label className="label">성별</label>
-                  <select className="input" name="gender" defaultValue="" style={{ height: 42 }} aria-label="성별">
+                  <label className="label" htmlFor="add-student-gender">성별</label>
+                  <select id="add-student-gender" className="input" name="gender" defaultValue="" style={{ height: 42 }}>
                     <option value="">–</option>
                     <option value="male">남</option>
                     <option value="female">여</option>
@@ -362,21 +362,21 @@ export default function StudentList({
                 </label>
               </div>
               <div>
-                <label className="label">학교</label>
-                <input className="input" name="school" placeholder="○○고등학교" style={{ height: 42 }} />
+                <label className="label" htmlFor="add-student-school">학교</label>
+                <input id="add-student-school" className="input" name="school" placeholder="○○고등학교" style={{ height: 42 }} />
               </div>
               <div>
-                <label className="label">생년월일</label>
-                <input className="input" name="birthdate" type="date" style={{ height: 42 }} aria-label="생년월일" />
+                <label className="label" htmlFor="add-student-birthdate">생년월일</label>
+                <input id="add-student-birthdate" className="input" name="birthdate" type="date" style={{ height: 42 }} />
               </div>
               <div className="flex gap-2">
                 <div style={{ flex: 1 }}>
-                  <label className="label">학생 연락처</label>
-                  <input className="input" name="student_phone" placeholder="010-0000-0000" style={{ height: 42 }} />
+                  <label className="label" htmlFor="add-student-phone">학생 연락처</label>
+                  <input id="add-student-phone" className="input" name="student_phone" placeholder="010-0000-0000" style={{ height: 42 }} />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label className="label">보호자 연락처</label>
-                  <input className="input" name="guardian_phone" placeholder="010-0000-0000" style={{ height: 42 }} />
+                  <label className="label" htmlFor="add-student-guardian-phone">보호자 연락처</label>
+                  <input id="add-student-guardian-phone" className="input" name="guardian_phone" placeholder="010-0000-0000" style={{ height: 42 }} />
                 </div>
               </div>
               <button className="btn btn-accent" style={{ height: 44, marginTop: 4 }}>추가</button>

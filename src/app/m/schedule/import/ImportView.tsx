@@ -50,7 +50,7 @@ function IconSpinner() {
   );
 }
 
-const th: React.CSSProperties = { textAlign: "left", padding: "7px 10px", fontSize: 11.5, fontWeight: 700, color: "var(--faint)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
+const th: React.CSSProperties = { textAlign: "left", padding: "7px 10px", fontSize: 11.5, fontWeight: 700, color: "var(--sub)", borderBottom: "1px solid var(--line)", whiteSpace: "nowrap" };
 const td: React.CSSProperties = { padding: "8px 10px", fontSize: 13, borderBottom: "1px solid var(--line)", verticalAlign: "middle" };
 
 type MatchStatus = "matched" | "unmatched" | "duplicate";
@@ -145,10 +145,10 @@ const matchChip: Record<MatchStatus, { label: string; fg: string; bg: string }> 
   duplicate: { label: "동명이인", fg: "var(--danger)", bg: "var(--panel2)" },
 };
 const diffChip: Record<DiffStatus | "n/a", { label: string; fg: string; bg: string }> = {
-  same: { label: "변경 없음", fg: "var(--faint)", bg: "var(--panel2)" },
+  same: { label: "변경 없음", fg: "var(--sub)", bg: "var(--panel2)" },
   new: { label: "새로 등록", fg: "var(--accent)", bg: "var(--accent-soft)" },
   changed: { label: "수정", fg: "var(--accent)", bg: "var(--accent-soft)" },
-  "n/a": { label: "-", fg: "var(--faint)", bg: "transparent" },
+  "n/a": { label: "-", fg: "var(--sub)", bg: "transparent" },
 };
 const appliedChip = { label: "반영됨", fg: "var(--ok)", bg: "var(--ok-soft)" };
 
@@ -293,7 +293,7 @@ export default function ImportView({ base }: { base: ImportBase }) {
       `}</style>
       <div className="card" style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", flexWrap: "wrap" }}>
         <span style={{ fontSize: 20, fontWeight: 700 }}>스케줄 JSON 업로드</span>
-        <span style={{ fontSize: 12, color: "var(--faint)" }}>정제된 JSON 을 올리면 학생별로 무엇이 바뀌는지 미리 보고, 선택한 학생만 반영합니다</span>
+        <span style={{ fontSize: 12, color: "var(--sub)" }}>정제된 JSON 을 올리면 학생별로 무엇이 바뀌는지 미리 보고, 선택한 학생만 반영합니다</span>
       </div>
 
       <div className="card" style={{ flex: "none", padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -303,7 +303,7 @@ export default function ImportView({ base }: { base: ImportBase }) {
             <IconUpload />파일 선택(.json)
           </button>
           <input ref={fileRef} type="file" accept="application/json" disabled={applying} onChange={onFileChange} style={{ display: "none" }} />
-          <span style={{ fontSize: 11.5, color: "var(--faint)" }}>또는 아래에 JSON 을 붙여넣고 파싱하세요</span>
+          <span style={{ fontSize: 11.5, color: "var(--sub)" }}>또는 아래에 JSON 을 붙여넣고 파싱하세요</span>
         </div>
         <textarea
           value={rawText}
@@ -331,7 +331,7 @@ export default function ImportView({ base }: { base: ImportBase }) {
       {rows && (
         <div ref={previewRef} className="card" style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-            <div style={{ fontSize: 12.5, color: "var(--faint)" }}>
+            <div style={{ fontSize: 12.5, color: "var(--sub)" }}>
               전체 {rows.length}명 · 매칭 {okRows.filter((r) => r.matchStatus === "matched").length}명 · 이름 없음 {okRows.filter((r) => r.matchStatus === "unmatched").length}명 ·
               동명이인 {okRows.filter((r) => r.matchStatus === "duplicate").length}명 · 형식 오류 {errorRows.length}명 · 선택됨 {selected.size}명
             </div>

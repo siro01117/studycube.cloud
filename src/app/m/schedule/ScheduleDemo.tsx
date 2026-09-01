@@ -203,7 +203,7 @@ const barDayBtn = (active: boolean): React.CSSProperties => ({
   minWidth: 44, height: 40, padding: "0 6px", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer",
   border: `1px solid ${active ? "var(--accent)" : "var(--line)"}`, background: active ? "var(--accent)" : "var(--card)", color: active ? "#fff" : "var(--sub)",
 });
-const caption: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: "var(--faint)", marginBottom: 4 };
+const caption: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: "var(--sub)", marginBottom: 4 };
 const field: React.CSSProperties = { display: "flex", flexDirection: "column" };
 
 // ── 좌표계 헬퍼 — 학생 타임테이블과 운영 시간표 미리보기가 같은 계산을 공유한다 ──
@@ -832,7 +832,7 @@ export default function ScheduleDemo({
             {/* 헤더 카드 */}
             <div className="card" style={{ flex: "none", display: "flex", alignItems: "center", gap: 10, padding: "12px 16px", flexWrap: "wrap" }}>
               <span style={{ fontSize: 20, fontWeight: 700 }}>운영 시간표</span>
-              <span style={{ fontSize: 12, color: "var(--faint)" }}>표를 고치면 미리보기가 바로 갱신됩니다</span>
+              <span style={{ fontSize: 12, color: "var(--sub)" }}>표를 고치면 미리보기가 바로 갱신됩니다</span>
             </div>
             {/* 타임테이블 카드 */}
             <div className="card" style={{ flex: 1, minHeight: 0, display: "flex", overflow: "hidden", padding: 0 }}>
@@ -903,7 +903,7 @@ export default function ScheduleDemo({
                       const isToday = iso === effToday;
                       return (
                         <div key={d} style={{ textAlign: "center", padding: "3px 0" }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: i === 5 ? "#2563eb" : "var(--faint)" }}>{d}</div>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: i === 5 ? "#2563eb" : "var(--sub)" }}>{d}</div>
                           <div style={{ fontSize: 15, fontWeight: isToday ? 800 : 600, fontVariantNumeric: "tabular-nums",
                             color: isToday ? "#fff" : "var(--ink)", background: isToday ? "var(--accent)" : "transparent",
                             borderRadius: 999, width: 26, height: 24, lineHeight: "24px", margin: "1px auto 0" }}>{dayNum(iso)}</div>
@@ -915,7 +915,7 @@ export default function ScheduleDemo({
                 <div ref={gridWrapRef} style={{ position: "relative", display: "grid", gridTemplateColumns: `46px repeat(7,1fr)`, gap: 4 }}>
                   <div style={{ position: "relative", height: SLOTS * rowH }}>
                     {Array.from({ length: (END - START) / 60 + 1 }, (_, i) => START + i * 60).map((m) => (
-                      <span key={m} style={{ position: "absolute", right: 6, top: yPx(m, rowH), transform: "translateY(-6px)", fontSize: 12.5, color: "var(--faint)", fontVariantNumeric: "tabular-nums" }}>{fmtClock(m)}</span>
+                      <span key={m} style={{ position: "absolute", right: 6, top: yPx(m, rowH), transform: "translateY(-6px)", fontSize: 12.5, color: "var(--sub)", fontVariantNumeric: "tabular-nums" }}>{fmtClock(m)}</span>
                     ))}
                     {isCurrentWeek && nowGridMin != null && (
                       <span style={{ position: "absolute", right: 2, top: nowTop, transform: "translateY(-50%)", fontSize: 10, fontWeight: 800, color: "#fff", background: "var(--accent)", borderRadius: 4, padding: "1px 5px", whiteSpace: "nowrap" }}>
@@ -1007,7 +1007,7 @@ export default function ScheduleDemo({
               <div style={{ padding: "14px 16px 24px" }}>
                 <h4 style={{ fontSize: 13, fontWeight: 800, margin: "0 0 8px" }}>등·하원</h4>
                 {sched.hours.length === 0 ? (
-                  <p style={{ fontSize: 12.5, color: "var(--faint)", margin: "0 0 18px" }}>등록된 등하원 시각이 없습니다.</p>
+                  <p style={{ fontSize: 12.5, color: "var(--sub)", margin: "0 0 18px" }}>등록된 등하원 시각이 없습니다.</p>
                 ) : (
                   <table style={{ borderCollapse: "collapse", width: "100%", marginBottom: 20 }}>
                     <thead>
@@ -1040,7 +1040,7 @@ export default function ScheduleDemo({
 
                 <h4 style={{ fontSize: 13, fontWeight: 800, margin: "0 0 8px" }}>정기 일정</h4>
                 {sched.rules.length === 0 ? (
-                  <p style={{ fontSize: 12.5, color: "var(--faint)", margin: "0 0 18px" }}>등록된 정기 일정이 없습니다.</p>
+                  <p style={{ fontSize: 12.5, color: "var(--sub)", margin: "0 0 18px" }}>등록된 정기 일정이 없습니다.</p>
                 ) : (
                   <table style={{ borderCollapse: "collapse", width: "100%", marginBottom: 20 }}>
                     <thead>
@@ -1122,7 +1122,7 @@ export default function ScheduleDemo({
 
                 <h4 style={{ fontSize: 13, fontWeight: 800, margin: "0 0 8px" }}>임시 일정</h4>
                 {sched.excs.length === 0 ? (
-                  <p style={{ fontSize: 12.5, color: "var(--faint)" }}>등록된 임시 일정이 없습니다.</p>
+                  <p style={{ fontSize: 12.5, color: "var(--sub)" }}>등록된 임시 일정이 없습니다.</p>
                 ) : (
                   <table style={{ borderCollapse: "collapse", width: "100%" }}>
                     <thead>
@@ -1139,7 +1139,7 @@ export default function ScheduleDemo({
                             <td style={thtd}><span style={{ ...kchip, background: k.bg, border: `1px solid ${k.bd}`, color: k.fg }}>{e.reason}</span></td>
                             <td style={{ ...thtd, fontWeight: 700 }}>{dispTitle(e.title, e.reason)}</td>
                             <td style={{ ...thtd, fontVariantNumeric: "tabular-nums" }}>{fmtClock(e.start)}–{fmtClock(e.end)}</td>
-                            <td style={{ ...thtd, color: "var(--faint)" }}>{target ? `${target.title} 대체` : "—"}</td>
+                            <td style={{ ...thtd, color: "var(--sub)" }}>{target ? `${target.title} 대체` : "—"}</td>
                             <td style={thtd}>
                               <button onClick={() => {
                                   const prev = sched;
@@ -1248,7 +1248,7 @@ export default function ScheduleDemo({
                   {(startErr || endErr) && <span style={{ color: "var(--danger)" }}>시간 형식을 확인하세요 (예: 9, 1830, 18:30)</span>}
                   {excMode && dateVal && excDayIdx == null && !startErr && !endErr && <span style={{ color: "var(--danger)" }}>날짜를 확인하세요</span>}
                   {!startErr && !endErr && !(excMode && dateVal && excDayIdx == null) && (
-                    <span style={{ color: "var(--faint)" }}>숫자키 1~6 으로 요일 토글 · Enter로 추가 · 24시간제(예: 11 → 11:00)</span>
+                    <span style={{ color: "var(--sub)" }}>숫자키 1~6 으로 요일 토글 · Enter로 추가 · 24시간제(예: 11 → 11:00)</span>
                   )}
                 </div>
               </div>
@@ -1264,7 +1264,7 @@ export default function ScheduleDemo({
                 </div>
 
                 <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "var(--faint)", width: 30 }}>등원</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "var(--sub)", width: 30 }}>등원</span>
                   <Inp ref={arrHRef} value={arrH} error={arrHErr}
                     onFocus={(e) => e.currentTarget.select()}
                     onChange={(e) => {
@@ -1305,7 +1305,7 @@ export default function ScheduleDemo({
                 </div>
 
                 <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "var(--faint)", width: 30 }}>하원</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "var(--sub)", width: 30 }}>하원</span>
                   <Inp ref={lvHRef} value={lvH} error={lvHErr}
                     onFocus={(e) => e.currentTarget.select()}
                     onChange={(e) => {
@@ -1379,7 +1379,7 @@ export default function ScheduleDemo({
                     <b style={{ minWidth: 66 }}>{label}</b>
                     <span style={{ fontVariantNumeric: "tabular-nums", color: "var(--sub)" }}>{fmtClock(c.block.start)}–{fmtClock(c.block.end)}</span>
                     <span style={{ fontWeight: 700 }}>{c.block.title}</span>
-                    <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--faint)" }}>{c.block.ruleId ? "정기" : "임시"}</span>
+                    <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--sub)" }}>{c.block.ruleId ? "정기" : "임시"}</span>
                   </div>
                 );
               })}
@@ -1412,12 +1412,12 @@ export default function ScheduleDemo({
               </div>
               {memo && <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--ink)", whiteSpace: "pre-wrap", wordBreak: "break-word", marginBottom: 6 }}>{memo}</div>}
               <div style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: "var(--sub)", marginBottom: 4 }}>{fmtClock(pop.block.start)}–{fmtClock(pop.block.end)}</div>
-              <div style={{ fontSize: 11.5, color: "var(--faint)", marginBottom: 6 }}>{daysLabel}</div>
+              <div style={{ fontSize: 11.5, color: "var(--sub)", marginBottom: 6 }}>{daysLabel}</div>
               {popReplaceTarget && (
                 <div style={{ fontSize: 11, color: "var(--accent)", marginBottom: 8 }}>{dispTitle(popReplaceTarget.title, popReplaceTarget.reason)} 대체</div>
               )}
               {popRule && popRule.days.length > 1 && (
-                <div style={{ fontSize: 11, color: "var(--faint)", marginBottom: 10 }}>이 정기 일정은 {daysLabel} {popRule.days.length}일에 적용됩니다</div>
+                <div style={{ fontSize: 11, color: "var(--sub)", marginBottom: 10 }}>이 정기 일정은 {daysLabel} {popRule.days.length}일에 적용됩니다</div>
               )}
               <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 4 }}>
                 {pop.block.ruleId ? (
@@ -1525,7 +1525,7 @@ function OpsView({
           <div style={{ display: "grid", gridTemplateColumns: "46px 1fr", gap: 4, maxWidth: 520 }}>
             <div style={{ position: "relative", height: SLOTS * ROW }}>
               {Array.from({ length: (END - START) / 60 + 1 }, (_, i) => START + i * 60).map((m) => (
-                <span key={m} style={{ position: "absolute", right: 6, top: yPx(m, ROW), transform: "translateY(-6px)", fontSize: 12.5, color: "var(--faint)", fontVariantNumeric: "tabular-nums" }}>{fmtClock(m)}</span>
+                <span key={m} style={{ position: "absolute", right: 6, top: yPx(m, ROW), transform: "translateY(-6px)", fontSize: 12.5, color: "var(--sub)", fontVariantNumeric: "tabular-nums" }}>{fmtClock(m)}</span>
               ))}
             </div>
             <div style={{ position: "relative", height: SLOTS * ROW, border: "1px solid var(--line)", borderRadius: 9, background: "var(--panel2)", overflow: "hidden" }}>

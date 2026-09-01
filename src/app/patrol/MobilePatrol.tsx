@@ -7,7 +7,7 @@ import MobileNav from "../_shared/MobileNav";
 import { PATROL_STATES, PATROL_BY_KEY } from "@/lib/patrol";
 import { SW, SH, xyOf, boundsOf } from "@/lib/seatmap";
 import { PatrolQueue, type QueueStatus } from "@/lib/patrol-queue";
-import { startPatrol, endPatrol, recordPatrolBulk, clearPatrolMark, getPatrolSessionDetail } from "../m/seat/patrolActions";
+import { startPatrol, endPatrol, recordPatrolBulk, clearPatrolMark, getPatrolSessionDetail, type PatrolPace } from "../m/seat/patrolActions";
 import { statusAt, ghostStyleOf, reasonColor, isPatrolExempt, type DaySlot, type Period, type ActualAttendance } from "@/lib/schedule";
 
 export type MRoom = { id: string; name: string; floor: number };
@@ -60,10 +60,11 @@ function Elapsed({ startedAt }: { startedAt: number }) {
   return <span style={{ fontVariantNumeric: "tabular-nums" }}>{(hh > 0 ? hh + ":" : "") + String(mm).padStart(2, "0") + ":" + String(ss).padStart(2, "0")}</span>;
 }
 
-export default function MobilePatrol({ rooms, seats, students, attendance, canManage, branchKey, openSession, scheduleMap, periods, actual }: {
+export default function MobilePatrol({ rooms, seats, students, attendance, canManage, branchKey, openSession, patrolPace, scheduleMap, periods, actual }: {
   rooms: MRoom[]; seats: MSeat[]; students: MStudent[];
   attendance: Record<string, "in" | "out">; canManage: boolean; branchKey: string;
   openSession: MOpenSession | null;
+  patrolPace: PatrolPace | null;
   scheduleMap: Record<string, MScheduleInfo>;
   periods: Period[];
   actual: MActual;
@@ -418,6 +419,13 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
           {qs.sending ? "전송중…" : sync.label}
         </button>
       </div>
+
+      {/* 감으로 돌지 않도록 — 오늘 순찰 횟수·마지막 순찰 이후 경과(서버 계산, 클라 시각 계산 금지) */}
+      {!session && patrolPace && (
+        <div style={{ flex: "none", padding: "6px 12px", background: "var(--panel2)", borderBottom: "1px solid var(--line)", fontSize: 11.5, color: "var(--dim)", textAlign: "center" }}>
+          오늘 순찰 {patrolPace.todayCount}회{patrolPace.lastLabel ? ` · 마지막 ${patrolPace.lastLabel}` : ""}
+        </div>
+      )}
 
       {/* ── 방 캔버스 ── */}
       <div ref={canvasRef}

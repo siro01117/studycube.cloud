@@ -10,10 +10,11 @@ import { checkIn, checkOut } from './attendanceActions';
 import { updateRoom, deleteRoom, saveRoomPositions } from './roomActions';
 import StudentPopup, { ReleaseSeatIcon, MoveSeatIcon } from '../_shared/StudentPopup';
 import ContextMenu, { type MenuItem } from '../_shared/ContextMenu';
+import Modal from '../_shared/Modal';
 import { useLongPress } from '../_shared/useLongPress';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { recordPatrol, clearPatrolMark, startPatrol, endPatrol, getPatrolSessionDetail, type OpenPatrolSession } from './patrolActions';
+import { recordPatrol, clearPatrolMark, startPatrol, endPatrol, getPatrolSessionDetail, type OpenPatrolSession, type PatrolPace } from './patrolActions';
 import { PATROL_STATES, PATROL_BY_KEY } from '@/lib/patrol';
 import {
   statusAt, ghostStyleOf, reasonColor, isPatrolExempt, checkoutBranchAt,
@@ -120,9 +121,9 @@ function checkoutReasonStyle(label: string, filled: boolean): CSSProperties {
 function Tile({ label, value, color, span = 1, sub }: { label: string; value: string | number; color?: string; span?: number; sub?: string }) {
   return (
     <div className="card" style={{ gridColumn: `span ${span}`, padding: '16px 18px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-      <div style={{ fontSize: 12.5, color: 'var(--faint)' }}>{label}</div>
+      <div style={{ fontSize: 12.5, color: 'var(--sub)' }}>{label}</div>
       <div style={{ fontSize: 28, fontWeight: 800, color: color ?? 'var(--txt)', marginTop: 3 }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 3 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 11, color: 'var(--sub)', marginTop: 3 }}>{sub}</div>}
     </div>
   );
 }
@@ -148,7 +149,7 @@ function ageFrom(bd: string | null): number | null {
 function Info({ k, v }: { k: string; v: string }) {
   return (
     <div>
-      <div style={{ fontSize: 11.5, color: 'var(--faint)' }}>{k}</div>
+      <div style={{ fontSize: 11.5, color: 'var(--sub)' }}>{k}</div>
       <div style={{ fontWeight: 600, marginTop: 1 }}>{v}</div>
     </div>
   );
@@ -214,12 +215,12 @@ const seatInner = (num: number | null, label: string, who: string | null) => (
   who ? (
     // 배정된 좌석: 번호는 좌상단에 작게, 이름 가운데 — 번호·이름 같은 톤
     <>
-      <span style={{ position: 'absolute', top: 4, left: 6, fontSize: 9, fontWeight: 700, color: 'var(--faint)', lineHeight: 1 }}>{num ?? label}</span>
+      <span style={{ position: 'absolute', top: 4, left: 6, fontSize: 9, fontWeight: 700, color: 'var(--sub)', lineHeight: 1 }}>{num ?? label}</span>
       <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--dim)', maxWidth: 74, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1 }}>{who}</span>
     </>
   ) : (
     // 공석: 번호만 가운데
-    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--faint)', lineHeight: 1 }}>{num ?? label}</span>
+    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--sub)', lineHeight: 1 }}>{num ?? label}</span>
   )
 );
 
@@ -323,20 +324,41 @@ const StaticSeat = memo(function StaticSeat({
     if (gs.strip) style.backgroundImage = `linear-gradient(to right, ${gs.strip} 0 3px, transparent 3px)`;
     ghostLabelColor = ghost.state === 'away' || ghost.state === 'none' ? 'var(--faint)' : reasonColor(ghost.label);
   }
+  // 클릭/키보드 활성화 공통 로직 — onClick 은 마우스 좌표, onKeyDown 은 셀 중심 좌표로 대체.
+  const activate = (x: number, y: number) => {
+    if (!clickable && !moveTarget) return;
+    if (movingStudentId) { moveTo(s); return; }
+    if (patrolMode) { if (s.current_student_id) setPatrolMenu({ x, y, seat: s }); return; }
+    if (clickable) openSeat(s.id);
+  };
+  const interactive = clickable || moveTarget; // 클릭 핸들러가 실제로 뭔가 하는 좌석만 탭 정지점으로
+  const staticTitle = !patrolMode ? (attTitle ?? (needsAttention ? ATTENTION_TITLE : undefined)) : undefined;
+  const seatLabel = `${s.number ?? s.label}번`;
+  // 마지막 폴백까지 둔다 — 라벨이 비면 스크린리더엔 그냥 "버튼"으로만 읽힌다.
+  const ariaLabel = staticTitle
+    ?? (patrolMode && s.current_student_id ? `${seatLabel} ${who ?? ''} 순찰` : undefined)
+    ?? (moveTarget ? `${seatLabel} 빈자리, 이동` : undefined)
+    ?? (who ? `${seatLabel} ${who}` : `${seatLabel} 빈자리`);
   return (
     <div
       className="seatbox"
       {...lp.bind(s)}
       onClick={(e) => {
         if (lp.consumed()) return; // 방금 꾹누르기로 메뉴 열렸으면 클릭 무시
-        if (!clickable && !moveTarget) return;
-        if (movingStudentId) { moveTo(s); return; }
-        if (patrolMode) { if (s.current_student_id) setPatrolMenu({ x: e.clientX, y: e.clientY, seat: s }); return; }
-        if (clickable) openSeat(s.id);
+        activate(e.clientX, e.clientY);
       }}
       onContextMenu={(e) => { e.preventDefault(); if (!movingStudentId && !patrolMode) setSeatMenu({ x: e.clientX, y: e.clientY, seat: s }); }}
       style={style}
-      title={!patrolMode ? (attTitle ?? (needsAttention ? ATTENTION_TITLE : undefined)) : undefined}
+      title={staticTitle}
+      role={interactive ? 'button' : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      aria-label={interactive ? ariaLabel : undefined}
+      onKeyDown={interactive ? (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        activate(r.left + r.width / 2, r.top + r.height / 2);
+      } : undefined}
     >
       {seatInner(s.number, s.label, who)}
       {patSt ? (
@@ -348,7 +370,7 @@ const StaticSeat = memo(function StaticSeat({
           {ghost.label}
         </span>
       ) : !patrolMode && attKind ? (
-        <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: attKind === 'in' ? ink('present') : 'var(--faint)' }}>
+        <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: attKind === 'in' ? ink('present') : 'var(--sub)' }}>
           {ATT_LABEL[attKind]}
         </span>
       ) : needsAttention ? (
@@ -407,10 +429,14 @@ const OvRoom = memo(function OvRoom({
           {r.name} <span style={{ color: 'var(--accent)' }}>{String(rs.length - occ).padStart(2, '0')}</span>/{String(rs.length).padStart(2, '0')}
         </span>
       </div>
-      <div style={{
-        position: 'relative', width: b.w, height: b.h, borderRadius: 14,
-        border: '1px solid var(--line)', background: 'var(--panel)',
-      }}>
+      <div
+        role="group"
+        aria-label={`${r.name} 좌석 배치도`}
+        style={{
+          position: 'relative', width: b.w, height: b.h, borderRadius: 14,
+          border: '1px solid var(--line)', background: 'var(--panel)',
+        }}
+      >
         {rs.map((s, i) => {
           const sid = s.current_student_id;
           const mark = patrolMode && sid ? patrolMarks[sid] : undefined;
@@ -441,13 +467,13 @@ const OvRoom = memo(function OvRoom({
 
 export default function FloorEditor({
   rooms, seats, students, canManage, canEditStudent, initialRoomId, occupancy, canAttend, canPatrol, lastPatrolAt,
-  openSession, scheduleMap, periods, actual, serverNowMin,
+  openSession, patrolPace, scheduleMap, periods, actual, serverNowMin,
 }: {
   rooms: Room[]; seats: Seat[]; students: Student[];
   canManage: boolean; canEditStudent: boolean; initialRoomId: string | null;
   occupancy: Record<string, SeatOcc>; canAttend: boolean; // 오늘 재실/부재 최종 판정(순찰·출결 중 더 최근 것)
   canPatrol: boolean; lastPatrolAt: string | null;
-  openSession: OpenPatrolSession | null; scheduleMap: Record<string, ScheduleInfo>;
+  openSession: OpenPatrolSession | null; patrolPace: PatrolPace | null; scheduleMap: Record<string, ScheduleInfo>;
   periods: Period[];
   actual: Record<string, ActualAttendance>; // 학생별 오늘 실제 출결 요약(statusAt 5번째 인자)
   serverNowMin: number; // 서버가 계산해 내려준 지금 KST 분 — "확인 필요" 판정 전용(클라 new Date() 금지 원칙)
@@ -485,6 +511,9 @@ export default function FloorEditor({
   const [arrange, setArrange] = useState(false);
   const [roomPos, setRoomPos] = useState<Record<string, { x: number; y: number }>>({});
   const [roomSettings, setRoomSettings] = useState<string | null>(null);
+  // 방 삭제는 좌석까지 연쇄 삭제라 되돌릴 수 없다 — window.confirm() 대신 인라인 2단계 확인으로
+  // 통일한다(m/student/StudentList.tsx 의 confirmDel 패턴과 동일). 방 설정을 새로 열 때마다 초기화.
+  const [confirmRoomDel, setConfirmRoomDel] = useState(false);
   const [zoom, setZoom] = useState(1.15); // 단일층 실좌석 전용 확대(네비·바 영향 X)
   const zoomBy = (d: number) => setZoom((z) => Math.min(2.5, Math.max(0.6, Math.round((z + d) * 100) / 100)));
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false); // 설정 메뉴 팝업
@@ -1028,7 +1057,7 @@ export default function FloorEditor({
           <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '-.01em', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
             {selRoom.name}
             {canManage && !isEdit && (
-              <button onClick={() => setRoomSettings(selRoom.id)} title="방 설정" style={{ border: '1px solid var(--line)', background: 'var(--panel2)', borderRadius: 7, width: 24, height: 24, display: 'grid', placeItems: 'center', cursor: 'pointer' }}>
+              <button onClick={() => { setConfirmRoomDel(false); setRoomSettings(selRoom.id); }} title="방 설정" style={{ border: '1px solid var(--line)', background: 'var(--panel2)', borderRadius: 7, width: 24, height: 24, display: 'grid', placeItems: 'center', cursor: 'pointer' }}>
                 <Ic d={I_EDIT} size={12} />
               </button>
             )}
@@ -1039,6 +1068,8 @@ export default function FloorEditor({
           <div
             ref={canvasRef}
             onPointerDown={onCanvasDown}
+            role="group"
+            aria-label="좌석 배치도"
             style={{
               position: 'relative', display: 'inline-block', width: cw, height: ch,
               borderRadius: 18, verticalAlign: 'top',
@@ -1071,6 +1102,8 @@ export default function FloorEditor({
               const att = !isEdit && s.current_student_id ? occupancy[s.current_student_id]?.kind : undefined;
               const st: CSSProperties = { ...seatStyle(s.status, sel, isEdit), left: s.x, top: s.y };
               if (att && ATT_COLOR[att]) { st.backgroundColor = ATT_COLOR[att].bg; st.borderColor = ATT_COLOR[att].bd; }
+              const seatLabel = `${s.number ?? s.label}번`;
+              const ariaLabel = !isEdit ? `${seatLabel}${who ? ` ${who}` : ''}${att ? `, ${ATT_LABEL[att]}` : ''}` : undefined;
               return (
                 <div
                   key={s.id}
@@ -1078,10 +1111,18 @@ export default function FloorEditor({
                   onPointerDown={isEdit ? (e) => onSeatDown(e, s) : undefined}
                   onClick={!isEdit ? () => openSeat(s.id) : undefined}
                   style={st}
+                  role={!isEdit ? 'button' : undefined}
+                  tabIndex={!isEdit ? 0 : undefined}
+                  aria-label={ariaLabel}
+                  onKeyDown={!isEdit ? (e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    e.preventDefault();
+                    openSeat(s.id);
+                  } : undefined}
                 >
                   {seatInner(s.number, s.label, who)}
                   {att && (
-                    <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: att === 'in' ? ink('present') : 'var(--faint)' }}>
+                    <span style={{ position: 'absolute', top: 3, right: 5, fontSize: 9.5, fontWeight: 800, color: att === 'in' ? ink('present') : 'var(--sub)' }}>
                       {ATT_LABEL[att]}
                     </span>
                   )}
@@ -1124,7 +1165,7 @@ export default function FloorEditor({
           </div>
         </div>
         {isEdit && (
-          <div style={{ textAlign: 'center', marginTop: 12, fontSize: 12, color: 'var(--faint)' }}>
+          <div style={{ textAlign: 'center', marginTop: 12, fontSize: 12, color: 'var(--sub)' }}>
             빈 곳 드래그 = 여러 좌석 선택 · Shift = 추가 선택 · 좌석 드래그 = 이동(그리드 스냅·정렬 가이드)
           </div>
         )}
@@ -1162,7 +1203,7 @@ export default function FloorEditor({
       <div style={{ maxWidth: 940, margin: '0 auto', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gridAutoRows: 'minmax(84px, auto)', gap: 12 }}>
         {/* 입실 히어로 (2×2) */}
         <div className="card" style={{ gridColumn: 'span 2', gridRow: 'span 2', padding: 24, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-          <div style={{ fontSize: 13, color: 'var(--faint)' }}>지금 입실 (재실)</div>
+          <div style={{ fontSize: 13, color: 'var(--sub)' }}>지금 입실 (재실)</div>
           <div style={{ fontSize: 58, fontWeight: 800, color: 'var(--ok)', lineHeight: 1.05 }}>{inNow}</div>
           <div style={{ fontSize: 13, color: 'var(--dim)', marginTop: 4 }}>전체 {totalSeats}석 · 공석 {vacant}</div>
         </div>
@@ -1175,7 +1216,7 @@ export default function FloorEditor({
         <div className="card" style={{ gridColumn: 'span 4', padding: 16 }}>
           <div style={{ fontSize: 12.5, fontWeight: 800, color: 'var(--dim)', marginBottom: 12 }}>방별 입실</div>
           {perRoom.length === 0 ? (
-            <div style={{ textAlign: 'center', color: 'var(--faint)', fontSize: 13, padding: 12 }}>등록된 방이 없습니다.</div>
+            <div style={{ textAlign: 'center', color: 'var(--sub)', fontSize: 13, padding: 12 }}>등록된 방이 없습니다.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {[...new Set(perRoom.map((x) => x.r.floor))].sort((a, b) => b - a).map((fl) => {
@@ -1203,7 +1244,7 @@ export default function FloorEditor({
                       <div style={{ height: 7, borderRadius: 999, background: 'var(--panel2)', overflow: 'hidden', marginTop: 6 }}>
                         <div style={{ height: '100%', width: `${Math.round(flRatio * 100)}%`, background: 'var(--accent)' }} />
                       </div>
-                      <div style={{ fontSize: 11, color: 'var(--faint)', marginTop: 5 }}>방 {onFloor.length}개</div>
+                      <div style={{ fontSize: 11, color: 'var(--sub)', marginTop: 5 }}>방 {onFloor.length}개</div>
                     </button>
                     {onFloor.map(({ r, st }) => {
                       const came = st.in;
@@ -1232,7 +1273,7 @@ export default function FloorEditor({
   // 한 층의 방들(저장된 배치면 그 위치, 아니면 자동 나열)
   const renderFloorRooms = (fl: number) => {
     const rms = roomsOnFloor(fl);
-    if (!rms.length) return <div style={{ textAlign: 'center', color: 'var(--faint)', fontSize: 13, padding: 30 }}>이 층에 방이 없습니다.</div>;
+    if (!rms.length) return <div style={{ textAlign: 'center', color: 'var(--sub)', fontSize: 13, padding: 30 }}>이 층에 방이 없습니다.</div>;
     const positioned = rms.some((r) => r.pos_x || r.pos_y);
     if (positioned) {
       const W = Math.max(...rms.map((r) => r.pos_x + roomBW(r)), 400) + 50;
@@ -1342,7 +1383,7 @@ export default function FloorEditor({
                   {r.name} · {r.floor}층
                   <button
                     onPointerDown={(e) => e.stopPropagation()}
-                    onClick={(e) => { e.stopPropagation(); setRoomSettings(r.id); }}
+                    onClick={(e) => { e.stopPropagation(); setConfirmRoomDel(false); setRoomSettings(r.id); }}
                     style={{ border: '1px solid var(--line)', background: 'var(--panel2)', borderRadius: 7, width: 24, height: 24, display: 'grid', placeItems: 'center', cursor: 'pointer' }}
                   >
                     <Ic d={I_EDIT} size={12} />
@@ -1395,12 +1436,18 @@ export default function FloorEditor({
 
         {/* 우측 액션 */}
         <div className="flex items-center gap-2" style={{ flex: 'none', position: 'relative' }}>
+          {!arrange && mode === 'view' && !patrolMode && floorSel !== 'all' && canPatrol && patrolPace && (
+            // 직원이 감으로 돌지 않도록 — 오늘 순찰 횟수·마지막 순찰 이후 경과는 서버가 계산해 내려준 값 그대로.
+            <span title="순찰 페이스" style={{ fontSize: 12, color: 'var(--dim)', whiteSpace: 'nowrap' }}>
+              오늘 순찰 {patrolPace.todayCount}회{patrolPace.lastLabel ? ` · 마지막 ${patrolPace.lastLabel}` : ''}
+            </span>
+          )}
           {!arrange && mode === 'view' && floorSel !== 'all' && canPatrol && (
             <button
               className="btn"
               onClick={() => setPatrolConfirm(patrolMode ? 'end' : (resume ? 'resume' : 'start'))}
               title="순찰 모드"
-              style={{ height: 36, padding: '0 14px', fontSize: 13, ...(patrolMode ? { background: '#e5484d', borderColor: '#e5484d', color: '#fff' } : {}) }}
+              style={{ height: 36, padding: '0 14px', fontSize: 13, ...(patrolMode ? { background: 'var(--danger-strong)', borderColor: 'var(--danger-strong)', color: '#fff' } : {}) }}
             >
               <Ic d={I_PATROL} /> {patrolMode ? '순찰 종료' : resume ? '이어하기' : '순찰'}
             </button>
@@ -1435,7 +1482,7 @@ export default function FloorEditor({
                       borderRadius: 12, boxShadow: '0 8px 24px rgba(20,22,30,.18)', padding: 6, zIndex: 40, minWidth: 190,
                     }}>
                       <button className="menuitem" style={menuItemStyle} onClick={() => { setSettingsMenuOpen(false); setNumberEditMode(true); }}>좌석 번호 재지정</button>
-                      <div style={{ padding: '6px 11px 2px', fontSize: 11, color: 'var(--faint)' }}>다른 설정은 추후 추가</div>
+                      <div style={{ padding: '6px 11px 2px', fontSize: 11, color: 'var(--sub)' }}>다른 설정은 추후 추가</div>
                     </div>
                   </>
                 )}
@@ -1454,15 +1501,15 @@ export default function FloorEditor({
 
       {patrolMode && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16, padding: '9px 20px', background: 'rgba(229,72,77,.08)', borderBottom: '1px solid var(--line)', flex: 'none', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 13, fontWeight: 800, color: '#e5484d' }}>순찰 중</span>
+          <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--danger-strong)' }}>순찰 중</span>
           <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>
             시작 {patrolStartedAt ? new Date(patrolStartedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : ''} · 경과 <PatrolElapsed startedAt={patrolStartedAt} />
           </span>
-          <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>누적 벌점 <b style={{ color: '#e5484d' }}>{patrolTally}점</b></span>
+          <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>누적 벌점 <b style={{ color: 'var(--danger-strong)' }}>{patrolTally}점</b></span>
           {patrolSummary && (
             <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>
               점검 {patrolSummary.marked}/{patrolSummary.total}
-              {patrolSummary.exempt > 0 && <span style={{ color: 'var(--faint)', fontWeight: 700 }}> · 제외 {patrolSummary.exempt}명</span>}
+              {patrolSummary.exempt > 0 && <span style={{ color: 'var(--sub)', fontWeight: 700 }}> · 제외 {patrolSummary.exempt}명</span>}
               {patrolSummary.present > 0 && ` · 예상 재실 ${patrolSummary.present}명`}
               {patrolSummary.brk > 0 && ` · 쉬는시간 ${patrolSummary.brk}명`}
               {patrolSummary.away > 0 && ` · 등원전 ${patrolSummary.away}명`}
@@ -1518,7 +1565,7 @@ export default function FloorEditor({
         }}
       >
         {rooms.length === 0 ? (
-          <div className="card p-10 text-center" style={{ color: 'var(--faint)', fontSize: 14, maxWidth: 480, margin: '40px auto' }}>
+          <div className="card p-10 text-center" style={{ color: 'var(--sub)', fontSize: 14, maxWidth: 480, margin: '40px auto' }}>
             아직 방이 없습니다.{canManage && ' 우측 상단 추가 › 방 추가 로 시작하세요.'}
           </div>
         ) : floorStack ? (
@@ -1539,13 +1586,17 @@ export default function FloorEditor({
 
       {/* 좌석 클릭 → 중앙 팝업 */}
       {selSeat && (
-        <>
-          <div onClick={closeDrawer} style={{ position: 'fixed', inset: 0, background: 'rgba(20,22,30,.45)', zIndex: 55 }} />
-          <div style={{
-            position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)',
+        <Modal
+          onClose={closeDrawer}
+          backdropBackground="rgba(20,22,30,.45)"
+          backdropZIndex={55}
+          panelZIndex={56}
+          panelStyle={{
             width: openStudent ? 720 : 420, maxWidth: 'calc(100vw - 32px)', maxHeight: 'calc(100dvh - 60px)', overflowY: 'auto',
-            background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 20, boxShadow: '0 24px 70px rgba(20,22,30,.35)', zIndex: 56,
-          }}>
+            background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 20, boxShadow: '0 24px 70px rgba(20,22,30,.35)',
+          }}
+          ariaLabel={openStudent ? '학생 정보' : `${selSeat.number ?? selSeat.label}번 좌석`}
+        >
             {openStudent ? (
               <StudentPopup
                 student={openStudent}
@@ -1570,12 +1621,12 @@ export default function FloorEditor({
                     <div className="label">미배정 학생 · 눌러서 배정</div>
                     <div style={{ border: '1px solid var(--line)', borderRadius: 12, maxHeight: 340, overflowY: 'auto' }}>
                       {unseated.length === 0 ? (
-                        <div style={{ padding: 18, textAlign: 'center', color: 'var(--faint)', fontSize: 13 }}>미배정 학생이 없습니다.</div>
+                        <div style={{ padding: 18, textAlign: 'center', color: 'var(--sub)', fontSize: 13 }}>미배정 학생이 없습니다.</div>
                       ) : (
                         unseated.map((s, i) => (
                           <button key={s.id} onClick={() => call(assignSeat, { seatId: selSeat.id, studentId: s.id }, closeDrawer)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', padding: '11px 14px', border: 'none', borderTop: i ? '1px solid var(--line)' : 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', color: 'inherit' }}>
                             <span style={{ fontSize: 14, fontWeight: 600 }}>{s.name}</span>
-                            <span style={{ fontSize: 12, color: 'var(--faint)' }}>{lbl(s) || s.school || ''}</span>
+                            <span style={{ fontSize: 12, color: 'var(--sub)' }}>{lbl(s) || s.school || ''}</span>
                           </button>
                         ))
                       )}
@@ -1586,8 +1637,7 @@ export default function FloorEditor({
                 )}
               </>
             )}
-          </div>
-        </>
+        </Modal>
       )}
 
       {/* 좌석 우클릭 컨텍스트 메뉴 */}
@@ -1614,13 +1664,18 @@ export default function FloorEditor({
 
       {/* 이어하기 확인창 (시작/종료와 버튼 구성이 달라 별도 분기) */}
       {patrolConfirm === 'resume' && resume && (
-        <>
-          <div onClick={() => setPatrolConfirm(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(20,22,30,.45)', zIndex: 70 }} />
-          <div style={{
-            position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 360, maxWidth: 'calc(100vw - 32px)',
-            background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 20, boxShadow: '0 24px 70px rgba(20,22,30,.35)', zIndex: 71, padding: 24,
-          }}>
-            <div style={{ width: 46, height: 46, borderRadius: 14, margin: '0 auto 14px', display: 'grid', placeItems: 'center', background: 'rgba(229,72,77,.12)', color: '#e5484d' }}>
+        <Modal
+          onClose={() => setPatrolConfirm(null)}
+          backdropBackground="rgba(20,22,30,.45)"
+          backdropZIndex={70}
+          panelZIndex={71}
+          panelStyle={{
+            width: 360, maxWidth: 'calc(100vw - 32px)',
+            background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 20, boxShadow: '0 24px 70px rgba(20,22,30,.35)', padding: 24,
+          }}
+          ariaLabel="하던 순찰을 이어할까요?"
+        >
+            <div style={{ width: 46, height: 46, borderRadius: 14, margin: '0 auto 14px', display: 'grid', placeItems: 'center', background: 'rgba(229,72,77,.12)', color: 'var(--danger-strong)' }}>
               <Ic d={I_PATROL} size={22} />
             </div>
             <div style={{ fontSize: 16, fontWeight: 800, textAlign: 'center', marginBottom: 8 }}>하던 순찰을 이어할까요?</div>
@@ -1633,8 +1688,7 @@ export default function FloorEditor({
               <button className="btn" onClick={doFreshPatrol} style={{ height: 44, color: 'var(--danger)' }}>새로 시작 (기존 기록은 종료 처리)</button>
               <button className="btn" onClick={() => setPatrolConfirm(null)} style={{ height: 44 }}>취소</button>
             </div>
-          </div>
-        </>
+        </Modal>
       )}
 
       {/* 순찰 시작/종료 확인창 */}
@@ -1662,17 +1716,22 @@ export default function FloorEditor({
         const shown = uncheckedPatrol.slice(0, 12).map((s) => `${s.number ?? s.label}번 ${s.current_student_id ? stuById.get(s.current_student_id)?.name ?? '' : ''}`);
         const rest = uncheckedPatrol.length - shown.length;
         return (
-          <>
-            <div onClick={() => setPatrolConfirm(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(20,22,30,.45)', zIndex: 70 }} />
-            <div style={{
-              position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 340, maxWidth: 'calc(100vw - 32px)',
-              background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 20, boxShadow: '0 24px 70px rgba(20,22,30,.35)', zIndex: 71, padding: 24, textAlign: 'center',
-            }}>
-              <div style={{ width: 46, height: 46, borderRadius: 14, margin: '0 auto 14px', display: 'grid', placeItems: 'center', background: 'rgba(229,72,77,.12)', color: '#e5484d' }}>
+          <Modal
+            onClose={() => setPatrolConfirm(null)}
+            backdropBackground="rgba(20,22,30,.45)"
+            backdropZIndex={70}
+            panelZIndex={71}
+            panelStyle={{
+              width: 340, maxWidth: 'calc(100vw - 32px)',
+              background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 20, boxShadow: '0 24px 70px rgba(20,22,30,.35)', padding: 24, textAlign: 'center',
+            }}
+            ariaLabel={isStart ? '순찰을 시작하시겠습니까?' : '순찰을 종료하시겠습니까?'}
+          >
+              <div style={{ width: 46, height: 46, borderRadius: 14, margin: '0 auto 14px', display: 'grid', placeItems: 'center', background: 'rgba(229,72,77,.12)', color: 'var(--danger-strong)' }}>
                 <Ic d={I_PATROL} size={22} />
               </div>
               <div style={{ fontSize: 13.5, fontWeight: 700, color: 'var(--dim)' }}>{line1}</div>
-              <div style={{ fontSize: 13, color: 'var(--faint)', marginTop: 4 }}>현재 시각 {fmtClock(now)}</div>
+              <div style={{ fontSize: 13, color: 'var(--sub)', marginTop: 4 }}>현재 시각 {fmtClock(now)}</div>
               <div style={{ fontSize: 16, fontWeight: 800, margin: '14px 0 18px' }}>{isStart ? '순찰을 시작하시겠습니까?' : '순찰을 종료하시겠습니까?'}</div>
               {hasWarn && (
                 <div style={{ background: 'var(--warn-soft)', border: '1px solid var(--warn)', borderRadius: 12, padding: '10px 12px', margin: '-8px 0 18px', fontSize: 12.5, color: 'var(--ink)', lineHeight: 1.6, textAlign: 'left' }}>
@@ -1682,12 +1741,11 @@ export default function FloorEditor({
               )}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <button className="btn" onClick={() => setPatrolConfirm(null)} style={{ height: 44 }}>취소</button>
-                <button className="btn btn-accent" onClick={isStart ? doStartPatrol : doEndPatrol} style={{ height: 44, ...(isStart ? {} : { background: '#e5484d', borderColor: '#e5484d' }) }}>
+                <button className="btn btn-accent" onClick={isStart ? doStartPatrol : doEndPatrol} style={{ height: 44, ...(isStart ? {} : { background: 'var(--danger-strong)', borderColor: 'var(--danger-strong)' }) }}>
                   {isStart ? '시작' : hasWarn ? `미점검 ${uncheckedPatrol.length}명 · 그대로 종료` : '종료'}
                 </button>
               </div>
-            </div>
-          </>
+          </Modal>
         );
       })()}
 
@@ -1750,12 +1808,17 @@ export default function FloorEditor({
           bodyLines = ['이 학생은 시간표가 없습니다.', '퇴실 처리할까요?'];
         }
         return (
-          <>
-            <div onClick={close} style={{ position: 'fixed', inset: 0, background: 'rgba(20,22,30,.45)', zIndex: 70 }} />
-            <div style={{
-              position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 380, maxWidth: 'calc(100vw - 32px)',
-              background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 20, boxShadow: '0 24px 70px rgba(20,22,30,.35)', zIndex: 71, padding: 24,
-            }}>
+          <Modal
+            onClose={close}
+            backdropBackground="rgba(20,22,30,.45)"
+            backdropZIndex={70}
+            panelZIndex={71}
+            panelStyle={{
+              width: 380, maxWidth: 'calc(100vw - 32px)',
+              background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 20, boxShadow: '0 24px 70px rgba(20,22,30,.35)', padding: 24,
+            }}
+            ariaLabel={`${name} 퇴실 확인`}
+          >
               <div style={{ width: 46, height: 46, borderRadius: 14, margin: '0 auto 12px', display: 'grid', placeItems: 'center', background: 'var(--accent-soft)', color: 'var(--accent)' }}>
                 <Ic d={I_LOGOUT} size={22} />
               </div>
@@ -1763,7 +1826,7 @@ export default function FloorEditor({
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, margin: '5px 0 16px' }}>
                 {seat && <span style={{ fontSize: 12.5, color: 'var(--dim)' }}>{seat.number ?? seat.label}번</span>}
                 {occ && (
-                  <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 9px', borderRadius: 999, backgroundColor: ATT_COLOR[occ.kind].bg, color: occ.kind === 'in' ? ink('present') : 'var(--faint)' }}>
+                  <span style={{ fontSize: 11, fontWeight: 800, padding: '2px 9px', borderRadius: 999, backgroundColor: ATT_COLOR[occ.kind].bg, color: occ.kind === 'in' ? ink('present') : 'var(--sub)' }}>
                     {ATT_LABEL[occ.kind]}
                   </span>
                 )}
@@ -1789,8 +1852,7 @@ export default function FloorEditor({
               )}
 
               <button className="btn" onClick={close} style={{ height: 40, width: '100%', marginTop: 14 }}>취소</button>
-            </div>
-          </>
+          </Modal>
         );
       })()}
 
@@ -1808,19 +1870,23 @@ export default function FloorEditor({
 
       {/* 모달 */}
       {modal && (
-        <>
-          <div onClick={() => setModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 60 }} />
-          <div style={{
-            position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 420, maxWidth: 'calc(100vw - 32px)',
-            background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 20, boxShadow: '0 20px 60px rgba(0,0,0,.5)', zIndex: 61,
-          }}>
+        <Modal
+          onClose={() => setModal(null)}
+          backdropBackground="rgba(0,0,0,.5)"
+          backdropZIndex={60}
+          panelZIndex={61}
+          panelStyle={{
+            width: 420, maxWidth: 'calc(100vw - 32px)',
+            background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 20, boxShadow: '0 20px 60px rgba(0,0,0,.5)',
+          }}
+          ariaLabel={modal === 'student' ? '학생 추가' : '방 추가'}
+        >
             {modal === 'student' ? (
               <StudentModal onClose={() => setModal(null)} />
             ) : (
               <RoomModal onClose={() => setModal(null)} floors={floors} defaultFloor={floorSel === 'all' ? (floors[0] ?? 4) : (floorSel as number)} />
             )}
-          </div>
-        </>
+        </Modal>
       )}
 
       {/* 방 설정 모달 */}
@@ -1829,12 +1895,17 @@ export default function FloorEditor({
         if (!r) return null;
         const floorOpts = Array.from(new Set([...floors, 4, 5, r.floor])).sort((a, b) => a - b);
         return (
-          <>
-            <div onClick={() => setRoomSettings(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', zIndex: 60 }} />
-            <div style={{
-              position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%,-50%)', width: 380, maxWidth: 'calc(100vw - 32px)',
-              background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 20, boxShadow: '0 20px 60px rgba(0,0,0,.5)', zIndex: 61,
-            }}>
+          <Modal
+            onClose={() => setRoomSettings(null)}
+            backdropBackground="rgba(0,0,0,.5)"
+            backdropZIndex={60}
+            panelZIndex={61}
+            panelStyle={{
+              width: 380, maxWidth: 'calc(100vw - 32px)',
+              background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 20, boxShadow: '0 20px 60px rgba(0,0,0,.5)',
+            }}
+            ariaLabel="방 설정"
+          >
               <div style={{ padding: '20px 22px 0', fontSize: 17, fontWeight: 800 }}>방 설정</div>
               <form action={updateRoom} onSubmit={() => setRoomSettings(null)}>
                 <input type="hidden" name="roomId" value={r.id} />
@@ -1866,14 +1937,28 @@ export default function FloorEditor({
                 </div>
               </form>
               <div style={{ padding: '12px 22px 20px', borderTop: '1px solid var(--line)', marginTop: 14 }}>
-                <button
-                  className="btn"
-                  onClick={() => { if (confirm(`'${r.name}' 방과 그 방의 좌석을 모두 삭제할까요?`)) call(deleteRoom, { roomId: r.id }, () => { setRoomSettings(null); setArrange(false); }); }}
-                  style={{ width: '100%', height: 40, fontSize: 13, color: 'var(--danger)' }}
-                >이 방 삭제 (좌석 포함)</button>
+                {confirmRoomDel ? (
+                  <div className="flex gap-2">
+                    <button
+                      className="btn"
+                      onClick={() => setConfirmRoomDel(false)}
+                      style={{ flex: 1, height: 40, fontSize: 13 }}
+                    >취소</button>
+                    <button
+                      className="btn"
+                      onClick={() => call(deleteRoom, { roomId: r.id }, () => { setConfirmRoomDel(false); setRoomSettings(null); setArrange(false); })}
+                      style={{ flex: 1, height: 40, fontSize: 13, background: 'var(--danger)', borderColor: 'var(--danger)', color: '#fff' }}
+                    >정말 삭제 (되돌릴 수 없음)</button>
+                  </div>
+                ) : (
+                  <button
+                    className="btn"
+                    onClick={() => setConfirmRoomDel(true)}
+                    style={{ width: '100%', height: 40, fontSize: 13, color: 'var(--danger)' }}
+                  >이 방 삭제 (좌석 포함)</button>
+                )}
               </div>
-            </div>
-          </>
+          </Modal>
         );
       })()}
     </div>
@@ -1893,8 +1978,8 @@ function StudentModal({ onClose }: { onClose: () => void }) {
       <div style={{ padding: '20px 22px 0', fontSize: 17, fontWeight: 800 }}>학생 추가</div>
       <div style={{ padding: '16px 22px 22px' }}>
         <div style={{ marginBottom: 12 }}>
-          <div className="label">이름</div>
-          <input className="input" name="name" placeholder="이름" required style={{ height: 42 }} />
+          <label className="label" htmlFor="floor-add-student-name">이름</label>
+          <input id="floor-add-student-name" className="input" name="name" placeholder="이름" required aria-required="true" style={{ height: 42 }} />
         </div>
         <div className="flex gap-2" style={{ marginBottom: 12 }}>
           <div style={{ flex: 1 }}>
@@ -1975,7 +2060,7 @@ function RoomModal({ onClose, floors, defaultFloor }: { onClose: () => void; flo
             {floorOpts.map((f) => <option key={f} value={f}>{f}층</option>)}
           </select>
         </div>
-        <div style={{ fontSize: 12, color: 'var(--faint)', marginTop: 8 }}>빈 방으로 만든 뒤, 편집에서 좌석을 하나씩 추가하세요.</div>
+        <div style={{ fontSize: 12, color: 'var(--sub)', marginTop: 8 }}>빈 방으로 만든 뒤, 편집에서 좌석을 하나씩 추가하세요.</div>
         <div className="flex justify-end gap-2" style={{ marginTop: 18 }}>
           <button type="button" className="btn" onClick={onClose} style={{ height: 40, fontSize: 13 }}>취소</button>
           <button className="btn btn-accent" style={{ height: 40, fontSize: 13 }}>만들기</button>

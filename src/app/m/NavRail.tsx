@@ -139,7 +139,7 @@ const S: Record<string, CSSProperties> = {
   },
   icoBox: { width: 40, height: 34, borderRadius: 10, display: "grid", placeItems: "center", color: "var(--sub)" },
   icoOn: { background: "var(--accent-soft)", color: "var(--accent)" },
-  lbl: { fontSize: 10.5, lineHeight: 1.15, textAlign: "center", color: "var(--faint)", maxWidth: 68 },
+  lbl: { fontSize: 10.5, lineHeight: 1.15, textAlign: "center", color: "var(--sub)", maxWidth: 68 },
   foot: { display: "flex", flexDirection: "column", alignItems: "center", gap: 8, marginTop: 6 },
   avatar: {
     width: 34, height: 34, borderRadius: "50%", background: "var(--accent-soft)", color: "var(--accent)",

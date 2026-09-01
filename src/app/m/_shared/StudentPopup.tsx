@@ -37,7 +37,7 @@ function ageFrom(bd: string | null): number | null {
 function Info({ k, v }: { k: string; v: string }) {
   return (
     <div>
-      <div style={{ fontSize: 11.5, color: "var(--faint)" }}>{k}</div>
+      <div style={{ fontSize: 11.5, color: "var(--sub)" }}>{k}</div>
       <div style={{ fontWeight: 600, marginTop: 1 }}>{v}</div>
     </div>
   );
@@ -176,10 +176,10 @@ export default function StudentPopup({
               {accessCode ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: "0.08em", fontFamily: "ui-monospace, monospace" }}>{accessCode}</span>
-                  <span style={{ fontSize: 11.5, color: "var(--faint)" }}>이름 + 이 코드로 도시락 등 신청</span>
+                  <span style={{ fontSize: 11.5, color: "var(--sub)" }}>이름 + 이 코드로 도시락 등 신청</span>
                 </div>
               ) : (
-                <div style={{ fontSize: 12.5, color: "var(--faint)" }}>미발급 — 목록 상단 ‘코드 발급’ 버튼으로 부여</div>
+                <div style={{ fontSize: 12.5, color: "var(--sub)" }}>미발급 — 목록 상단 ‘코드 발급’ 버튼으로 부여</div>
               )}
             </div>
           )}
@@ -190,7 +190,7 @@ export default function StudentPopup({
               <Info k="다음 납부" v="—" />
               <Info k="미납" v="—" />
             </div>
-            <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 6 }}>결제 모듈이 붙으면 표시됩니다.</div>
+            <div style={{ fontSize: 11.5, color: "var(--sub)", marginTop: 6 }}>결제 모듈이 붙으면 표시됩니다.</div>
           </div>
 
           {actions && (
@@ -203,7 +203,7 @@ export default function StudentPopup({
         {/* 오른쪽: 입·퇴실 기록 */}
         <div style={{ flex: "0 0 232px", borderLeft: "1px solid var(--line)", paddingLeft: 18, display: "flex", flexDirection: "column", minHeight: 300 }}>
           <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
-            <span style={{ fontSize: 12, color: "var(--faint)", fontWeight: 700 }}>입·퇴실 기록</span>
+            <span style={{ fontSize: 12, color: "var(--sub)", fontWeight: 700 }}>입·퇴실 기록</span>
             {canAttend && attEvents.length > 0 && isToday && (
               <button onClick={() => call(undoLastEvent, { studentId: student.id, date: attDate })} disabled={pending} className="chip" style={{ height: 22, fontSize: 11, cursor: "pointer", color: "var(--danger)" }}>마지막 취소</button>
             )}
@@ -218,13 +218,13 @@ export default function StudentPopup({
           )}
           <div style={{ flex: 1, overflowY: "auto", maxHeight: 260 }}>
             {attEvents.length === 0 ? (
-              <div style={{ color: "var(--faint)", fontSize: 12.5, padding: "10px 2px" }}>기록 없음</div>
+              <div style={{ color: "var(--sub)", fontSize: 12.5, padding: "10px 2px" }}>기록 없음</div>
             ) : (
               attEvents.map((e, i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 2px", borderTop: i ? "1px solid var(--line)" : "none" }}>
                   <span style={{ width: 34, fontSize: 12.5, fontWeight: 800, color: e.kind === "in" ? "var(--ok)" : "var(--dim)" }}>{e.kind === "in" ? "입실" : "퇴실"}</span>
                   <span style={{ fontSize: 13.5, fontWeight: 700 }}>{new Date(e.at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })}</span>
-                  <span style={{ fontSize: 11, color: "var(--faint)", marginLeft: "auto" }}>{e.auto ? "자동" : "수동"}</span>
+                  <span style={{ fontSize: 11, color: "var(--sub)", marginLeft: "auto" }}>{e.auto ? "자동" : "수동"}</span>
                 </div>
               ))
             )}
@@ -242,7 +242,7 @@ export default function StudentPopup({
                 <button className="btn" disabled={pending} onClick={() => call(clearDailyStatus, { studentId: student.id, date: attDate })} style={{ height: 38, fontSize: 12.5, gap: 6 }}><RestoreIcon /> 결석 취소</button>
               ) : absentPick ? (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 5, padding: "8px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--panel2)" }}>
-                  <div style={{ width: "100%", fontSize: 11, color: "var(--faint)", marginBottom: 2 }}>결석 사유 선택</div>
+                  <div style={{ width: "100%", fontSize: 11, color: "var(--sub)", marginBottom: 2 }}>결석 사유 선택</div>
                   {ABSENCE_REASONS.map((r) => (
                     <button key={r.key} disabled={pending} onClick={() => call(setAbsent, { studentId: student.id, reason: r.key, date: attDate })} className="chip" style={{ height: 28, fontSize: 12, cursor: "pointer" }}>{r.label}</button>
                   ))}
