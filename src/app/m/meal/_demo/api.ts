@@ -1,10 +1,10 @@
 // window.api 어댑터 — 예전엔 localStorage(더미 시드 포함)였다. 지금은 실 DB 위 서버 액션
 // (../actions.ts)을 그대로 호출하는 얇은 래퍼다. 원본 렌더러 코드(App.tsx, pages/*, components/*)는
-// window.api 만 호출하므로 이 파일이 무엇으로 구현됐는지 전혀 모른다 — 그래서 렌더러 쪽은 이 교체로
-// 단 한 줄도 바꾸지 않아도 됐다(단, createApp(구 upsertApp) 시그니처는 학생 검색 전환으로 바뀌었고,
-// 결제 저장은 updatePayment 로 분리됐다).
+// window.api 만 호출하므로 이 파일이 무엇으로 구현됐는지 전혀 모른다.
+// 도시락 신청은 학생 전용(f/[slug]/forms/lch4k9wp.tsx)이다 — 관리자는 등록·삭제를 못 하고 결제 정보만
+// 고칠 수 있다(updatePayment). createApp/deleteApp/searchStudents 는 관리자 대신 등록 기능과 함께 제거됨.
 import { holidayLabel as libHolidayLabel } from "@/lib/holidays";
-import type { Application, ClosureInfo, CreateAppPayload, Month, StudentCandidate, UpdatePaymentPayload } from "./types";
+import type { Application, ClosureInfo, Month, UpdatePaymentPayload } from "./types";
 import * as actions from "../actions";
 
 function toClosureMap(rows: { date: string; lunch_closed: boolean; dinner_closed: boolean; label: string | null }[]): Record<string, ClosureInfo> {
@@ -18,7 +18,6 @@ function toApplication(a: actions.AppRow): Application {
     id: a.id, month_id: a.month_id, studentId: a.studentId,
     name: a.name, seat: a.seat, floor: a.floor,
     paid: a.paid, paid_amount: a.paid_amount, paid_date: a.paid_date, memo: a.memo,
-    source: a.source,
     meals: a.meals,
   };
 }
@@ -41,21 +40,15 @@ export function installMealApi() {
     setClosure: async (monthId: string, date: string, lunchClosed: boolean, dinnerClosed: boolean, label: string) => {
       await actions.setClosure(monthId, date, lunchClosed, dinnerClosed, label);
     },
+    mealCountOn: async (monthId: string, date: string) => actions.mealCountOn(monthId, date),
     holidayLabel: async (iso: string) => libHolidayLabel(iso),
 
     listApps: async (monthId: string) => (await actions.listApps(monthId)).map(toApplication),
-    createApp: async (payload: CreateAppPayload) =>
-      actions.createApp({
-        monthId: payload.monthId, studentId: payload.studentId,
-        paidAmount: payload.paidAmount, paidDate: payload.paidDate, memo: payload.memo, meals: payload.meals,
-      }),
     updatePayment: async (payload: UpdatePaymentPayload) => {
       await actions.updatePayment({
         orderId: payload.orderId, paidAmount: payload.paidAmount, paidDate: payload.paidDate, memo: payload.memo,
       });
     },
-    deleteApp: async (id: string) => { await actions.deleteApp(id); },
-    searchStudents: async (monthId: string, query: string): Promise<StudentCandidate[]> => actions.searchStudents(monthId, query),
 
     todayOrders: async () => actions.todayOrders(),
   };

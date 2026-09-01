@@ -117,7 +117,7 @@ const BOOT_LOCK =
 
 // 스키마·시드 내용이 바뀌면 이 값을 올린다. 그때만 DDL 이 다시 돈다.
 // (schema.modules.ts / CORE_SQL / PERMISSIONS / MODULES 를 수정하면 반드시 갱신)
-const SCHEMA_VERSION = "2026-08-31.2"; // 도시락 신청 출처 구분(lunch_order.source) + 수정 잠금
+const SCHEMA_VERSION = "2026-08-31.5"; // 도시락: lunch_meal.price 단가 스냅샷 추가
 
 /** 이미 이 버전으로 부팅된 DB인지 한 번의 쿼리로 판정 */
 async function alreadyBooted(): Promise<boolean> {
@@ -153,6 +153,38 @@ async function boot() {
   // 스케쥴 입력 기간(2026-08-20): 기존 제출 행은 first_submitted_at 이 없다 — created_at 을 최초
   // 제출 시각으로 간주해 채운다(그 순간부터는 actions.ts submitForm 이 insert 시에만 채우고 보존).
   await db.query(`update submission set first_submitted_at = coalesce(first_submitted_at, created_at) where first_submitted_at is null`);
+  // 도시락 관리자 등록 폐지(2026-08-31): 신청은 학생 전용이 되어 신청 출처 구분이 의미를 잃었다.
+  // 컬럼 삭제를 "이번" 배포에서는 하지 않는다 — 롤링 배포 중에는 직전 빌드의 살아있는
+  // 인스턴스가 아직 `insert into lunch_order(..., source) ...` 를 실행 중일 수 있는데, 새 인스턴스가
+  // 부팅하자마자 컬럼을 지우면 그 사이 옛 인스턴스의 insert 가 42703(undefined column)으로 실패한다.
+  // 코드는 이미 이 컬럼을 읽지도 쓰지도 않으므로(현재 lunch-actions.ts/actions.ts 어디에도 source 언급
+  // 없음) 컬럼이 남아 있어도 무해하다 — 새 코드의 insert 는 컬럼을 아예 생략하는데, 이 컬럼은 이번
+  // 정리 전부터(구버전 SCHEMA_VERSION 때부터) 이미 그런 생략-insert 와 공존해온 컬럼이라 기본값/null
+  // 허용 여부가 이미 검증돼 있다 — 새로 깨질 일이 없다. drop 은 옛 인스턴스가 모두 내려간 뒤인
+  // 다음 배포에서 한다.
+  // 신청 시점 단가 스냅샷 — 없으면 월 가격을 바꿀 때 이미 완납한 학생이 미납으로 되돌아간다.
+  // schema.modules.ts 의 create table if not exists 는 신규 DB만 커버하므로, 이미 존재하는 DB는
+  // 여기서 컬럼을 얹는다 — 멱등(add column if not exists), 매 버전마다 다시 돌아도 안전하다.
+  await db.query(`alter table lunch_meal add column if not exists price int not null default 0`);
+  // 기존 행(마이그레이션 이전에 신청된 끼니)은 그 시점 단가가 어디에도 남아있지 않다 — 되살릴 수
+  // 없으므로 최선의 근사치로 "그 달의 현재 가격"을 채운다(기존 화면이 항상 재계산해오던 값과 동일해서
+  // 이 UPDATE 직후 총액이 갑자기 바뀌지 않는다).
+  // price=0 인 행만 대상으로 삼는 것만으로는 멱등하지 않다 — 이 문장은 SCHEMA_VERSION 이 오를
+  // 때마다(이 마이그레이션과 무관한 변경이어도) 매번 다시 돈다. 나중에 관리자가 "가격 미설정 달"의
+  // 가격을 정식으로 넣으면, 그 전에 0원으로 신청됐던(그리고 이미 결제까지 끝났을 수 있는) 행이 다음
+  // 배포 때 조용히 새 단가로 덮어써진다 — updatePayment 는 이 스냅샷 합계로만 완납 여부를 재계산하므로
+  // (paid 자체는 건드리지 않는다) 완납인데 잔액이 생기는 상태가 된다. 다른 마이그레이션의 선례
+  // (schedule_grant 무효화, schema.modules.ts)처럼 cutover 시점(이 컬럼을 추가한 SCHEMA_VERSION의
+  // 배포 시각) 이전에 만들어진 주문만 대상으로 날짜로 스코프해 최초 1회만 돌게 한다 — 그 시점 이후의
+  // 주문은 saveLunchOrder 가 항상 정확한 단가로 직접 저장하므로 백필 대상이 아니다.
+  await db.query(`
+    update lunch_meal lm
+       set price = case when lm.meal_type='lunch' then mo.lunch_price else mo.dinner_price end
+      from lunch_order o
+      join lunch_month mo on mo.id = o.month_id
+     where o.id = lm.order_id and lm.price = 0
+       and o.created_at < timestamptz '2026-08-31 00:00+09'
+  `);
 
   // 권한 카탈로그
   for (const p of PERMISSIONS) {

@@ -13,7 +13,7 @@ const DAYS_KR = ['월', '화', '수', '목', '금', '토', '일']
 export function MonthSettings({ year, month, onYearMonthChange, onChange }: {
   year: number; month: number; onYearMonthChange: (y: number, m: number) => void; onChange: () => void
 }) {
-  const { toast } = useDialog()
+  const { toast, confirm } = useDialog()
   const [m, setM] = useState<Month | null>(null)
   const [closures, setClosures] = useState<Record<string, ClosureInfo>>({})
   const [holidays, setHolidays] = useState<Record<string, string>>({})
@@ -59,12 +59,31 @@ export function MonthSettings({ year, month, onYearMonthChange, onChange }: {
     setDirty(false); toast('설정이 저장되었습니다.', 'success'); onChange()
   }
 
+  // 이미 신청이 있는 날을 휴무로 지정하면 그 학생은 그 날 그 끼니를 취소만 할 수 있게 된다
+  // (재추가는 막힘) — 되돌릴 수 있는 조작이 아니므로, 새로 휴무로 "지정"할 때만(이미 휴무인 걸
+  // 해제할 때는 필요 없음) 기존 신청 건수를 서버에서 세어 보여주고 확인을 받는다.
+  const confirmClose = async (iso: string, n: number): Promise<boolean> => {
+    if (n <= 0) return true
+    return confirm({
+      title: '이미 신청이 있어요',
+      message: `${iso}에 ${n}건 신청돼 있어요. 휴무로 지정해도 기존 신청은 지워지지 않고, 학생은 취소만 할 수 있게 돼요. 계속할까요?`,
+      confirmLabel: '휴무로 지정',
+      danger: true,
+    })
+  }
+
   const toggleMeal = async (d: Date, type: 'lunch' | 'dinner') => {
     const iso = isoDate(d.getFullYear(), d.getMonth() + 1, d.getDate())
     const eff = effectiveClosure(d, closures, holidays)
     const lc = eff?.lunch_closed ?? false; const dc = eff?.dinner_closed ?? false
     const newLc = type === 'lunch' ? !lc : lc
     const newDc = type === 'dinner' ? !dc : dc
+    const closing = type === 'lunch' ? newLc && !lc : newDc && !dc
+    if (closing) {
+      const counts = await window.api.mealCountOn(m.id, iso)
+      const n = type === 'lunch' ? counts.lunch : counts.dinner
+      if (!(await confirmClose(iso, n))) return
+    }
     await window.api.setClosure(m.id, iso, newLc, newDc, eff?.label ?? '')
     setClosures({ ...closures, [iso]: { lunch_closed: newLc, dinner_closed: newDc, label: eff?.label ?? '' } })
   }
@@ -149,11 +168,15 @@ export function MonthSettings({ year, month, onYearMonthChange, onChange }: {
                   both ? 'bg-white border-ink-300' : 'bg-white border-ink-200')}>
 
                   {/* date area — compact */}
-                  <button onClick={() => {
+                  <button onClick={async () => {
                     const iso = isoDate(d.getFullYear(), d.getMonth() + 1, d.getDate())
                     const newBoth = !(lc && dc)
-                    window.api.setClosure(m.id, iso, newBoth, newBoth, label)
-                      .then(() => setClosures((c) => ({ ...c, [iso]: { lunch_closed: newBoth, dinner_closed: newBoth, label } })))
+                    if (newBoth) {
+                      const counts = await window.api.mealCountOn(m.id, iso)
+                      if (!(await confirmClose(iso, counts.lunch + counts.dinner))) return
+                    }
+                    await window.api.setClosure(m.id, iso, newBoth, newBoth, label)
+                    setClosures((c) => ({ ...c, [iso]: { lunch_closed: newBoth, dinner_closed: newBoth, label } }))
                   }} className="px-1.5 pt-1.5 pb-0.5 text-center flex-shrink-0 relative">
                     <span className={clsx('text-[13px] font-bold leading-none block',
                       isSun ? 'text-red-400' : dow === 6 ? 'text-blue-400' : 'text-ink-900')}>

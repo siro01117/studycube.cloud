@@ -265,17 +265,16 @@ create table if not exists lunch_order(
   unique(month_id, student_id)
 );
 create index if not exists idx_lunch_order_month on lunch_order(month_id);
--- 신청 출처: 학생이 직접 낸 것(student)은 관리자가 끼니를 못 고친다(신뢰의 근거) — 카운터가 대신
--- 넣은 것(staff, 종이 신청서 접수 등)만 자유 수정. 기존 행(이 컬럼이 생기기 전) 기본값은 'student' —
--- ApplicationDialog 의 학생 검색·대신 등록 기능은 이 작업에서 신설된 것이라 그 전까지는 학생 폼
--- (lunch-actions.ts)이 lunch_order 를 만드는 유일한 경로였다(actions.ts 참고).
-alter table lunch_order add column if not exists source text not null default 'student' check (source in ('student','staff'));
+-- 도시락 신청은 학생 전용이다(lunch-actions.ts 가 lunch_order 를 만드는 유일한 경로) — 관리자는
+-- 등록·삭제를 못 하고 결제 정보만 고친다. 그래서 신청 출처를 구분할 필요가 없다(구 source 컬럼은
+-- bootstrap.ts 의 마이그레이션으로 떨어뜨린다).
 
 -- 주문한 끼니(날짜×중/석식). 발주 집계는 여기서.
 create table if not exists lunch_meal(
   order_id   uuid not null references lunch_order(id) on delete cascade,
   date       date not null,
   meal_type  text not null check (meal_type in ('lunch','dinner')),
+  price      int  not null default 0, -- 신청 시점 단가 스냅샷(월 가격이 나중에 바뀌어도 안 흔들림)
   primary key(order_id, date, meal_type)
 );
 create index if not exists idx_lunch_meal_date on lunch_meal(date);

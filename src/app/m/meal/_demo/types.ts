@@ -9,7 +9,7 @@ export interface Month {
   notice: string | null  // newline-separated lines
 }
 
-export interface Meal { date: string; meal_type: 'lunch' | 'dinner' }
+export interface Meal { date: string; meal_type: 'lunch' | 'dinner'; price: number }
 
 export interface Application {
   id: string
@@ -22,16 +22,6 @@ export interface Application {
   paid_amount: number
   paid_date: string | null
   memo: string
-  source: 'student' | 'staff'
-  meals: Meal[]
-}
-
-export interface CreateAppPayload {
-  monthId: string
-  studentId: string
-  paidAmount: number
-  paidDate: string | null
-  memo: string
   meals: Meal[]
 }
 
@@ -40,14 +30,6 @@ export interface UpdatePaymentPayload {
   paidAmount: number
   paidDate: string | null
   memo: string
-}
-
-export interface StudentCandidate {
-  id: string
-  name: string
-  seat: string | null
-  floor: number | null
-  alreadyApplied: boolean
 }
 
 // Per-meal closure: null means fully open (default)
@@ -64,19 +46,18 @@ declare global {
       updateMonth: (id: string, fields: Partial<Month>) => Promise<void>
       listClosures: (monthId: string) => Promise<Record<string, ClosureInfo>>
       setClosure: (monthId: string, date: string, lunchClosed: boolean, dinnerClosed: boolean, label: string) => Promise<void>
+      mealCountOn: (monthId: string, date: string) => Promise<{ lunch: number; dinner: number }>
       holidayLabel: (iso: string) => Promise<string | null>
 
       listApps: (monthId: string) => Promise<Application[]>
-      createApp: (payload: CreateAppPayload) => Promise<string>
       updatePayment: (payload: UpdatePaymentPayload) => Promise<void>
-      deleteApp: (id: string) => Promise<void>
-      searchStudents: (monthId: string, query: string) => Promise<StudentCandidate[]>
 
       todayOrders: () => Promise<{
         today: string
         applicants: { name: string; seat: string | null; meal_type: 'lunch' | 'dinner' }[]
         lunchTotal: number
         dinnerTotal: number
+        excludedClosed: number
       }>
     }
   }

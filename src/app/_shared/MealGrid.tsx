@@ -98,7 +98,14 @@ export default function MealGrid({
                   const isToday = cell.iso === today;
                   const isActive = cell.iso === activeDate;
                   return (
-                    <div key={ci} style={{ display: "flex", flexDirection: "column", borderRight: ci === 5 ? "none" : "1px solid var(--line)" }}>
+                    <div
+                      key={ci}
+                      style={{
+                        display: "flex", flexDirection: "column",
+                        borderRight: ci === 5 ? "none" : "1px solid var(--line)",
+                        boxShadow: isToday ? "inset 0 0 0 1.5px var(--accent)" : "none",
+                      }}
+                    >
                       <DateHeadCell day={cell.day} today={isToday} active={isActive} />
                       <MealCell
                         date={cell.iso}
@@ -145,6 +152,9 @@ export default function MealGrid({
           </span>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
             <HatchSwatch /> 휴무
+          </span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <span aria-hidden="true" style={{ display: "inline-block", width: 16, height: 11, borderRadius: 2, border: "1px solid var(--line)", background: "var(--line)" }} /> 마감
           </span>
           {legendExtra && <span>{legendExtra}</span>}
         </div>
@@ -202,7 +212,7 @@ function MealCell({
   const closed = closure ? (meal === "lunch" ? closure.lunch_closed : closure.dinner_closed) : false;
   const label = meal === "lunch" ? "중식" : "석식";
   const title = closed
-    ? `${label} 휴무${closure?.label ? ` — ${closure.label}` : ""}`
+    ? `${label} 휴무${closure?.label ? ` — ${closure.label}` : ""}${applied ? " · 신청됨(눌러서 취소)" : ""}`
     : locked
       ? `${label} 마감${applied ? " (신청됨)" : ""}`
       : applied
@@ -214,12 +224,26 @@ function MealCell({
     borderBottom: borderBottom ? "1px solid var(--line)" : "none", padding: 0, width: "100%",
   };
 
+  // 마감(locked)과 휴무(closed)는 반드시 다른 톤이어야 한다(둘 다 var(--panel2) 를 쓰면 구별이 안
+  // 된다는 지적) — 휴무는 옅은 panel2 + 대각선 빗금, 마감은 그보다 눌린 var(--line) 평면 톤(빗금 없음).
+  // 빗금은 "휴무"라는 기호로 이미 고정돼 있어 마감에 재사용하면 안 되고, 아이콘은 이 그리드의 데이터
+  // 칸에 상시 노출하지 않는 규칙(파일 상단 주석)을 지켜 title 툴팁에만 남긴다.
   let bg: string | undefined;
   if (closed) bg = "var(--panel2)";
-  else if (locked) bg = "var(--panel2)";
+  else if (locked) bg = "var(--line)";
 
+  // 휴무(빗금)와 신청(점)은 배타적이지 않다 — 신청된 뒤 관리자가 휴무로 바꾼 칸은 두 기호를
+  // 동시에 보여줘야 학생이 "신청한 줄" 알아채고 취소할 수 있다. 점을 별도 레이어(zIndex)에
+  // 올려 절대배치된 빗금(inset:0) 밑에 깔리지 않게 한다.
   const content = closed ? (
-    <HatchSwatch full />
+    <>
+      <HatchSwatch full />
+      {applied && (
+        <span style={{ position: "relative", zIndex: 1 }}>
+          <DotIcon color={locked ? "var(--dim)" : "var(--ink)"} />
+        </span>
+      )}
+    </>
   ) : applied ? (
     <DotIcon color={locked ? "var(--dim)" : "var(--ink)"} />
   ) : null;

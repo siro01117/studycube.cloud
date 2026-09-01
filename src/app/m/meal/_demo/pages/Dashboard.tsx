@@ -44,7 +44,12 @@ export function Dashboard({ onChange }: { onChange: () => void }) {
         <div>
           <div className="text-ink-500 text-[11px] tracking-[0.16em] uppercase font-semibold">Today</div>
           <h1 className="text-[38px] leading-tight font-semibold tracking-tight mt-0.5">{dateLabel}</h1>
-          <p className="text-ink-500 text-[13px] mt-1">오늘 들어가야 할 발주 수량</p>
+          <p className="text-ink-500 text-[13px] mt-1">
+            오늘 들어가야 할 발주 수량
+            {data.excludedClosed > 0 && (
+              <span className="text-red-500"> · 휴무 지정으로 {data.excludedClosed}건 제외됨</span>
+            )}
+          </p>
         </div>
         {refreshedLabel && <span className="text-ink-400 text-[11px] tabular-nums">{refreshedLabel}</span>}
       </div>

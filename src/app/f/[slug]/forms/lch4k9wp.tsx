@@ -9,14 +9,13 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import FormShell from "../../_shared/FormShell";
 import IdentityExpired from "../../_shared/IdentityExpired";
-import { LockPopup } from "../../_shared/LockedInfo";
 import { useIdentity, useRedirectIfNoIdentity, type StoredIdentity } from "../../_shared/useIdentity";
 import { useScrollFocusOn } from "../../_shared/useScrollFocus";
 import { getHubSlug } from "../../registry";
 import type { FormDef } from "../../registry";
 import {
   effectiveClosure, mealAvailable, mealLocked, dowOf, won, monthLabel, noticeLines,
-  daysInMonth, isoDate,
+  daysInMonth, isoDate, MEAL_LOCK_HOUR_MIN,
   type Closure, type MealType,
 } from "@/lib/lunch";
 import MealGrid from "../../../_shared/MealGrid";
@@ -33,8 +32,6 @@ export default function LunchForm({ def }: { def: FormDef }) {
   useRedirectIfNoIdentity(hydrated, identity, hubSlug);
   const [expired, setExpired] = useState(false);
   const [tab, setTab] = useState<Tab>("current");
-  const [nextOpen, setNextOpen] = useState<boolean | null>(null);
-  const [lockLines, setLockLines] = useState<string[] | null>(null);
   const [dirty, setDirty] = useState(false);
   const [done, setDone] = useState(false);
 
@@ -54,24 +51,7 @@ export default function LunchForm({ def }: { def: FormDef }) {
             {identity.studentName} 학생으로 확인되었어요.
           </div>
 
-          {!done && (
-            <TabsBar
-              tab={tab}
-              nextOpen={nextOpen}
-              onSelect={(t) => {
-                if (t === "next") {
-                  // nextOpen 이 아직 null(로딩 중)이면 서버 재검증에서 에러 텍스트로 갈리지 않도록
-                  // 탭 전환 자체를 막는다 — 열림/잠김 어느 쪽이든 같은 잠금 팝업 경로로 수렴시킨다.
-                  if (nextOpen === null) return;
-                  if (nextOpen === false) {
-                    setLockLines(["다음 달 신청은 25일부터 열려요"]);
-                    return;
-                  }
-                }
-                setTab(t);
-              }}
-            />
-          )}
+          {!done && <TabsBar tab={tab} onSelect={setTab} />}
 
           <MonthPanel
             key={tab}
@@ -81,37 +61,34 @@ export default function LunchForm({ def }: { def: FormDef }) {
             hubSlug={hubSlug}
             done={done}
             onExpired={onExpired}
-            onNextOpenKnown={setNextOpen}
             onDirtyChange={setDirty}
             onDoneChange={setDone}
           />
         </>
       )}
-      {lockLines && <LockPopup title="다음 달 신청" lines={lockLines} onClose={() => setLockLines(null)} />}
     </FormShell>
   );
 }
 
 // ---------------- 탭 ----------------
-function TabsBar({ tab, nextOpen, onSelect }: { tab: Tab; nextOpen: boolean | null; onSelect: (t: Tab) => void }) {
-  const nextLocked = nextOpen === false;
-  const nextPending = nextOpen === null;
+// 다음 달 탭은 날짜 제한 없이 항상 열려 있다(25일 규칙 폐지) — 아직 준비 안 된 달은 가격 미설정
+// 안내(PriceUnsetNotice)가 탭을 연 뒤 그 안에서 막는다.
+function TabsBar({ tab, onSelect }: { tab: Tab; onSelect: (t: Tab) => void }) {
   return (
     <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
       <TabButton active={tab === "current"} onClick={() => onSelect("current")}>
         이번 달
       </TabButton>
-      <TabButton active={tab === "next"} locked={nextLocked} dim={nextPending} onClick={() => onSelect("next")}>
+      <TabButton active={tab === "next"} onClick={() => onSelect("next")}>
         다음 달
-        {nextLocked && <LockSmallIcon />}
       </TabButton>
     </div>
   );
 }
 
 function TabButton({
-  active, locked, dim, onClick, children,
-}: { active: boolean; locked?: boolean; dim?: boolean; onClick: () => void; children: React.ReactNode }) {
+  active, onClick, children,
+}: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"
@@ -119,7 +96,7 @@ function TabButton({
       style={{
         flex: 1, height: 44, borderRadius: 12, border: `1px solid ${active ? "var(--accent)" : "var(--line)"}`,
         background: active ? "var(--accent-soft)" : "var(--card)",
-        color: active ? "var(--accent)" : locked || dim ? "var(--faint)" : "var(--ink)",
+        color: active ? "var(--accent)" : "var(--ink)",
         fontSize: 14, fontWeight: active ? 800 : 700, cursor: "pointer",
         display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
       }}
@@ -136,7 +113,7 @@ type PanelState =
   | { phase: "ready"; data: ReadyData };
 
 function MonthPanel({
-  tab, identity, slug, hubSlug, done, onExpired, onNextOpenKnown, onDirtyChange, onDoneChange,
+  tab, identity, slug, hubSlug, done, onExpired, onDirtyChange, onDoneChange,
 }: {
   tab: Tab;
   identity: StoredIdentity;
@@ -144,17 +121,14 @@ function MonthPanel({
   hubSlug: string;
   done: boolean;
   onExpired: () => void;
-  onNextOpenKnown: (v: boolean) => void;
   onDirtyChange: (v: boolean) => void;
   onDoneChange: (v: boolean) => void;
 }) {
   const [state, setState] = useState<PanelState>({ phase: "loading" });
+  // selected/original 은 사용자가 편집하는 값이라 state 로 둔다. priceMap/appliedLocked/lockedAll 은
+  // state.data 의 순수 파생값이라 아래 useMemo 로 뽑는다(별도 state 로 들면 동기화 실수 여지만 생긴다).
   const [selected, setSelected] = useState<Set<MealKey>>(new Set());
   const [original, setOriginal] = useState<Set<MealKey>>(new Set());
-  // 마감(잠김) & 이미 신청됨 — 그리는 dot 을 위한 부분집합.
-  const [appliedLocked, setAppliedLocked] = useState<Set<MealKey>>(new Set());
-  // 마감(잠김) 전체 — 신청 여부와 무관하게 이 달의 모든 잠긴 끼니(그리드 톤·비활성용).
-  const [lockedAll, setLockedAll] = useState<Set<MealKey>>(new Set());
   const [saving, startSave] = useTransition();
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const doneRef = useRef<HTMLDivElement>(null);
@@ -177,27 +151,12 @@ function MonthPanel({
         setState({ phase: "error", error: r.error });
         return;
       }
-      onNextOpenKnown(r.nextOpen);
       const unlocked = new Set<MealKey>();
-      const appliedLockedSet = new Set<MealKey>();
       for (const m of r.myMeals) {
-        const k = keyOf(m.date, m.meal_type);
-        if (mealLocked(m.date, m.meal_type, r.today, r.nowMin)) appliedLockedSet.add(k);
-        else unlocked.add(k);
-      }
-      // 마감 여부는 "신청했었는지"와 무관하게 mealLocked 그대로 화면에 반영한다(결함 1) — 한 번도
-      // 신청 안 한 과거 날짜도 잠긴 것으로 보이고 눌리지 않아야 한다.
-      const lockedAllSet = new Set<MealKey>();
-      for (let d = 1; d <= daysInMonth(r.month.year, r.month.month); d++) {
-        const iso = isoDate(r.month.year, r.month.month, d);
-        for (const meal of ["lunch", "dinner"] as MealType[]) {
-          if (mealLocked(iso, meal, r.today, r.nowMin)) lockedAllSet.add(keyOf(iso, meal));
-        }
+        if (!mealLocked(m.date, m.meal_type, r.today, r.nowMin)) unlocked.add(keyOf(m.date, m.meal_type));
       }
       setSelected(new Set(unlocked));
       setOriginal(unlocked);
-      setAppliedLocked(appliedLockedSet);
-      setLockedAll(lockedAllSet);
       setSaveErr(null);
       setState({ phase: "ready", data: r });
     });
@@ -208,6 +167,31 @@ function MonthPanel({
 
   const dirty = useMemo(() => !setsEqual(selected, original), [selected, original]);
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
+
+  // priceMap: 저장된 끼니의 단가 스냅샷(lm.price, 관리자 화면 actions.ts listApps 과 같은 원칙).
+  // appliedLocked: 마감 & 이미 신청됨(dot 표시용). lockedAll: 이 달의 모든 잠긴 끼니(그리드 톤·비활성용,
+  // 신청 여부 무관 — 한 번도 신청 안 한 과거 날짜도 잠긴 것으로 보여야 한다).
+  const { priceMap, appliedLocked, lockedAll } = useMemo(() => {
+    if (state.phase !== "ready") {
+      return { priceMap: new Map<MealKey, number>(), appliedLocked: new Set<MealKey>(), lockedAll: new Set<MealKey>() };
+    }
+    const r = state.data;
+    const appliedLockedSet = new Set<MealKey>();
+    const priceMapNext = new Map<MealKey, number>();
+    for (const m of r.myMeals) {
+      const k = keyOf(m.date, m.meal_type);
+      priceMapNext.set(k, m.price);
+      if (mealLocked(m.date, m.meal_type, r.today, r.nowMin)) appliedLockedSet.add(k);
+    }
+    const lockedAllSet = new Set<MealKey>();
+    for (let d = 1; d <= daysInMonth(r.month.year, r.month.month); d++) {
+      const iso = isoDate(r.month.year, r.month.month, d);
+      for (const meal of ["lunch", "dinner"] as MealType[]) {
+        if (mealLocked(iso, meal, r.today, r.nowMin)) lockedAllSet.add(keyOf(iso, meal));
+      }
+    }
+    return { priceMap: priceMapNext, appliedLocked: appliedLockedSet, lockedAll: lockedAllSet };
+  }, [state]);
 
   if (state.phase === "loading") {
     return <div style={{ fontSize: 13.5, color: "var(--dim)", textAlign: "center", padding: "24px 4px" }}>불러오고 있어요…</div>;
@@ -262,17 +246,35 @@ function MonthPanel({
   }
 
   const closureBy = new Map<string, Closure>(r.closures.map((c) => [c.date, c]));
-  // 결함 4: 관리자가 아직 가격을 정하지 않은 달(중식·석식 가격 모두 0) — 새로 신청하면 합계가
-  // 항상 0원이라 이상하므로, 새 신청 추가는 막고(기존 취소는 허용) 화면에 이유를 안내한다.
-  // 서버(lunch-actions.ts)도 같은 판정(month.lunch_price===0 && month.dinner_price===0)을 쓴다.
-  const priceUnset = r.month.lunch_price === 0 && r.month.dinner_price === 0;
+  // 가격 미설정은 달 전체(둘 다 0)가 아니라 끼니별로 본다 — 중식만 0원인 달이면 중식만 막고 석식은
+  // 정상 신청된다. 새 신청 추가만 막고 기존 취소는 허용한다. 서버(lunch-actions.ts)도 같은
+  // 판정(끼니별 price===0, existingSet 기준 집합 비교)을 쓴다.
+  const lunchPriceUnset = r.month.lunch_price === 0;
+  const dinnerPriceUnset = r.month.dinner_price === 0;
+  const priceUnsetOf = (meal: MealType) => (meal === "lunch" ? lunchPriceUnset : dinnerPriceUnset);
 
   const toggle = (date: string, meal: MealType) => {
     if (mealLocked(date, meal, r.today, r.nowMin)) return;
-    if (!mealAvailable(date, dowOf(date), meal, closureBy)) return;
     const k = keyOf(date, meal);
+    // 신청한 뒤 관리자가 휴무로 바꾼 날 — 새로 신청(추가)은 막되, "원래(이번 편집 세션을
+    // 시작할 때) 신청돼 있던" 칸은 이번 세션 동안 자유롭게 켜고 끌 수 있다(오탭으로 취소해도 되돌릴
+    // 수 있어야 한다 — original 기준으로 판단하므로 몇 번을 껐다 켜도 서버의 "새로 추가되는 휴무만
+    // 거부" 규칙과 어긋나지 않는다. existingSet 도 같은 시점 기준이다). mealAvailable 자체(순수 함수,
+    // 서버와 공유)는 건드리지 않고 이 호출부에서 "적용 범위"만 좁힌다.
+    if (!mealAvailable(date, dowOf(date), meal, closureBy)) {
+      if (!original.has(k)) return;
+      setSelected((prev) => {
+        const next = new Set(prev);
+        if (next.has(k)) next.delete(k);
+        else next.add(k);
+        return next;
+      });
+      return;
+    }
     const adding = !selected.has(k);
-    if (adding && priceUnset) return; // 가격 미정 달엔 새 신청 불가 — 취소(제거)는 그대로 허용
+    // 서버(existingSet)와 같은 기준: "원래(저장돼 있던) 끼니"를 세션 중 껐다 다시 켜는 것은 새 신청이
+    // 아니다 — original 기준으로 판단해야, 저장 전 상태로 돌아가는 것마저 막는 일이 없다.
+    if (adding && !original.has(k) && priceUnsetOf(meal)) return; // 가격 미정 끼니엔 새 신청 불가 — 취소는 그대로 허용
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(k)) next.delete(k);
@@ -289,7 +291,19 @@ function MonthPanel({
   };
   const lunchCount = countOf("lunch");
   const dinnerCount = countOf("dinner");
-  const total = lunchCount * r.month.lunch_price + dinnerCount * r.month.dinner_price;
+  // 총액은 이미 저장된 끼니는 저장 시점 단가 스냅샷(priceMap, lm.price)으로, 이번 세션에
+  // 새로 고른(아직 저장 안 된) 끼니만 현재 월 가격으로 계산한다 — 관리자 화면(actions.ts listApps)과
+  // 같은 원칙이라 가격을 바꿔도 학생 화면·관리 화면 총액이 어긋나지 않는다.
+  let total = 0;
+  for (const k of new Set([...selected, ...appliedLocked])) {
+    const saved = priceMap.get(k);
+    if (saved !== undefined) {
+      total += saved;
+    } else {
+      const meal = k.slice(k.lastIndexOf("|") + 1) as MealType;
+      total += meal === "lunch" ? r.month.lunch_price : r.month.dinner_price;
+    }
+  }
 
   const save = () => {
     setSaveErr(null);
@@ -318,10 +332,14 @@ function MonthPanel({
     });
   };
 
+  // 오늘은 항상 "이번 달" 탭 안에 있다 — 남은 시간 안내도 그 탭에서만 뜻이 있다.
+  const minutesLeft = tab === "current" ? MEAL_LOCK_HOUR_MIN - r.nowMin : null;
+
   return (
     <div>
-      <NoticeBox notice={r.month.notice} />
-      {priceUnset && <PriceUnsetNotice />}
+      <NoticeBox notice={r.month.notice} minutesLeft={minutesLeft} />
+      {/* 안내 배너는 둘 다 미설정일 때만 */}
+      {lunchPriceUnset && dinnerPriceUnset && <PriceUnsetNotice />}
       <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 10 }}>{monthLabel(r.month.year, r.month.month)}</div>
       <MealGrid
         year={r.month.year}
@@ -332,8 +350,13 @@ function MonthPanel({
         lockedSet={lockedAll}
         onMealClick={(date, meal) => toggle(date, meal)}
         isMealDisabled={(date, meal, closure, locked) => {
+          if (locked) return true;
           const closed = closure ? (meal === "lunch" ? closure.lunch_closed : closure.dinner_closed) : false;
-          return closed || locked;
+          if (!closed) return false;
+          // 휴무인 칸은 원칙적으로 클릭 불가지만, "원래(이번 편집 세션 시작 시점에) 신청돼
+          // 있던" 칸만은 계속 눌리게 둔다 — toggle 이 그 경우 켜고 끄기를 모두 허용하므로(되돌리기),
+          // 여기서도 selected 가 아니라 original 로 판단해야 취소 후 다시 켤 때 막히지 않는다.
+          return !original.has(keyOf(date, meal));
         }}
         legendExtra="칸을 눌러 신청·취소하세요"
       />
@@ -353,12 +376,27 @@ function MonthPanel({
 }
 
 // ---------------- 안내 ----------------
-function NoticeBox({ notice }: { notice: string | null }) {
+// 남은 시간은 서버가 요청 시점에 내려준 nowMin 스냅샷으로 한 번만 계산한다(클라에서 new Date() 금지
+// 원칙) — 화면을 오래 열어두면 낡으므로, 정확한 분 단위 대신 10분 단위로 내림해 "약" 을 붙인다.
+// 올림하면 마감을 넘긴 뒤에도 "시간 남음"이라 오도할 수 있어 내림만 쓴다.
+function timeLeftLabel(minutesLeft: number): string | null {
+  if (minutesLeft <= 0) return null;
+  const bucket = Math.floor(minutesLeft / 10) * 10;
+  if (bucket <= 0) return "곧 마감돼요";
+  const h = Math.floor(bucket / 60);
+  const m = bucket % 60;
+  const parts = [h > 0 ? `${h}시간` : "", m > 0 ? `${m}분` : ""].filter(Boolean).join(" ");
+  return `약 ${parts} 남았어요`;
+}
+
+function NoticeBox({ notice, minutesLeft }: { notice: string | null; minutesLeft: number | null }) {
   const lines = noticeLines(notice);
+  const timeLeft = minutesLeft === null ? null : timeLeftLabel(minutesLeft);
   return (
     <div style={{ border: "1px solid var(--line)", borderRadius: 12, background: "var(--panel2)", padding: "12px 14px", marginBottom: 16, display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--sub)" }}>도시락은 4층에서 받아 가세요.</div>
       <div style={{ fontSize: 12.5, color: "var(--sub)" }}>당일 오전 8시 전까지 신청·취소할 수 있어요.</div>
+      {timeLeft && <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--accent)" }}>오늘 신청 마감까지 {timeLeft}</div>}
       {lines.map((line, i) => (
         <div key={i} style={{ fontSize: 12.5, color: "var(--dim)" }}>
           {line}
@@ -428,14 +466,6 @@ function UserIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
       <circle cx="12" cy="7" r="4" />
-    </svg>
-  );
-}
-function LockSmallIcon() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="5" y="11" width="14" height="9" rx="2" />
-      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
     </svg>
   );
 }

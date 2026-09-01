@@ -84,12 +84,6 @@ export function mealLocked(iso: string, _meal: MealType, todayIso: string, nowKs
   return false;
 }
 
-// ---- 다음 달 신청 개방 판정(순수 함수) ----
-// 매월 25일(KST) 0시부터 다음 달 탭이 열린다. todayIso = "YYYY-MM-DD".
-export function nextMonthOpenDay(todayIso: string): boolean {
-  return Number(todayIso.slice(8, 10)) >= 25;
-}
-
 /** 연·월의 다음 달(연도 넘어감 처리 포함). */
 export function nextYm(year: number, month: number): { year: number; month: number } {
   return month === 12 ? { year: year + 1, month: 1 } : { year, month: month + 1 };
@@ -100,9 +94,8 @@ export const won = (n: number) => n.toLocaleString("ko-KR") + "원";
 export const noticeLines = (notice: string | null | undefined): string[] =>
   (notice ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
 
-// 첫 달 생성 시 기본 주의사항 (도시락앱 DEFAULT_NOTICE 이식).
-export const DEFAULT_NOTICE = `도시락은 완전 신청제로 운영되며 당일 신청은 불가합니다.
-결제는 선불입니다.
-신청한 도시락을 먹지 않았더라도 환불이 되지 않습니다.
-도시락 취소는 일주일 전 까지 가능합니다.
-결제는 카운터에 문의 해주세요.`;
+// 첫 달 생성 시 기본 주의사항. 마감 시각(당일 오전 8시)·수령 장소(4층)는 학생 폼(lch4k9wp.tsx)의
+// NoticeBox 가 고정 문구로 이미 보여주므로 여기서는 반복하지 않는다 — 이 값은 관리자가 달마다
+// 자유롭게 고쳐 쓰는 나머지 안내(결제·환불 정책)만 담는다.
+export const DEFAULT_NOTICE = `신청했다면 먹지 않았더라도 환불이 되지 않습니다.
+결제는 카운터에 문의해주세요.`;

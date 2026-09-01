@@ -5,21 +5,27 @@
 // 고쳐 쓰는 상태 저장이라서 다른 공개 폼들과 저장 방식이 다르다.
 //
 // 본인확인은 다른 공개 폼과 같은 원칙 — 세션에 저장된 studentId 를 신뢰하지 않고 이름+코드로 다시 찾는다.
-// 마감 판정(mealLocked)·다음 달 개방 판정(nextMonthOpenDay)은 src/lib/lunch.ts 의 순수 함수를 그대로
-// 쓴다 — 이 파일과 화면(lch4k9wp.tsx)이 같은 함수를 써야 클라·서버 판정이 어긋나지 않는다.
+// 마감 판정(mealLocked)은 src/lib/lunch.ts 의 순수 함수를 그대로 쓴다 — 이 파일과 화면(lch4k9wp.tsx)이
+// 같은 함수를 써야 클라·서버 판정이 어긋나지 않는다.
+// 다음 달 탭은 날짜 제한 없이 항상 연다(과거엔 25일부터만 열었으나 폐지) — "아직 준비 안 된 달"
+// 가드는 가격 미설정 체크(priceUnset, 아래 saveLunchOrder)가 더 정확하게 이미 수행한다.
 import { db } from "@/lib/db";
 import { ready } from "@/lib/bootstrap";
 import { findStudent, publicAuthError } from "@/lib/public-auth";
 import { getOrCreateMonth, listClosures } from "@/lib/lunch-server";
 import { todayKey, minuteOfKST } from "@/lib/date";
 import {
-  dowOf, mealAvailable, mealLocked, nextMonthOpenDay, nextYm,
+  dowOf, mealAvailable, mealLocked, nextYm,
   type LunchMonth, type Closure, type MealType,
 } from "@/lib/lunch";
 
 const s = (v: FormDataEntryValue | null): string => String(v ?? "").trim();
 const MAX_MEALS = 100; // 한 달 최대 슬롯(≈62)보다 넉넉한 상한
 export type Tab = "current" | "next";
+
+/** 끼니 종류 → 그 달의 단가. 여러 곳에서 같은 삼항식이 반복되던 것을 하나로 묶었다. */
+const mealPrice = (month: LunchMonth, mealType: MealType): number =>
+  mealType === "lunch" ? month.lunch_price : month.dinner_price;
 
 async function branchId(): Promise<string | null> {
   const r = await db.query<{ id: string }>(`select id from branch where code='HQ' limit 1`);
@@ -50,11 +56,10 @@ async function verifyIdentity(formData: FormData): Promise<IdentityResult> {
   return { ok: true, studentId: match.id, studentName: match.name, testBypass: false };
 }
 
-/** tab → 대상 연·월. "next" 인데 아직 25일 전이면 ok:false(클라가 잠긴 탭을 우회 호출한 경우 대비). */
+/** tab → 대상 연·월. "next" 는 날짜 제한 없이 항상 다음 달을 연다. */
 function resolveYm(tab: Tab, today: string): { ok: true; year: number; month: number } | { ok: false; error: string } {
   const [y, m] = today.split("-").map(Number);
   if (tab === "current") return { ok: true, year: y, month: m };
-  if (!nextMonthOpenDay(today)) return { ok: false, error: "다음 달 신청은 25일부터 열려요." };
   const nx = nextYm(y, m);
   return { ok: true, year: nx.year, month: nx.month };
 }
@@ -67,10 +72,13 @@ export type LunchDataResult =
       isTest: boolean;
       today: string;
       nowMin: number;
-      nextOpen: boolean; // 다음 달 탭 개방 여부(오늘 기준) — 클라가 탭 자체를 잠글지 결정
       month: LunchMonth;
       closures: Closure[];
-      myMeals: { date: string; meal_type: MealType }[];
+      // price = 신청 시점 단가 스냅샷(lunch_meal.price). 관리자 화면(actions.ts listApps)과 같은 원칙으로
+      // 학생 화면 총액도 이 값을 합산해야 한다(예전엔 학생 화면만 월의 "현재" 가격을 다시 곱해서
+      // 관리자 화면과 금액이 달라졌다). 아직 저장되지 않은(이번 세션에 새로 고른) 끼니는 여기 없다 —
+      // 그건 화면이 현재 월 가격으로 계산한다(저장하면 그 가격으로 굳으니까).
+      myMeals: { date: string; meal_type: MealType; price: number }[];
     };
 
 /** FormData: slug, name, code, (개발전용) test, tab("current"|"next"). */
@@ -81,7 +89,6 @@ export async function getLunchData(formData: FormData): Promise<LunchDataResult>
 
   const tab: Tab = s(formData.get("tab")) === "next" ? "next" : "current";
   const today = todayKey();
-  const nextOpen = nextMonthOpenDay(today);
   const ym = resolveYm(tab, today);
   if (!ym.ok) return { ok: false, error: ym.error };
 
@@ -92,16 +99,16 @@ export async function getLunchData(formData: FormData): Promise<LunchDataResult>
   const closures = await listClosures(month.id);
 
   if (id.testBypass || !id.studentId) {
-    return { ok: true, studentName: id.studentName, isTest: true, today, nowMin: nowMinKst(), nextOpen, month, closures, myMeals: [] };
+    return { ok: true, studentName: id.studentName, isTest: true, today, nowMin: nowMinKst(), month, closures, myMeals: [] };
   }
 
-  const meals = await db.query<{ date: string; meal_type: MealType }>(
-    `select lm.date::text as date, lm.meal_type from lunch_meal lm
+  const meals = await db.query<{ date: string; meal_type: MealType; price: number }>(
+    `select lm.date::text as date, lm.meal_type, lm.price from lunch_meal lm
        join lunch_order o on o.id = lm.order_id
       where o.month_id=$1 and o.student_id=$2 order by lm.date`,
     [month.id, id.studentId],
   );
-  return { ok: true, studentName: id.studentName, isTest: false, today, nowMin: nowMinKst(), nextOpen, month, closures, myMeals: meals.rows };
+  return { ok: true, studentName: id.studentName, isTest: false, today, nowMin: nowMinKst(), month, closures, myMeals: meals.rows };
 }
 
 export type SaveLunchResult = { ok: true } | { ok: false; error: string; kind?: "identity" };
@@ -158,40 +165,50 @@ export async function saveLunchOrder(formData: FormData): Promise<SaveLunchResul
   const closureBy = new Map(closures.map((c) => [c.date, c]));
   const todayEditable = nowMin < 8 * 60;
 
-  // 결함 4: 가격 미설정 달(중식·석식 가격 모두 0) — 신청이 "늘어나는" 경우만 거부한다. 원래
-  // meals.length > 0 이면 무조건 거부해서 전부 취소는 되는데 일부만 취소하는 건 막히는 모순이
-  // 있었다(취소는 언제나 가능해야 한다) — 이 함수가 교체 대상으로 삼는 "아직 마감 안된" 구간의
-  // 기존 개수와 비교해 늘어날 때만 막는다. 클라(lch4k9wp.tsx)와 같은 판정 기준을 쓴다.
-  const priceUnset = month.lunch_price === 0 && month.dinner_price === 0;
-  if (priceUnset && meals.length > 0) {
-    const existingCountRes = await db.query<{ cnt: string }>(
-      `select count(*)::text as cnt
-         from lunch_meal lm
-         join lunch_order o on o.id = lm.order_id
-        where o.month_id=$1 and o.student_id=$2 and (lm.date > $3 or ($4 and lm.date = $3))`,
-      [month.id, studentId, today, todayEditable],
-    );
-    const existingCount = Number(existingCountRes.rows[0]?.cnt ?? 0);
-    if (meals.length > existingCount) {
+  // 기존(교체 대상 구간 = 아직 마감 안 된 끼니)에 이미 있던 끼니 목록. 가격 미설정 가드("새로
+  // 추가될 때만 막는다")와 휴무 가드(마찬가지로 "새로 추가될 때만 막는다") 둘 다 이 집합을 기준으로
+  // 삼는다 — 한 번 조회로 재사용한다.
+  const existingRes = await db.query<{ date: string; meal_type: MealType }>(
+    `select lm.date::text as date, lm.meal_type
+       from lunch_meal lm
+       join lunch_order o on o.id = lm.order_id
+      where o.month_id=$1 and o.student_id=$2 and (lm.date > $3 or ($4 and lm.date = $3))`,
+    [month.id, studentId, today, todayEditable],
+  );
+  const existingSet = new Set(existingRes.rows.map((r) => `${r.date}|${r.meal_type}`));
+
+  // key 는 한 번만 만들어 아래 두 검사가 재사용한다. 검사 순서(가격 → 마감 → 휴무)를 지키려면
+  // 두 패스가 필요하다 — 한 패스로 합쳐 항목별로 번갈아 검사하면 뒤 항목의 가격 오류보다 앞 항목의
+  // 마감 오류가 먼저 나가 순서가 바뀐다.
+  const withKey = meals.map((mm) => ({ ...mm, key: `${mm.date}|${mm.meal_type}` }));
+
+  // 가격 미설정은 "달 전체(중식·석식 둘 다 0)"가 아니라 끼니별로 판정한다 — 중식만 0원인 달이면
+  // 중식만 막고 석식은 정상 신청된다(예전엔 둘 다 0일 때만 막아서 반쪽 가격 달이 샜다). 또한 개수
+  // 비교가 아니라 existingSet(위) 기준 집합 비교로 "새로 추가되는" 끼니만 본다 — 개수 비교였을
+  // 때는 취소 1 + 추가 1 처럼 총 개수는 같지만 알맹이가 바뀐 요청이 통과해 price=0 인 행이 몰래
+  // 들어올 수 있었다. 클라(lch4k9wp.tsx)와 같은 기준을 쓴다.
+  for (const mm of withKey) {
+    if (existingSet.has(mm.key)) continue; // 기존 유지는 항상 허용(취소는 별도로 항상 허용)
+    if (mealPrice(month, mm.meal_type) === 0) {
       return { ok: false, error: "이 달은 아직 가격이 정해지지 않았어요. 카운터에 문의해주세요." };
     }
   }
 
-  // 서버 재검증 — 클라가 잠긴(마감된) 끼니나 휴무일 끼니를 하나라도 보내면, 그 항목만 걸러내지 않고
-  // 요청 전체를 거부한다(클라·서버 판정이 어긋났다는 신호이므로 조용히 잘라내지 않는다).
-  for (const mm of meals) {
+  // 서버 재검증 — 클라가 잠긴(마감된) 끼니를 하나라도 보내면 요청 전체를 거부한다(클라·서버 판정이
+  // 어긋났다는 신호이므로 조용히 잘라내지 않는다). 휴무일 끼니는 원칙이 다르다: 관리자가 "신청이
+  // 이미 있던 날"을 나중에 휴무로 바꿀 수 있으므로, 이미 있던 휴무 끼니를 그대로 유지하거나 빼는
+  // 것(취소)은 항상 허용하고, "새로 추가"되는 휴무 끼니만 거부한다(가격 가드와 같은 원칙).
+  for (const mm of withKey) {
     if (mealLocked(mm.date, mm.meal_type, today, nowMin)) {
       return { ok: false, error: "마감된 끼니가 포함돼 있어요. 화면을 새로고침한 뒤 다시 시도해주세요." };
     }
-    if (!mealAvailable(mm.date, dowOf(mm.date), mm.meal_type, closureBy)) {
-      return { ok: false, error: "휴무일 끼니가 포함돼 있어요. 화면을 새로고침한 뒤 다시 시도해주세요." };
+    if (!mealAvailable(mm.date, dowOf(mm.date), mm.meal_type, closureBy) && !existingSet.has(mm.key)) {
+      return { ok: false, error: "휴무일에 새로 신청할 수는 없어요. 화면을 새로고침한 뒤 다시 시도해주세요." };
     }
   }
 
-  // 주문(월×학생) 확보. source는 최초 생성 시점에만 정해진다 — 이미 있는 행(관리자가 먼저 만든
-  // staff 신청)을 학생이 고치더라도 source 는 바뀌지 않는다(do update 절에 source 를 넣지 않음).
   const ord = await db.query<{ id: string }>(
-    `insert into lunch_order(branch_id, month_id, student_id, source) values ($1,$2,$3,'student')
+    `insert into lunch_order(branch_id, month_id, student_id) values ($1,$2,$3)
      on conflict (month_id, student_id) do update set updated_at=now()
      returning id`,
     [branch, month.id, studentId],
@@ -208,18 +225,21 @@ export async function saveLunchOrder(formData: FormData): Promise<SaveLunchResul
       [orderId, today, todayEditable],
     );
   } else {
-    const params: (string | boolean)[] = [orderId, today, todayEditable];
+    const params: (string | number | boolean)[] = [orderId, today, todayEditable];
     const insVals: string[] = [];
     const pairVals: string[] = [];
     for (const mm of meals) {
       const i = params.length;
-      params.push(mm.date, mm.meal_type);
-      insVals.push(`($1, $${i + 1}::date, $${i + 2})`);
+      const price = mealPrice(month, mm.meal_type);
+      params.push(mm.date, mm.meal_type, price);
+      insVals.push(`($1, $${i + 1}::date, $${i + 2}, $${i + 3})`);
       pairVals.push(`($${i + 1}::date, $${i + 2})`);
     }
+    // price 는 신청 시점 단가 스냅샷 — on conflict do nothing 이므로 이미 있던(유지되는) 행의 기존
+    // 스냅샷은 덮어쓰지 않는다. 새로 추가되는 행만 지금 월 가격으로 기록된다.
     await db.query(
       `with ins as (
-         insert into lunch_meal(order_id, date, meal_type)
+         insert into lunch_meal(order_id, date, meal_type, price)
          values ${insVals.join(", ")}
          on conflict (order_id, date, meal_type) do nothing
        )

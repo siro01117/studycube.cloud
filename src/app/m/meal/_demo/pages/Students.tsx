@@ -1,21 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Plus, Trash2, CheckCircle2, Circle, Search, X, ChevronDown } from 'lucide-react'
+import { CheckCircle2, Circle, Search, X, ChevronDown } from 'lucide-react'
 import clsx from 'clsx'
-import { PillButton, spring } from '../components/Motion'
+import { spring } from '../components/Motion'
 import { useDialog } from '../components/Dialog'
-import { ApplicationDialog } from './ApplicationDialog'
 import type { Application, Month } from '../types'
 
 type PayFilter = 'all' | 'unpaid' | 'paid'
 
 export function Students({ year: initYear, month: initMonth, onChange }: { year: number; month: number; onChange: () => void }) {
-  const { toast, confirm } = useDialog()
+  const { toast } = useDialog()
   const [year, setYear] = useState(initYear)
   const [month, setMonth] = useState(initMonth)
   const [m, setM] = useState<Month | null>(null)
   const [apps, setApps] = useState<Application[]>([])
-  const [adding, setAdding] = useState(false)
   const [filter, setFilter] = useState('')
   const [payFilter, setPayFilter] = useState<PayFilter>('all')
   const [payPopup, setPayPopup] = useState<{ id: string; anchor: DOMRect } | null>(null)
@@ -41,23 +39,13 @@ export function Students({ year: initYear, month: initMonth, onChange }: { year:
   useEffect(() => { load() }, [year, month])
   if (!m) return null
 
-  const onSaved = async () => { setAdding(false); await load(); onChange() }
-
-  const onDelete = async (id: string) => {
-    const ok = await confirm({ title: '신청서 삭제', message: '정말로 삭제할까요? 이 작업은 되돌릴 수 없습니다.', confirmLabel: '삭제', danger: true })
-    if (!ok) return
-    try {
-      await window.api.deleteApp(id); await load(); onChange()
-      toast('삭제되었습니다.')
-    } catch (e) {
-      toast(e instanceof Error ? e.message : '삭제하지 못했습니다.', 'error')
-    }
-  }
-
+  // 총액은 각 끼니에 저장된 단가 스냅샷(mm.price) 합계로 낸다 — 월의 "현재" 가격(m.lunch_price
+  // 등)을 다시 곱하지 않는다. 그래야 관리자가 가격을 바꿔도 이미 신청·완납된 건의 총액·완납 상태가
+  // 흔들리지 않는다.
   const getStats = (a: Application) => {
     const lunch = a.meals.filter((mm) => mm.meal_type === 'lunch').length
     const dinner = a.meals.filter((mm) => mm.meal_type === 'dinner').length
-    const total = lunch * m.lunch_price + dinner * m.dinner_price
+    const total = a.meals.reduce((sum, mm) => sum + (mm.price || 0), 0)
     const remaining = total - (a.paid_amount || 0)
     return { lunch, dinner, total, remaining }
   }
@@ -131,15 +119,14 @@ export function Students({ year: initYear, month: initMonth, onChange }: { year:
             ))}
           </div>
 
-          <PillButton variant="primary" icon={<Plus size={15} />} onClick={() => setAdding(true)}>신청서 추가</PillButton>
         </div>
       </div>
 
       <div className="max-w-[1080px] mx-auto card p-3">
-        <div className="grid grid-cols-[1.6fr_56px_70px_56px_56px_1.2fr_110px_90px] gap-3 px-3 py-2 text-[11px] uppercase tracking-[0.12em] font-semibold text-ink-400">
+        <div className="grid grid-cols-[1.6fr_56px_70px_56px_56px_1.2fr_110px] gap-3 px-3 py-2 text-[11px] uppercase tracking-[0.12em] font-semibold text-ink-400">
           <span>이름</span><span className="text-center">층</span><span className="text-center">좌석</span>
           <span className="text-center">중식</span><span className="text-center">석식</span>
-          <span className="text-right">총액 / 잔액</span><span>납입 상태</span><span className="text-right">관리</span>
+          <span className="text-right">총액 / 잔액</span><span>납입 상태</span>
         </div>
 
         <div className="flex flex-col gap-1.5 mt-1">
@@ -147,7 +134,7 @@ export function Students({ year: initYear, month: initMonth, onChange }: { year:
             {allFiltered.length === 0 && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                 className="text-center py-14 text-ink-400 text-[13px]">
-                {payFilter === 'unpaid' ? '미납자가 없습니다.' : '신청서를 추가해주세요.'}
+                {payFilter === 'unpaid' ? '미납자가 없습니다.' : '아직 신청한 학생이 없습니다.'}
               </motion.div>
             )}
             {allFiltered.map((a, i) => {
@@ -158,20 +145,14 @@ export function Students({ year: initYear, month: initMonth, onChange }: { year:
                 <motion.div key={a.id} layout
                   initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98 }}
                   transition={{ ...spring, delay: 0.015 * i }}
-                  className="grid grid-cols-[1.6fr_56px_70px_56px_56px_1.2fr_110px_90px] gap-3 px-3 py-3 rounded-xl bg-surface items-center hover:bg-ink-50 transition-colors"
+                  className="grid grid-cols-[1.6fr_56px_70px_56px_56px_1.2fr_110px] gap-3 px-3 py-3 rounded-xl bg-surface items-center hover:bg-ink-50 transition-colors"
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div className="w-8 h-8 rounded-full bg-ink-900 text-white flex items-center justify-center text-[12px] font-bold shrink-0">
                       {a.name.slice(0, 1)}
                     </div>
                     <div className="min-w-0">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="font-semibold text-[13px] truncate">{a.name}</span>
-                        <span className={clsx('shrink-0 rounded-full px-1.5 py-[1px] text-[10px] font-medium',
-                          a.source === 'student' ? 'bg-ink-100 text-ink-500' : 'bg-emerald-50 text-emerald-600')}>
-                          {a.source === 'student' ? '학생 제출' : '카운터 등록'}
-                        </span>
-                      </div>
+                      <span className="font-semibold text-[13px] truncate">{a.name}</span>
                       {a.memo && <div className="text-[11px] text-ink-400 truncate">{a.memo}</div>}
                     </div>
                   </div>
@@ -200,13 +181,6 @@ export function Students({ year: initYear, month: initMonth, onChange }: { year:
                     </motion.button>
                     {a.paid_date && <div className="text-[10px] text-ink-400 mt-0.5">{a.paid_date}</div>}
                   </div>
-                  <div className="flex justify-end gap-1">
-                    {a.source === 'student' ? (
-                      <IBtn onClick={() => {}} title="학생이 직접 신청한 신청서는 삭제할 수 없습니다" disabled><Trash2 size={13} /></IBtn>
-                    ) : (
-                      <IBtn onClick={() => onDelete(a.id)} title="삭제" danger><Trash2 size={13} /></IBtn>
-                    )}
-                  </div>
                 </motion.div>
               )
             })}
@@ -224,13 +198,6 @@ export function Students({ year: initYear, month: initMonth, onChange }: { year:
           onSaved={async () => { setPayPopup(null); await load(); onChange(); toast('납입 정보가 저장되었습니다.', 'success') }}
         />
       )}
-
-      <ApplicationDialog
-        open={adding}
-        year={year} month={month} monthRow={m}
-        onClose={() => setAdding(false)}
-        onSaved={async () => { setAdding(false); await load(); onChange(); toast('신청서가 저장되었습니다.', 'success') }}
-      />
     </div>
   )
 }
@@ -244,7 +211,7 @@ function PayPopup({ app, anchor, monthRow, onClose, onSaved }: {
 
   const lunch = app.meals.filter((m) => m.meal_type === 'lunch').length
   const dinner = app.meals.filter((m) => m.meal_type === 'dinner').length
-  const total = lunch * monthRow.lunch_price + dinner * monthRow.dinner_price
+  const total = app.meals.reduce((sum, mm) => sum + (mm.price || 0), 0)
   const remaining = total - amount
 
   const save = async () => {
@@ -316,13 +283,3 @@ function Fld({ label, children }: { label: string; children: React.ReactNode }) 
   )
 }
 
-function IBtn({ children, onClick, title, danger, disabled }: { children: React.ReactNode; onClick: () => void; title: string; danger?: boolean; disabled?: boolean }) {
-  return (
-    <motion.button whileHover={disabled ? undefined : { y: -1 }} whileTap={disabled ? undefined : { scale: 0.9 }} transition={spring}
-      title={title} onClick={disabled ? undefined : onClick} disabled={disabled}
-      className={clsx('w-7 h-7 rounded-full flex items-center justify-center transition-colors',
-        disabled ? 'text-ink-300 cursor-not-allowed' : danger ? 'hover:bg-red-50 text-ink-400 hover:text-red-500' : 'hover:bg-ink-100 text-ink-500')}>
-      {children}
-    </motion.button>
-  )
-}

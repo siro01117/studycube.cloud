@@ -13,7 +13,7 @@ import { ready } from "@/lib/bootstrap";
 import { getOrCreateMonth, listClosures as listClosuresDb } from "@/lib/lunch-server";
 import { todayKey } from "@/lib/date";
 import { asJson } from "@/lib/jsonb";
-import type { LunchMonth, Closure, MealType } from "@/lib/lunch";
+import { dowOf, mealAvailable, type LunchMonth, type Closure, type MealType } from "@/lib/lunch";
 
 async function branchOf(): Promise<string> {
   await ready();
@@ -92,17 +92,17 @@ export type AppRow = {
   id: string; month_id: string; studentId: string;
   name: string; seat: string | null; floor: number | null;
   paid: boolean; paid_amount: number; paid_date: string | null; memo: string;
-  source: "student" | "staff";
-  meals: { date: string; meal_type: MealType }[];
+  // price = 신청 시점 단가 스냅샷 — 화면은 이 값을 합산해 총액을 낸다. 월의 "현재" 가격을
+  // 다시 곱하지 않는다(그러면 관리자가 가격을 바꿀 때마다 과거 신청의 총액·완납 상태가 흔들린다).
+  meals: { date: string; meal_type: MealType; price: number }[];
 };
 
 const APP_SELECT = `
   select o.id, o.month_id, o.student_id as "studentId",
          s.name, seat.label as seat, room.floor as floor,
          o.paid, o.paid_amount, o.paid_date::text as paid_date, coalesce(o.memo, '') as memo,
-         o.source,
          coalesce(
-           json_agg(json_build_object('date', lm.date::text, 'meal_type', lm.meal_type) order by lm.date)
+           json_agg(json_build_object('date', lm.date::text, 'meal_type', lm.meal_type, 'price', lm.price) order by lm.date)
            filter (where lm.date is not null),
            '[]'
          ) as meals
@@ -120,12 +120,11 @@ function rowToApp(r: Record<string, unknown>): AppRow {
     name: r.name as string,
     seat: (r.seat as string | null) ?? null,
     floor: (r.floor as number | null) ?? null,
-    source: (r.source as "student" | "staff") ?? "staff",
     paid: !!r.paid,
     paid_amount: (r.paid_amount as number) ?? 0,
     paid_date: (r.paid_date as string | null) ?? null,
     memo: (r.memo as string) ?? "",
-    meals: (asJson(r.meals) as { date: string; meal_type: MealType }[]) ?? [],
+    meals: (asJson(r.meals) as { date: string; meal_type: MealType; price: number }[]) ?? [],
   };
 }
 
@@ -141,103 +140,23 @@ export async function listApps(monthId: string): Promise<AppRow[]> {
     order by room.floor nulls last, s.name`,
     [monthId, branchId],
   );
-  return r.rows.map(rowToApp);
-}
-
-// ---------------- 8. createApp (신규 등록 전용) ----------------
-// 결제 정보만 고치는 경로는 updatePayment(아래)로 분리됐다 — 이 함수는 새 신청서를 만들 때만
-// 부른다(ApplicationDialog.tsx: 학생 검색 → 신규 등록). 이미 신청서가 있는 학생은 검색 결과에서
-// 걸러지므로 정상 경로로는 기존 행을 다시 여기로 보낼 일이 없다. 그래도 우회 호출에 대비해
-// 아래 "끼니 변경 금지" 가드는 남겨둔다 — 클라만 막으면 뚫린다, 서버가 진짜 관문이다.
-export type CreateAppPayload = {
-  monthId: string; studentId: string;
-  paidAmount: number; paidDate: string | null; memo: string;
-  meals: { date: string; meal_type: MealType }[];
-};
-export async function createApp(payload: CreateAppPayload): Promise<string> {
-  const branchId = await branchOfManage();
-  const month = await assertMonth(payload.monthId, branchId);
-
-  const st = await db.query<{ id: string }>(
-    `select id from student where id=$1 and branch_id=$2`,
-    [payload.studentId, branchId],
-  );
-  if (!st.rows[0]) throw new Error("학생을 찾을 수 없습니다");
-
-  const ymPrefix = `${month.year}-${String(month.month).padStart(2, "0")}`;
-  const meals = payload.meals.filter((m) => m.date.startsWith(ymPrefix) && (m.meal_type === "lunch" || m.meal_type === "dinner"));
-  const lunchCnt = meals.filter((m) => m.meal_type === "lunch").length;
-  const dinnerCnt = meals.filter((m) => m.meal_type === "dinner").length;
-  const total = lunchCnt * month.lunch_price + dinnerCnt * month.dinner_price;
-  const paidAmount = Math.max(0, payload.paidAmount || 0);
-  const paid = paidAmount >= total && total > 0;
-
-  // 신청서 수정 기능은 없앴다 — 이미 등록된 신청(학생 제출/카운터 등록 무관)의 끼니는 그 무엇으로도
-  // 못 고친다(결제만 고치고 싶으면 updatePayment 를 써야 한다).
-  const existing = await db.query<{ id: string; date: string; meal_type: MealType }>(
-    `select o.id, lm.date::text as date, lm.meal_type
-       from lunch_order o
-       left join lunch_meal lm on lm.order_id = o.id
-      where o.month_id=$1 and o.student_id=$2 and o.branch_id=$3`,
-    [payload.monthId, payload.studentId, branchId],
-  );
-  if (existing.rows.length) {
-    const existingKeys = new Set(
-      existing.rows.filter((r) => r.date != null).map((r) => `${r.date}|${r.meal_type}`),
-    );
-    const nextKeys = new Set(meals.map((m) => `${m.date}|${m.meal_type}`));
-    const changed =
-      existingKeys.size !== nextKeys.size || [...existingKeys].some((k) => !nextKeys.has(k));
-    if (changed) {
-      throw new Error("이미 등록된 신청서의 끼니는 수정할 수 없습니다. 결제 정보만 수정해주세요.");
-    }
-  }
-
-  // source 는 최초 생성 시점에만 정해진다 — 이미 있는 행(학생이 먼저 낸 신청)을 관리자가 결제만
-  // 고치더라도 source 는 'staff' 로 바뀌지 않는다(do update 절에 source 를 넣지 않음).
-  const ord = await db.query<{ id: string }>(
-    `insert into lunch_order(branch_id, month_id, student_id, source, paid, paid_amount, paid_date, memo)
-     values ($1,$2,$3,'staff',$4,$5,$6,$7)
-     on conflict (month_id, student_id) do update
-       set paid=$4, paid_amount=$5, paid_date=$6, memo=$7, updated_at=now()
-     returning id`,
-    [branchId, payload.monthId, payload.studentId, paid, paidAmount, payload.paidDate || null, payload.memo || ""],
-  );
-  const orderId = ord.rows[0].id;
-
-  if (meals.length === 0) {
-    await db.query(`delete from lunch_meal where order_id=$1`, [orderId]);
-  } else {
-    const params: unknown[] = [orderId];
-    const insVals: string[] = [];
-    const pairVals: string[] = [];
-    for (const m of meals) {
-      const i = params.length;
-      params.push(m.date, m.meal_type);
-      insVals.push(`($1, $${i + 1}::date, $${i + 2})`);
-      pairVals.push(`($${i + 1}::date, $${i + 2})`);
-    }
-    await db.query(
-      `with ins as (
-         insert into lunch_meal(order_id, date, meal_type)
-         values ${insVals.join(", ")}
-         on conflict (order_id, date, meal_type) do nothing
-       )
-       delete from lunch_meal
-        where order_id=$1
-          and (date, meal_type) not in (${pairVals.join(", ")})`,
-      params,
-    );
-  }
-
-  return orderId;
+  // 신청 뒤 관리자가 휴무로 바꾼 끼니는 발주(todayOrders)에서 빼듯 청구 화면(Students.tsx의
+  // getStats/PayPopup)에서도 뺀다 — 만들지도 않은 도시락이 청구되면 안 된다. 여기서 meals 배열 자체를
+  // 걸러내면 화면은 손대지 않아도 자동으로 같은 기준을 따른다(updatePayment 도 같은 기준을 쓴다).
+  const closures = await listClosuresDb(monthId);
+  const closureBy = new Map(closures.map((c) => [c.date, c]));
+  return r.rows.map(rowToApp).map((a) => ({
+    ...a,
+    meals: a.meals.filter((mm) => mealAvailable(mm.date, dowOf(mm.date), mm.meal_type, closureBy)),
+  }));
 }
 
 // ---------------- 8b. updatePayment (결제 정보 저장 전용 — lunch_meal 은 손대지 않는다) ----------------
 // PayPopup(Students.tsx)이 부른다. 화면이 들고 있는 app.meals 는 그 사이 학생이 폼에서 신청을
-// 바꿨을 수 있어 낡았을 수 있다 — createApp 처럼 "끼니 변경 여부"를 클라 값으로 판단하면 그
-// 낡은 값과 서버 실제 값이 어긋나 결제만 저장하려다 엉뚱하게 거부당한다. 그래서 이 경로는 끼니를
-// 아예 안 받는다: 총액은 서버가 lunch_meal 에서 직접 세어 계산한다.
+// 바꿨을 수 있어 낡았을 수 있다 — "끼니 변경 여부"를 클라 값으로 판단하면 그 낡은 값과 서버 실제
+// 값이 어긋나 결제만 저장하려다 엉뚱하게 거부당한다. 그래서 이 경로는 끼니를 아예 안 받는다:
+// 총액은 서버가 lunch_meal 에서 직접 세어 계산한다. 도시락 등록·수정은 학생 폼(lunch-actions.ts)
+// 전용이다 — 관리자 쪽에서 lunch_meal 을 쓰는 경로는 이 파일에 없다.
 export type UpdatePaymentPayload = {
   orderId: string;
   paidAmount: number;
@@ -247,23 +166,25 @@ export type UpdatePaymentPayload = {
 export async function updatePayment(payload: UpdatePaymentPayload): Promise<void> {
   const branchId = await branchOfManage();
 
-  const ord = await db.query<{ id: string; lunch_price: number; dinner_price: number }>(
-    `select o.id, mo.lunch_price, mo.dinner_price
-       from lunch_order o
-       join lunch_month mo on mo.id = o.month_id
-      where o.id=$1 and o.branch_id=$2`,
+  const ord = await db.query<{ id: string; month_id: string }>(
+    `select o.id, o.month_id from lunch_order o where o.id=$1 and o.branch_id=$2`,
     [payload.orderId, branchId],
   );
   if (!ord.rows[0]) throw new Error("신청서를 찾을 수 없습니다");
-  const { lunch_price, dinner_price } = ord.rows[0];
 
-  const meals = await db.query<{ meal_type: MealType }>(
-    `select meal_type from lunch_meal where order_id=$1`,
+  // 총액은 신청 시점 단가 스냅샷(lunch_meal.price) 합계로 낸다 — 월의 "현재" 가격을 다시
+  // 곱하지 않는다. 그래야 관리자가 가격을 바꿔도 이미 완납한 신청이 미납으로 되돌아가지 않는다.
+  // 그 중 신청 뒤 휴무로 바뀐 끼니는 listApps 와 같은 기준(mealAvailable)으로 빼고 합산한다 —
+  // 만들지도 않은 도시락이 청구되면 안 된다.
+  const closures = await listClosuresDb(ord.rows[0].month_id);
+  const closureBy = new Map(closures.map((c) => [c.date, c]));
+  const mealsRes = await db.query<{ date: string; meal_type: MealType; price: number }>(
+    `select date::text as date, meal_type, price from lunch_meal where order_id=$1`,
     [payload.orderId],
   );
-  const lunchCnt = meals.rows.filter((r) => r.meal_type === "lunch").length;
-  const dinnerCnt = meals.rows.filter((r) => r.meal_type === "dinner").length;
-  const total = lunchCnt * lunch_price + dinnerCnt * dinner_price;
+  const total = mealsRes.rows
+    .filter((mm) => mealAvailable(mm.date, dowOf(mm.date), mm.meal_type, closureBy))
+    .reduce((sum, mm) => sum + mm.price, 0);
   const paidAmount = Math.max(0, payload.paidAmount || 0);
   const paid = paidAmount >= total && total > 0;
 
@@ -273,18 +194,25 @@ export async function updatePayment(payload: UpdatePaymentPayload): Promise<void
   );
 }
 
-// ---------------- 9. deleteApp ----------------
-export async function deleteApp(id: string): Promise<void> {
+// ---------------- 9. mealCountOn (특정 날짜의 끼니별 기존 신청 건수) ----------------
+// MonthSettings 가 휴무 지정(setClosure) 직전에 부른다 — 이미 신청이 있는 날을 휴무로 바꾸면
+// 그 학생들은 취소만 가능해지므로, 지정 전에 관리자에게 건수를 보여주고 확인받는다.
+export async function mealCountOn(monthId: string, date: string): Promise<{ lunch: number; dinner: number }> {
+  // 휴무 지정(setClosure) 직전 확인 용도로만 쓰이는 관리 흐름 — 형제 쓰기 경로(setClosure 등)와
+  // 같이 조회 권한(lunch.view)이 아니라 관리 권한(lunch.manage)으로 인가한다.
   const branchId = await branchOfManage();
-  const r = await db.query<{ source: string }>(
-    `select source from lunch_order where id=$1 and branch_id=$2`,
-    [id, branchId],
+  await assertMonth(monthId, branchId);
+  const r = await db.query<{ meal_type: MealType; cnt: string }>(
+    `select lm.meal_type, count(*)::text as cnt
+       from lunch_meal lm
+       join lunch_order o on o.id = lm.order_id
+      where o.month_id=$1 and lm.date=$2
+      group by lm.meal_type`,
+    [monthId, date],
   );
-  if (!r.rows[0]) return; // 이미 없음 — 조용히 통과(idempotent 삭제)
-  if (r.rows[0].source === "student") {
-    throw new Error("학생이 직접 신청한 신청서는 관리자가 삭제할 수 없습니다.");
-  }
-  await db.query(`delete from lunch_order where id=$1 and branch_id=$2`, [id, branchId]);
+  const out = { lunch: 0, dinner: 0 };
+  for (const row of r.rows) out[row.meal_type] = Number(row.cnt);
+  return out;
 }
 
 // ---------------- 10. todayOrders (층별 분류 → 신청자 명단) ----------------
@@ -293,12 +221,15 @@ export type TodayOrders = {
   lunchTotal: number;
   dinnerTotal: number;
   applicants: { name: string; seat: string | null; meal_type: MealType }[];
+  // 신청은 있었지만 그 사이 관리자가 휴무로 지정한 끼니는 발주 수량·명단에서 뺀다(학생은
+  // 취소만 가능한 상태로 화면에 남는다). 그 건수를 완전히 숨기지 않고 관리자에게 알린다.
+  excludedClosed: number;
 };
 export async function todayOrders(): Promise<TodayOrders> {
   const branchId = await branchOf();
   const today = todayKey();
-  const r = await db.query<{ name: string; seat: string | null; meal_type: MealType }>(
-    `select s.name, seat.label as seat, lm.meal_type
+  const r = await db.query<{ name: string; seat: string | null; meal_type: MealType; date: string }>(
+    `select s.name, seat.label as seat, lm.meal_type, lm.date::text as date
        from lunch_meal lm
        join lunch_order o on o.id = lm.order_id
        join student s on s.id = o.student_id
@@ -307,27 +238,24 @@ export async function todayOrders(): Promise<TodayOrders> {
       order by lm.meal_type, s.name`,
     [today, branchId],
   );
-  const lunchTotal = r.rows.filter((x) => x.meal_type === "lunch").length;
-  const dinnerTotal = r.rows.filter((x) => x.meal_type === "dinner").length;
-  return { today, lunchTotal, dinnerTotal, applicants: r.rows };
-}
 
-// ---------------- 신청서 다이얼로그용 학생 검색(신설 — window.api 11개엔 없던 기능) ----------------
-export type StudentCandidate = { id: string; name: string; seat: string | null; floor: number | null; alreadyApplied: boolean };
-export async function searchStudents(monthId: string, query: string): Promise<StudentCandidate[]> {
-  const branchId = await branchOfManage();
-  await assertMonth(monthId, branchId);
-  const q = query.trim();
-  if (!q) return [];
-  const r = await db.query<{ id: string; name: string; seat: string | null; floor: number | null; applied: boolean }>(
-    `select s.id, s.name, seat.label as seat, room.floor as floor,
-            exists(select 1 from lunch_order o where o.month_id=$2 and o.student_id=s.id) as applied
-       from student s
-       left join seat on seat.current_student_id = s.id and seat.branch_id = s.branch_id
-       left join room on room.id = seat.room_id
-      where s.branch_id=$1 and s.status='enrolled' and s.name ilike $3
-      order by s.name limit 20`,
-    [branchId, monthId, `%${q}%`],
+  // 오늘이 속한 달의 휴무 오버라이드만 가져온다 — 월 행이 아직 없으면(신청이 있으니 사실상 없을 수
+  // 없지만 방어적으로) 오버라이드 없이 기본 휴무 규칙(일요일·공휴일·토요일 석식)만 적용된다.
+  const [y, m] = today.split("-").map(Number);
+  const monthRow = await db.query<{ id: string }>(
+    `select id from lunch_month where branch_id=$1 and year=$2 and month=$3`,
+    [branchId, y, m],
   );
-  return r.rows.map((x) => ({ id: x.id, name: x.name, seat: x.seat, floor: x.floor, alreadyApplied: x.applied }));
+  const closures = monthRow.rows[0] ? await listClosuresDb(monthRow.rows[0].id) : [];
+  const closureBy = new Map(closures.map((c) => [c.date, c]));
+  const dow = dowOf(today);
+
+  const open = r.rows.filter((x) => mealAvailable(x.date, dow, x.meal_type, closureBy));
+  const excludedClosed = r.rows.length - open.length;
+  const lunchTotal = open.filter((x) => x.meal_type === "lunch").length;
+  const dinnerTotal = open.filter((x) => x.meal_type === "dinner").length;
+  return {
+    today, lunchTotal, dinnerTotal, excludedClosed,
+    applicants: open.map(({ name, seat, meal_type }) => ({ name, seat, meal_type })),
+  };
 }
