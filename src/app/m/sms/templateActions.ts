@@ -10,7 +10,7 @@ import { dateTimeLabel } from "@/lib/date";
 import {
   SMS_SITUATIONS, SITUATION_META, unknownVariablesIn, isSmsSituation, type SmsSituation,
 } from "@/lib/sms-template";
-import { getExpiryDailyTime, setExpiryDailyTime, DEFAULT_EXPIRY_DAILY_TIME } from "@/lib/sms-auto";
+import { getExpiryDailyTime, setExpiryDailyTime, DEFAULT_EXPIRY_DAILY_TIME, getAcademyName, setAcademyName } from "@/lib/sms-auto";
 import {
   getSmsWorkerSecretMeta as getSmsWorkerSecretMetaLib,
   issueSmsWorkerSecret as issueSmsWorkerSecretLib,
@@ -35,17 +35,19 @@ export type WorkerSecretMeta = { issuedAtLabel: string; issuedBy: string } | nul
 export async function getSmsTemplates(): Promise<{
   rows: TemplateRow[];
   expiryDailyTime: string;
+  academyName: string;
   workerSecretMeta: WorkerSecretMeta;
 }> {
   const me = await guard("sms.view");
   const branchId = me.activeBranchId;
-  if (!branchId) return { rows: [], expiryDailyTime: DEFAULT_EXPIRY_DAILY_TIME, workerSecretMeta: null };
-  const [r, expiryDailyTime, secretMeta] = await Promise.all([
+  if (!branchId) return { rows: [], expiryDailyTime: DEFAULT_EXPIRY_DAILY_TIME, academyName: "", workerSecretMeta: null };
+  const [r, expiryDailyTime, academyName, secretMeta] = await Promise.all([
     db.query<{ situation: string; title: string; body: string; enabled: boolean; updated_at: string }>(
       `select situation, title, body, enabled, updated_at::text as updated_at from sms_template where branch_id=$1::uuid`,
       [branchId],
     ),
     getExpiryDailyTime(branchId),
+    getAcademyName(branchId),
     getSmsWorkerSecretMetaLib(branchId),
   ]);
   const bysituation = new Map(r.rows.map((row) => [row.situation, row]));
@@ -66,7 +68,7 @@ export async function getSmsTemplates(): Promise<{
   const workerSecretMeta: WorkerSecretMeta = secretMeta
     ? { issuedAtLabel: dateTimeLabel(secretMeta.issuedAt), issuedBy: secretMeta.issuedBy }
     : null;
-  return { rows, expiryDailyTime, workerSecretMeta };
+  return { rows, expiryDailyTime, academyName, workerSecretMeta };
 }
 
 export type SaveTemplateResult = { ok: true } | { ok: false; error: string };
@@ -111,6 +113,21 @@ export async function saveExpiryDailyTime(formData: FormData): Promise<SaveTempl
   const hhmm = String(formData.get("time") ?? "").trim();
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(hhmm)) return { ok: false, error: "시각 형식이 올바르지 않습니다(HH:MM)." };
   await setExpiryDailyTime(branchId, hhmm);
+  revalidatePath("/m/sms");
+  return { ok: true };
+}
+
+/** 문자에 찍히는 학원 이름 — branch.name("본점")과 분리해 여기서 정한다(sms-auto.ts getAcademyName()
+ *  주석 참고). 미리보기와 실제 발송이 같은 값을 쓰므로 여기서 바꾸면 둘 다 같이 바뀐다. */
+export async function saveAcademyName(formData: FormData): Promise<SaveTemplateResult> {
+  const me = await guard("sms.manage");
+  const branchId = me.activeBranchId;
+  if (!branchId) return { ok: false, error: "소속 지점을 확인할 수 없습니다." };
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) return { ok: false, error: "학원 이름을 입력해주세요." };
+  // 문자 한 통은 90바이트라 이름이 길면 본문을 잡아먹는다(한글 2바이트). 20자면 충분히 넉넉하다.
+  if (name.length > 20) return { ok: false, error: "학원 이름은 20자 이내로 입력해주세요." };
+  await setAcademyName(branchId, name);
   revalidatePath("/m/sms");
   return { ok: true };
 }

@@ -4,6 +4,7 @@ import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
 import { MODULE_ROUTES } from "@/lib/modules";
 import NavRail from "./NavRail";
+import LiveRefresh from "../_shared/LiveRefresh";
 import type { NavModule } from "./NavRail";
 
 export const runtime = "nodejs";
@@ -29,6 +30,9 @@ export default async function ModuleLayout({ children }: { children: React.React
 
   return (
     <div className="app-shell" style={{ display: "flex", minHeight: "100dvh" }}>
+      {/* 탭으로 돌아왔을 때 서버 데이터를 다시 끌어온다 — 주기 폴링은 붙이지 않는다
+          (관리 화면 대부분은 남이 실시간으로 바꾸지 않는다). LiveRefresh.tsx 주석 참고. */}
+      <LiveRefresh />
       <NavRail modules={modules} me={{ name: me.name, isCto: me.isCto }} />
       <div className="app-main" style={{ flex: 1, minWidth: 0 }}>{children}</div>
     </div>

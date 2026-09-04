@@ -26,9 +26,33 @@ async function loadTemplate(branchId: string, situation: "attend_in" | "attend_o
   return r.rows[0] ?? null;
 }
 
+// 문자에 찍히는 학원 이름 — branch.name 을 그대로 쓰지 않는다. branch.name 은 "본점"처럼 내부에서
+// 지점을 구분하는 라벨이라, 학부모에게 나가는 문자에 "[본점]" 으로 찍히면 어디서 온 문자인지 알 수
+// 없다. 대외 이름은 따로 두고(branch_setting.academy_name, 문자 발송함 템플릿 탭에서 바꾼다),
+// 설정이 없을 때만 branch.name 으로 물러선다.
+export const SETTING_ACADEMY_NAME_KEY = "academy_name";
+
+export async function getAcademyName(branchId: string): Promise<string> {
+  const r = await db.query<{ value: string }>(
+    `select value from branch_setting where branch_id=$1::uuid and key=$2`,
+    [branchId, SETTING_ACADEMY_NAME_KEY],
+  );
+  const v = (r.rows[0]?.value ?? "").trim();
+  if (v) return v;
+  const b = await db.query<{ name: string }>(`select name from branch where id=$1::uuid`, [branchId]);
+  return b.rows[0]?.name ?? "";
+}
+
+export async function setAcademyName(branchId: string, name: string): Promise<void> {
+  await db.query(
+    `insert into branch_setting(branch_id, key, value) values ($1::uuid, $2, $3)
+     on conflict (branch_id, key) do update set value=excluded.value, updated_at=now()`,
+    [branchId, SETTING_ACADEMY_NAME_KEY, name.trim()],
+  );
+}
+
 async function branchName(branchId: string): Promise<string> {
-  const r = await db.query<{ name: string }>(`select name from branch where id=$1::uuid`, [branchId]);
-  return r.rows[0]?.name ?? "";
+  return getAcademyName(branchId);
 }
 
 /** 학생 한 명의 입·퇴실 문자를 큐잉한다(템플릿이 꺼져 있거나 번호가 없으면 조용히 아무것도 안 함 —

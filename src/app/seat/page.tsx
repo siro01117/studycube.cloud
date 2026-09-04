@@ -1,6 +1,7 @@
 import type { Viewport } from "next";
 import MobileSeat from "./MobileSeat";
 import { loadSeatData } from "./loadSeat";
+import LiveRefresh from "../_shared/LiveRefresh";
 
 export const runtime = "nodejs";
 
@@ -11,5 +12,5 @@ export const viewport: Viewport = { width: "device-width", initialScale: 1, maxi
 // 쿼리·권한 검사는 loadSeat.ts 로 뺐다(태블릿 화면 /t/seat 과 공유 — 화면이 늘어도 검사가 갈리지 않게).
 export default async function MobileSeatPage() {
   const props = await loadSeatData();
-  return <MobileSeat {...props} />;
+  return <><LiveRefresh intervalMs={30_000} /><MobileSeat {...props} /></>;
 }

@@ -91,7 +91,10 @@ export const SITUATION_META: Record<SmsSituation, SituationMeta> = {
 // 학생 로그인 공개 폼(studycube.co.kr, 공개 접수 폼과 같은 도메인). 링크 변수의 값 — 환경변수로
 // 뺄 만한 설정값은 아니고(도메인 자체가 서비스 소개 사이트에 고정돼 있음, src/app/f/layout.tsx 주석
 // 참고) 바뀌면 코드에서 여기 한 곳만 고치면 되게 상수로 둔다.
-export const STUDENT_LOGIN_URL = "https://studycube.co.kr/apply";
+// 학생이 이름+출입코드로 들어가는 "바로가기" 허브(f/registry.ts 의 hub 슬러그). 예전에는
+// studycube.co.kr/apply 를 가리켰는데 그 주소는 404 였다 — 학생에게 죽은 링크를 문자로 보내고
+// 있었다. co.kr 로도 열리지만(리라이트 프록시) 프록시를 한 단계 덜 태우려고 .cloud 직결을 쓴다.
+export const STUDENT_LOGIN_URL = "https://studycube.cloud/f/hb3n7qxr";
 
 const VAR_RE = /\{([^{}]+)\}/g;
 

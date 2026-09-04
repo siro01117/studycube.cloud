@@ -5,6 +5,7 @@ import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
 import FloorEditor, { type Room, type Seat, type Student, type ScheduleInfo } from "./FloorEditor";
 import PhoneRedirect from "../_shared/PhoneRedirect";
+import LiveRefresh from "../../_shared/LiveRefresh";
 import PageHeader from "../_shared/PageHeader";
 import { todayKey as todayStr, weekdayOf, minuteOfKST, weekStartKey } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
 import type { DaySlot, Period, ActualAttendance } from "@/lib/schedule";
@@ -152,6 +153,8 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
   return (
     <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <PhoneRedirect to="/seat" />
+      {/* 여러 근무자·태블릿이 동시에 보는 화면이라 주기 갱신까지 붙인다(LiveRefresh.tsx 주석). */}
+      <LiveRefresh intervalMs={30_000} />
       <PageHeader
         backHref="/home"
         backLabel="대시보드"

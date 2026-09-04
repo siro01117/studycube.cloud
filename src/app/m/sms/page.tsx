@@ -29,7 +29,7 @@ export default async function SmsPage({ searchParams }: { searchParams: Promise<
   const canManage = can(me, "sms.manage");
 
   if (tab === "templates") {
-    const { rows: templateRows, expiryDailyTime, workerSecretMeta } = await getSmsTemplates();
+    const { rows: templateRows, expiryDailyTime, academyName, workerSecretMeta } = await getSmsTemplates();
     return (
       <main style={{ minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
         <PageHeader backHref="/home" backLabel="대시보드" title="문자 발송함" flexNone maxWidth={WIDTH} />
@@ -42,6 +42,7 @@ export default async function SmsPage({ searchParams }: { searchParams: Promise<
             <TemplatesView
               rows={templateRows}
               expiryDailyTime={expiryDailyTime}
+              academyName={academyName}
               workerSecretMeta={workerSecretMeta}
               canManage={canManage}
             />

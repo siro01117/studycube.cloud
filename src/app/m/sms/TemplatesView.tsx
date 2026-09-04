@@ -5,7 +5,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { TemplateRow, WorkerSecretMeta } from "./templateActions";
-import { saveSmsTemplate, saveExpiryDailyTime, issueSmsWorkerSecretAction } from "./templateActions";
+import { saveSmsTemplate, saveExpiryDailyTime, issueSmsWorkerSecretAction, saveAcademyName } from "./templateActions";
 import { smsByteLength, SMS_LMS_BYTE_THRESHOLD, unknownVariablesIn, renderTemplate, type SmsSituation } from "@/lib/sms-template";
 
 // 미리보기용 예시 값 — 실제 발송값이 아니라 "이 변수 자리에 이런 게 들어간다"를 감 잡게 하는 용도.
@@ -216,6 +216,55 @@ function WorkerSecretSetting({ meta, canManage }: { meta: WorkerSecretMeta; canM
   );
 }
 
+function AcademyNameSetting({ initial, canManage }: { initial: string; canManage: boolean }) {
+  const router = useRouter();
+  const [name, setName] = useState(initial);
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  function save() {
+    setError(null); setSaved(false);
+    const fd = new FormData();
+    fd.set("name", name);
+    startTransition(async () => {
+      const r = await saveAcademyName(fd);
+      if (!r.ok) { setError(r.error); return; }
+      setSaved(true);
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="card" style={{ padding: 16, display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>문자에 찍히는 학원 이름</div>
+        <div style={{ fontSize: 12, color: "var(--sub)", marginTop: 2 }}>
+          모든 문자의 {"{학원이름}"} 자리에 들어갑니다. 지점 이름(본점 등)과 따로 두는 이유는, 학부모가
+          받는 문자에 &quot;[본점]&quot;이라고 찍히면 어디서 온 문자인지 알 수 없기 때문입니다. 문자 한 통은
+          90바이트라 이름이 길수록 본문이 줄어듭니다.
+        </div>
+      </div>
+      <input
+        className="input"
+        value={name}
+        disabled={!canManage}
+        placeholder="예: 스터디큐브"
+        onChange={(e) => setName(e.target.value)}
+        onBlur={(e) => setName(e.currentTarget.value.trim())}
+        style={{ height: 38, width: 180 }}
+      />
+      {canManage && (
+        <button className="btn btn-accent" disabled={name === initial || isPending} onClick={save} style={{ cursor: "pointer", height: 34, fontSize: 12.5 }}>
+          저장
+        </button>
+      )}
+      {saved && name === initial && <span style={{ fontSize: 12, color: "var(--ok)" }}>저장됨</span>}
+      {error && <span style={{ fontSize: 12, color: "var(--danger-strong)" }}>{error}</span>}
+    </div>
+  );
+}
+
 function DailyTimeSetting({ initial, canManage }: { initial: string; canManage: boolean }) {
   const router = useRouter();
   const [time, setTime] = useState(initial);
@@ -257,9 +306,9 @@ function DailyTimeSetting({ initial, canManage }: { initial: string; canManage: 
 }
 
 export default function TemplatesView({
-  rows, expiryDailyTime, workerSecretMeta, canManage,
+  rows, expiryDailyTime, academyName, workerSecretMeta, canManage,
 }: {
-  rows: TemplateRow[]; expiryDailyTime: string; workerSecretMeta: WorkerSecretMeta; canManage: boolean;
+  rows: TemplateRow[]; expiryDailyTime: string; academyName: string; workerSecretMeta: WorkerSecretMeta; canManage: boolean;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -270,6 +319,8 @@ export default function TemplatesView({
       </div>
 
       <WorkerSecretSetting meta={workerSecretMeta} canManage={canManage} />
+
+      <AcademyNameSetting initial={academyName} canManage={canManage} />
 
       <DailyTimeSetting initial={expiryDailyTime} canManage={canManage} />
 

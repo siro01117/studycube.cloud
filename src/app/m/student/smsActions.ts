@@ -10,6 +10,7 @@ import { db } from "@/lib/db";
 import { guard } from "@/lib/auth";
 import { enqueueSmsBatch } from "@/lib/sms";
 import { renderTemplate, STUDENT_LOGIN_URL, type SmsSituation } from "@/lib/sms-template";
+import { getAcademyName } from "@/lib/sms-auto";
 
 export type SmsCandidate = { id: string; name: string; phone: string | null; code: string | null };
 export type SmsTemplateInfo = { title: string; body: string; enabled: boolean };
@@ -23,11 +24,14 @@ function toUuidArrayLiteral(ids: string[]): string {
 }
 
 async function loadTemplateAndBranchName(branchId: string, situation: SmsSituation): Promise<{ tmpl: SmsTemplateInfo; branchName: string }> {
-  const [tmplR, branchR] = await Promise.all([
+  // 학원 이름은 branch.name("본점")이 아니라 대외 이름을 쓴다 — sms-auto.ts getAcademyName() 주석 참고.
+  // 미리보기와 실제 발송이 같은 값을 보게 하려면 두 경로가 같은 함수를 타야 한다(예전에는 미리보기와
+  // 실제 문자가 갈렸다).
+  const [tmplR, name] = await Promise.all([
     db.query<SmsTemplateInfo>(`select title, body, enabled from sms_template where branch_id=$1::uuid and situation=$2`, [branchId, situation]),
-    db.query<{ name: string }>(`select name from branch where id=$1::uuid`, [branchId]),
+    getAcademyName(branchId),
   ]);
-  return { tmpl: tmplR.rows[0] ?? { title: "", body: "", enabled: false }, branchName: branchR.rows[0]?.name ?? "" };
+  return { tmpl: tmplR.rows[0] ?? { title: "", body: "", enabled: false }, branchName: name };
 }
 
 // ---------------- 링크·로그인 코드 안내(access_code) ----------------

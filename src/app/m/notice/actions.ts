@@ -196,14 +196,16 @@ export async function markNoticeRead(formData: FormData) {
 import { renderTemplate, type SmsSituation } from "@/lib/sms-template";
 import { enqueueSmsBatch } from "@/lib/sms";
 import type { SmsCandidate, SmsTemplateInfo, SendSmsResult } from "@/app/m/student/smsActions";
+import { getAcademyName } from "@/lib/sms-auto";
 
 async function loadBroadcastTemplateAndBranchName(branchId: string): Promise<{ tmpl: SmsTemplateInfo; branchName: string }> {
   const situation: SmsSituation = "notice_broadcast";
-  const [tmplR, branchR] = await Promise.all([
+  // 학원 이름은 branch.name("본점")이 아니라 대외 이름 — sms-auto.ts getAcademyName() 주석 참고.
+  const [tmplR, name] = await Promise.all([
     db.query<SmsTemplateInfo>(`select title, body, enabled from sms_template where branch_id=$1::uuid and situation=$2`, [branchId, situation]),
-    db.query<{ name: string }>(`select name from branch where id=$1::uuid`, [branchId]),
+    getAcademyName(branchId),
   ]);
-  return { tmpl: tmplR.rows[0] ?? { title: "", body: "", enabled: false }, branchName: branchR.rows[0]?.name ?? "" };
+  return { tmpl: tmplR.rows[0] ?? { title: "", body: "", enabled: false }, branchName: name };
 }
 
 export async function getNoticeBroadcastCandidates(): Promise<{ candidates: SmsCandidate[]; tmpl: SmsTemplateInfo; branchName: string }> {

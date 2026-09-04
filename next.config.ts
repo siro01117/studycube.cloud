@@ -4,12 +4,13 @@ const nextConfig: NextConfig = {
   // PGlite(로컬 개발 DB)는 번들링하지 말고 서버에서 그대로 로드
   serverExternalPackages: ["@electric-sql/pglite"],
 
-  // 클라이언트 라우터 캐시 — 한 번 방문한 모듈 화면을 잠깐 들고 있다가
-  // 재방문 시 즉시 보여주고 뒤에서 갱신한다. dynamic 기본값은 0(캐시 안 함).
-  // 30초면 "탭 몇 개 왔다갔다" 하는 동안은 서버 왕복 0, 그 뒤엔 자연히 새로고침.
-  // 데이터가 바뀌는 조작(입실·순찰·벌점)은 서버액션이 revalidate 하므로 즉시 반영된다.
+  // 클라이언트 라우터 캐시 — dynamic 을 0(캐시 안 함)으로 되돌렸다. 예전엔 30초를 들고 있었는데,
+  // "내가 한 조작은 서버액션이 revalidate 하니 괜찮다"는 근거가 반쪽이었다: 남이 자기 기기에서
+  // 바꾼 것은 이쪽 revalidate 를 타지 않아서, 화면을 옮겼다 돌아오면 최대 30초 동안 옛 상태가
+  // 그대로 보였다. 여러 근무자가 동시에 쓰는 실제 운영에서 이게 계속 문제가 됐다.
+  // 화면에 머물러 있는 동안의 갱신은 _shared/LiveRefresh.tsx 가 맡는다.
   experimental: {
-    staleTimes: { dynamic: 30, static: 180 },
+    staleTimes: { dynamic: 0, static: 180 },
     // 공개 폼(/f/**)이 studycube.co.kr → studycube.cloud 로 리라이트 프록시된다.
     // 서버액션은 기본적으로 Origin 헤더가 요청 호스트와 같아야 통과하는데, 프록시를 거치면
     // Origin 이 studycube.co.kr 로 들어와 기본 검사에 막힌다 — 허용 오리진에 명시.
