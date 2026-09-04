@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
+import qrcode from "qrcode-generator";
 import type { DeviceRow } from "./actions";
 import { issueDeviceAction, reissueDeviceAction, setDeviceActiveAction, getDevices } from "./actions";
 
@@ -51,6 +52,17 @@ export default function EntranceView({ devices, width }: { devices: DeviceRow[];
     });
   }
 
+  // QR 은 서버가 아니라 브라우저에서 그린다 — 토큰은 이미 여기 state 에 있으니, QR 을 받으러 서버에
+  // 한 번 더 다녀오면 같은 비밀이 왕복만 한 번 늘어난다. errorCorrectionLevel 'M' 은 화면을 카메라로
+  // 찍는 환경(반사광·모아레)의 절충으로, 직원 출근 QR(kiosk/actions.ts)과 같은 값으로 맞췄다.
+  const qrSvg = useMemo(() => {
+    if (!issued) return null;
+    const qr = qrcode(0, "M");
+    qr.addData(issued.url);
+    qr.make();
+    return qr.createSvgTag({ scalable: true });
+  }, [issued]);
+
   async function copy(url: string) {
     try {
       await navigator.clipboard.writeText(url);
@@ -62,9 +74,9 @@ export default function EntranceView({ devices, width }: { devices: DeviceRow[];
   return (
     <div className="mx-auto" style={{ maxWidth: width, padding: "24px 20px 64px", width: "100%" }}>
       <p style={{ color: "var(--sub)", fontSize: 14, lineHeight: 1.6, marginBottom: 24 }}>
-        학원 입구에 세워둘 태블릿마다 기기를 하나씩 발급합니다. 발급된 주소를 그 태블릿 브라우저에
-        열어두면, 학생이 5자리 코드를 누를 때마다 입실·퇴실이 자동으로 기록됩니다. 재발급하면 이전
-        주소는 즉시 못 쓰게 됩니다.
+        학원 입구에 세워둘 태블릿마다 기기를 하나씩 발급합니다. 발급 직후 뜨는 QR 을 그 태블릿
+        카메라로 찍어 주소를 열어두면, 학생이 5자리 코드를 누를 때마다 입실·퇴실이 자동으로
+        기록됩니다. 재발급하면 이전 주소는 즉시 못 쓰게 됩니다.
       </p>
 
       <div className="card" style={{ padding: 20, marginBottom: 20 }}>
@@ -90,15 +102,27 @@ export default function EntranceView({ devices, width }: { devices: DeviceRow[];
 
       {issued && (
         <div className="card" style={{ padding: 20, marginBottom: 20, borderColor: "var(--accent)" }}>
-          <div className="label">{issued.deviceId ? "재발급된 주소" : "발급된 주소"} — 태블릿 브라우저에 이 주소를 열어두세요</div>
+          <div className="label" style={{ textAlign: "center" }}>
+            {issued.deviceId ? "재발급된 주소" : "발급된 주소"} — 태블릿 카메라로 아래 QR 을 찍으세요
+          </div>
+          {qrSvg && (
+            <div
+              // QR 자체가 흰 배경과 여백을 품고 있어 테마와 무관하게 스캔된다. 화면을 카메라로 찍는
+              // 용도라 280px 로 크게 잡는다 — 이 URL 은 49모듈(버전 9)이라 모듈 하나가 5px 남짓이고, 더 줄이면
+              // 보급형 태블릿 카메라가 못 잡는다.
+              style={{ width: 280, height: 280, margin: "6px auto 14px", borderRadius: 12, overflow: "hidden", background: "#fff" }}
+              dangerouslySetInnerHTML={{ __html: qrSvg }}
+            />
+          )}
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <code style={{ flex: 1, fontSize: 13, wordBreak: "break-all", background: "var(--panel2)", padding: "10px 12px", borderRadius: 10 }}>
               {issued.url}
             </code>
             <button className="btn" onClick={() => copy(issued.url)}>복사</button>
           </div>
-          <p style={{ color: "var(--faint)", fontSize: 12, marginTop: 10 }}>
-            이 주소는 지금만 보입니다. 다시 볼 수 없으니 지금 태블릿에 옮겨두세요.
+          <p style={{ color: "var(--faint)", fontSize: 12, marginTop: 10, textAlign: "center" }}>
+            QR 이 안 찍히면 위 주소를 태블릿 브라우저에 직접 입력하세요. 이 화면을 벗어나면 주소도 QR 도
+            다시 볼 수 없습니다.
           </p>
         </div>
       )}
