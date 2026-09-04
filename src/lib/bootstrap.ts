@@ -191,9 +191,10 @@ const BOOT_LOCK =
 
 // 스키마·시드 내용이 바뀌면 이 값을 올린다. 그때만 DDL 이 다시 돈다.
 // (schema.modules.ts / CORE_SQL / PERMISSIONS / MODULES 를 수정하면 반드시 갱신)
-const SCHEMA_VERSION = "2026-09-03.2"; // .1 은 seed 루프를 boot() 에 추가하기 전에 이미 커밋돼(개발 중
+const SCHEMA_VERSION = "2026-09-04.1"; // .1 은 seed 루프를 boot() 에 추가하기 전에 이미 커밋돼(개발 중
 // 살아있던 서버가 그 사이 요청을 받아 버전만 먼저 기록) 시드가 비어 있는 상태로 굳어버린 이력이 있다
 // (문자 템플릿 seed 재실행을 위해 .2 로 다시 올림 — sms_template 실제 로딩 결과가 그 증거).
+// 2026-09-04.1: 입구 태블릿 출입 키패드(entrance_device/entrance_attempt) 추가 + entrance.manage 권한.
 
 /** 이미 이 버전으로 부팅된 DB인지 한 번의 쿼리로 판정 */
 async function alreadyBooted(): Promise<boolean> {

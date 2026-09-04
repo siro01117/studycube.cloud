@@ -1,6 +1,8 @@
 // 문자 발송기(scripts/sms-worker.mjs, 원내 고정 IP 기기에서 도는 별개 스크립트) 전용 API.
-// 로그인 세션이 아니라 SMS_WORKER_SECRET 공유 비밀로만 연다 — 이 라우트를 부르는 쪽은 브라우저가
-// 아니라 사람이 없는 스크립트이기 때문(CRON_SECRET, api/cron/unexcused-absences 와 같은 이유).
+// 로그인 세션이 아니라 공유 비밀로만 연다 — 이 라우트를 부르는 쪽은 브라우저가 아니라 사람이 없는
+// 스크립트이기 때문(CRON_SECRET, api/cron/unexcused-absences 와 같은 이유). 비밀은 SMS_WORKER_SECRET
+// 환경변수(기존 설치, 하위호환) 또는 /m/sms 화면에서 발급해 branch_setting 에 해시로 저장한 값
+// (sms-worker-secret.ts) — 아래 authorized() 의 검증 순서 주석 참고.
 //
 // 두 동작을 action 필드로 가른다(라우트를 둘로 안 나눈 이유: 큐를 "가져가고 결과를 되돌려 준다"는
 // 한 세트의 왕복이라 스크립트 쪽에서 다루기 쉽게 하나로 묶었다):
@@ -14,40 +16,51 @@ import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
 import { SMS_MAX_ATTEMPTS, RETRY_BACKOFF_MINUTES } from "@/lib/sms";
 import { runDailyExpirySmsGeneration } from "@/lib/sms-auto";
+import { verifySmsWorkerSecretAnyBranch } from "@/lib/sms-worker-secret";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// SESSION_SECRET(src/lib/auth.ts secret())과 같은 관례: 환경변수가 있으면 그 값, 배포인데 없으면
-// 거부(구멍을 열어두지 않는다), 로컬 개발인데 없으면 로컬 전용 고정값으로 폴백(.env.local 을 만지지
-// 않고도 로컬에서 발송기 배선을 끝까지 시험할 수 있게 하기 위함 — 이 고정값은 배포에서는 절대
-// 쓰이지 않는다, NODE_ENV==='production' 분기가 막는다).
-function expectedSecret(): string | null {
-  const env = process.env.SMS_WORKER_SECRET;
-  if (env) return env;
-  if (process.env.NODE_ENV === "production") return null;
-  return "dev-only-sms-worker-secret";
-}
-
 // 타이밍 안전 비교 — 길이가 다르면 timingSafeEqual 이 예외를 던지므로 먼저 길이로 갈라낸다(길이
 // 비교 자체는 시크릿 값을 드러내지 않으므로 안전, src/lib/auth.ts readToken 과 같은 패턴).
-function authorized(req: Request): boolean {
-  const want = expectedSecret();
-  if (!want) return false;
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
+// 검증 순서(집주인 지시, /m/sms 발송기 비밀 발급 작업):
+//  ① SMS_WORKER_SECRET 환경변수가 있으면 그것과만 비교한다 — 기존에 그 방식으로 설치된 발송기가
+//     이번 변경으로 깨지지 않게 하기 위함(하위호환). 환경변수가 있으면 DB 는 아예 보지 않는다.
+//  ② 없으면 branch_setting 에 저장된 해시와 대조한다(sms-worker-secret.ts, /m/sms 화면에서 발급).
+//  ③ 둘 다 없으면 — 배포(NODE_ENV==='production')에서는 401(구멍을 열어두지 않는다, 기존 동작
+//     그대로). 로컬 개발인데 아무것도 설정 안 했으면 로컬 전용 고정값으로 폴백(.env.local 을 만지지
+//     않고도 로컬에서 발송기 배선을 끝까지 시험할 수 있게 하기 위함 — 이 고정값은 배포에서는 절대
+//     쓰이지 않는다).
+// 이 라우트는 로그인 세션이 없다 — 위 세 경로 중 어느 것도 "비밀 없이 통과"를 허용하지 않는다.
+async function authorized(req: Request): Promise<boolean> {
   const auth = req.headers.get("authorization") ?? "";
   const got = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  const a = Buffer.from(got);
-  const b = Buffer.from(want);
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(a, b);
+  if (!got) return false;
+
+  const envSecret = process.env.SMS_WORKER_SECRET;
+  if (envSecret) return timingSafeEqualStr(got, envSecret);
+
+  if (await verifySmsWorkerSecretAnyBranch(got)) return true;
+
+  if (process.env.NODE_ENV !== "production") {
+    return timingSafeEqualStr(got, "dev-only-sms-worker-secret");
+  }
+  return false;
 }
 
 type ClaimedRow = { id: string; phone: string; body: string; kind: string; attempts: number };
 
 export async function POST(req: Request) {
-  if (!authorized(req)) {
+  if (!(await authorized(req))) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
   await ready();

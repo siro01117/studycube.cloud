@@ -34,6 +34,7 @@ export const MODULE_ROUTES: Record<string, string> = {
   staff_schedule: "/m/staff",
   payment: "/m/finance", // 화면은 다른 작업이 구현 중(src/app/m/finance/**) — 경로만 먼저 연결
   sms: "/m/sms",
+  entrance_device: "/m/entrance",
 };
 
 export const MODULES: ModuleDef[] = [
@@ -65,4 +66,6 @@ export const MODULES: ModuleDef[] = [
   // 처음부터 켜둔다 — 화면 자체가 이미 sms.view 로 접근을 걸러서, 모듈을 꺼둘 이유가 없다(다른 mvp
   // 모듈처럼 "화면은 있는데 branch_module 로 또 꺼져 있어 못 들어간다" 혼란을 피한다).
   { key: "sms", label: "문자 발송함", requires: ["sms.view"], ord: 72, category: "staff", mvp: true },
+  // 입구 태블릿 발급·관리. sms 모듈 바로 옆(ord 73) — 둘 다 "무인/기기 인프라" 성격이라 가까이 둔다.
+  { key: "entrance_device", label: "입구 기기", requires: ["entrance.manage"], ord: 73, category: "staff", mvp: true },
 ];

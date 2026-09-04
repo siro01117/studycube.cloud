@@ -11,6 +11,10 @@ import {
   SMS_SITUATIONS, SITUATION_META, unknownVariablesIn, isSmsSituation, type SmsSituation,
 } from "@/lib/sms-template";
 import { getExpiryDailyTime, setExpiryDailyTime, DEFAULT_EXPIRY_DAILY_TIME } from "@/lib/sms-auto";
+import {
+  getSmsWorkerSecretMeta as getSmsWorkerSecretMetaLib,
+  issueSmsWorkerSecret as issueSmsWorkerSecretLib,
+} from "@/lib/sms-worker-secret";
 
 export type TemplateRow = {
   situation: SmsSituation;
@@ -23,19 +27,26 @@ export type TemplateRow = {
   updatedLabel: string | null; // KST 서버 포맷, 시드 그대로면 null(수정 이력 없음 표시)
 };
 
-/** 템플릿 목록 + 이용기간 자동 배치 실행 시각. 상황이 DB 에 없어도(이론상 시드가 안 됐을 때) 화면이
- *  비어 보이지 않도록 SITUATION_META 기본값으로 채워 보여준다(단, 이 경우 저장 전까지는 DB 에 실제
- *  행이 없다 — saveTemplate 이 upsert 이므로 처음 저장할 때 자연히 생긴다). */
-export async function getSmsTemplates(): Promise<{ rows: TemplateRow[]; expiryDailyTime: string }> {
+export type WorkerSecretMeta = { issuedAtLabel: string; issuedBy: string } | null;
+
+/** 템플릿 목록 + 이용기간 자동 배치 실행 시각 + 발송기 비밀 발급 여부. 상황이 DB 에 없어도(이론상
+ *  시드가 안 됐을 때) 화면이 비어 보이지 않도록 SITUATION_META 기본값으로 채워 보여준다(단, 이 경우
+ *  저장 전까지는 DB 에 실제 행이 없다 — saveTemplate 이 upsert 이므로 처음 저장할 때 자연히 생긴다). */
+export async function getSmsTemplates(): Promise<{
+  rows: TemplateRow[];
+  expiryDailyTime: string;
+  workerSecretMeta: WorkerSecretMeta;
+}> {
   const me = await guard("sms.view");
   const branchId = me.activeBranchId;
-  if (!branchId) return { rows: [], expiryDailyTime: DEFAULT_EXPIRY_DAILY_TIME };
-  const [r, expiryDailyTime] = await Promise.all([
+  if (!branchId) return { rows: [], expiryDailyTime: DEFAULT_EXPIRY_DAILY_TIME, workerSecretMeta: null };
+  const [r, expiryDailyTime, secretMeta] = await Promise.all([
     db.query<{ situation: string; title: string; body: string; enabled: boolean; updated_at: string }>(
       `select situation, title, body, enabled, updated_at::text as updated_at from sms_template where branch_id=$1::uuid`,
       [branchId],
     ),
     getExpiryDailyTime(branchId),
+    getSmsWorkerSecretMetaLib(branchId),
   ]);
   const bysituation = new Map(r.rows.map((row) => [row.situation, row]));
   const rows: TemplateRow[] = SMS_SITUATIONS.map((situation) => {
@@ -52,7 +63,10 @@ export async function getSmsTemplates(): Promise<{ rows: TemplateRow[]; expiryDa
       updatedLabel: row ? dateTimeLabel(row.updated_at) : null,
     };
   });
-  return { rows, expiryDailyTime };
+  const workerSecretMeta: WorkerSecretMeta = secretMeta
+    ? { issuedAtLabel: dateTimeLabel(secretMeta.issuedAt), issuedBy: secretMeta.issuedBy }
+    : null;
+  return { rows, expiryDailyTime, workerSecretMeta };
 }
 
 export type SaveTemplateResult = { ok: true } | { ok: false; error: string };
@@ -99,4 +113,18 @@ export async function saveExpiryDailyTime(formData: FormData): Promise<SaveTempl
   await setExpiryDailyTime(branchId, hhmm);
   revalidatePath("/m/sms");
   return { ok: true };
+}
+
+/** 발송기 공유 비밀 발급/재발급 — entrance.ts issueDevice 와 같은 모양: 원문은 이 응답에서만 보이고
+ *  DB 에는 해시만 남는다(sms-worker-secret.ts). 재발급이라는 별도 동작이 없다 — 같은 함수가 upsert 라
+ *  다시 부르면 그게 곧 재발급(이전 값 즉시 무효)이다. */
+export type IssueWorkerSecretResult = { ok: true; secret: string } | { ok: false; error: string };
+
+export async function issueSmsWorkerSecretAction(): Promise<IssueWorkerSecretResult> {
+  const me = await guard("sms.manage");
+  const branchId = me.activeBranchId;
+  if (!branchId) return { ok: false, error: "소속 지점을 확인할 수 없습니다." };
+  const secret = await issueSmsWorkerSecretLib(branchId, me.name);
+  revalidatePath("/m/sms");
+  return { ok: true, secret };
 }

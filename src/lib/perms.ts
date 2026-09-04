@@ -49,6 +49,9 @@ export const PERMISSIONS: Perm[] = [
   // 실제 발송 지점이 없어(이번 작업은 큐·발송기 기반만) 지금은 발송함 조회·큐 적재·재시도에만 쓰인다.
   { key: "sms.view", label: "문자 발송함 조회", category: "문자" },
   { key: "sms.manage", label: "문자 발송 관리(큐 적재·재시도)", category: "문자" },
+  // 입구 태블릿(출입 키패드) 기기 발급·재발급. 발급되는 토큰이 곧 "누구나 코드를 눌러 출결을 조작할
+  // 수 있는" 물리적 접근점을 여는 열쇠라 sms.*와 같은 축으로 CTO 전용(ADMIN_PERM_KEYS 의도적 제외).
+  { key: "entrance.manage", label: "입구 기기 발급·관리", category: "입구 기기" },
   // 일정·부가
   { key: "schedule.view", label: "스케쥴 조회", category: "일정·부가" },
   { key: "schedule.manage", label: "스케쥴 관리", category: "일정·부가" },

@@ -87,7 +87,7 @@ node scripts/sms-worker.mjs
 
 | 변수 | 필수 | 설명 |
 | --- | --- | --- |
-| `SMS_WORKER_SECRET` | 웹앱과 동일 값 필수 | `/api/sms-worker` claim/report 인증 및 `/nudge` 수신 인증(둘 다 타이밍 안전 비교, 같은 비밀 재사용). 미설정 시 로컬 개발용 고정값으로 폴백 |
+| `SMS_WORKER_SECRET` | 필수 | `/api/sms-worker` claim/report 인증 및 `/nudge` 수신 인증(둘 다 타이밍 안전 비교, 같은 비밀 재사용). 값은 `/m/sms` 템플릿 탭에서 발급(권장, 웹앱은 DB 에 해시로만 저장) — 또는 옛 방식대로 웹앱의 `SMS_WORKER_SECRET` 환경변수와 같은 값. 미설정 시 로컬 개발용 고정값으로 폴백 |
 | `SMS_WORKER_PORT` | 선택 | 발송기가 `/nudge`를 수신할 포트. 비우면 `8787`(22/80/443/3000과 겹치지 않는 임의의 높은 포트) |
 | `ALIGO_API_KEY` | 필수 | 알리고 API 키 |
 | `ALIGO_USER_ID` | 필수 | 알리고 계정 아이디 |
@@ -99,7 +99,7 @@ node scripts/sms-worker.mjs
 
 | 변수 | 필수 | 설명 |
 | --- | --- | --- |
-| `SMS_WORKER_SECRET` | 필수 | 위와 동일 값 — 발송기 인증에 쓴다 |
+| `SMS_WORKER_SECRET` | 선택(하위호환) | 예전 설치 방식. 설정돼 있으면 `/api/sms-worker` 인증에 이 값만 쓴다(DB 는 보지 않는다). 새로 설치할 때는 이 변수를 두지 않고 대신 `/m/sms` 템플릿 탭에서 발급한다 — 지점(`branch_setting`)마다 해시로 저장되고, 재발급하면 이전 값이 즉시 무효화된다(`src/lib/sms-worker-secret.ts`). `/nudge` 수신 인증(아래 `SMS_WORKER_URL`을 쓸 때만 해당)은 여전히 이 환경변수만 본다 — 웹앱→발송기 방향이라 DB 기반 비밀과는 별개다. |
 | `SMS_WORKER_URL` | 선택 | 발송기 주소(예: `http://<VPS 고정 IP>:8787`). 비우면 큐잉만 하고 찌르지 않는다 — VPS가 아직 없어도 큐잉은 항상 정상 동작한다 |
 
 재시도는 최대 3회, 실패 후 5분 뒤에 다시 큐에 올라간다(`src/lib/sms.ts` SMS_MAX_ATTEMPTS·

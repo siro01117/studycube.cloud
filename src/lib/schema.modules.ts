@@ -787,4 +787,38 @@ create table if not exists sms_template(
   updated_by uuid references person(id) on delete set null,
   primary key(branch_id, situation)
 );
+
+-- ================= 입구 태블릿(출입 키패드) 기기 =================
+-- 학원 입구에 세워둔 태블릿 브라우저가 여는 화면(/kiosk/[deviceId]/[token], src/app/kiosk/**)을
+-- 식별·인증하는 표. 로그인 세션이 없는 화면이라(하루 종일 켜둔 무인 기기) 이 표의 토큰이 유일한
+-- 인증 수단이다 — 직원 로그인(person/login_attempt)과는 완전히 다른 신원 축이라 person 테이블에
+-- 얹지 않고 새 표를 둔다(sms-worker 의 SMS_WORKER_SECRET 공유비밀과 같은 "사람이 아닌 호출자" 축).
+-- token 자체는 저장하지 않는다(탈취되면 그대로 재사용 가능한 비밀이므로 비밀번호처럼 해시만 저장 —
+-- person.pin_hash 와 같은 원칙). 재발급(관리 화면 "재발급" 버튼)은 이 해시를 새로 덮어써 이전
+-- 토큰(과거 URL을 아는 사람 포함)을 즉시 무효화한다.
+create table if not exists entrance_device(
+  id           uuid primary key default gen_random_uuid(),
+  branch_id    uuid not null references branch(id) on delete cascade,
+  name         text not null,              -- "정문 태블릿" 처럼 사람이 알아볼 이름(관리 화면 표시용)
+  token_hash   text not null,              -- sha256(token) hex — 원문 토큰은 발급 시 한 번만 보여주고 저장 안 함
+  active       boolean not null default true,
+  created_at   timestamptz not null default now(),
+  created_by   uuid references person(id) on delete set null,
+  reissued_at  timestamptz,
+  last_seen_at timestamptz                 -- 마지막으로 이 기기에서 코드가 눌린 시각(관리 화면 "마지막 사용")
+);
+create index if not exists idx_entrance_device_branch on entrance_device(branch_id);
+
+-- 기기 단위 학생 코드 무차별 대입 방어. access_attempt(공개 폼, (지점,이름) 단위)·login_attempt(직원,
+-- 로그인아이디 단위)와 같은 원자적 upsert 원리이되 키가 "기기"다 — 입구 태블릿은 학생 이름을 몰라
+-- (코드 5자리만 누른다) 시도자를 이름으로 가를 수 없고, 실사용 자체가 하루 수백 번이라 그 두 표의
+-- 임계값(10회/15분)을 그대로 쓰면 정상 사용만으로도 자주 잠긴다. 대신 창을 5분으로 좁히고 임계값을
+-- 20회로 올린다 — 5자리 숫자코드(10만 가지)를 맞히려면 그 창 안에 수천~수만 회가 필요해 20회로는
+-- 사실상 못 맞히지만, 여러 학생이 잇달아 오타를 내는 정상 상황(5분에 20번 오타)은 거의 없다.
+create table if not exists entrance_attempt(
+  device_id    uuid primary key references entrance_device(id) on delete cascade,
+  fails        int  not null default 0,
+  first_fail   timestamptz not null default now(),
+  locked_until timestamptz
+);
 `;

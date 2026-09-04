@@ -18,6 +18,7 @@ const COOKIE = "sq_session";
 
 // 서명키. 저장소에 상수로 박아두면 공개 저장소에서 세션 위조가 가능하므로
 // ① SESSION_SECRET 환경변수 → ② 접속문자열(배포 환경에만 존재)에서 파생 → ③ 로컬 전용 고정값.
+// ③ 은 개발에서만이다 — 배포에서 ①②가 다 없으면 물러서지 않고 던진다(아래).
 // export: 근태 QR 토큰 서명(src/lib/staff-attendance.ts)도 같은 키 파생 규칙을 쓴다 — 새 비밀값을
 // env/DB에 따로 두지 않고 이미 검증된 세션 서명 규칙(① SESSION_SECRET → ② 접속문자열 파생 → ③ 로컬
 // 고정값)을 재사용한다. 세션 쿠키와 QR 토큰은 서명 대상 문자열에 용도 접두사(예: "qr:")를 붙여
@@ -27,11 +28,19 @@ export function secret(): string {
   if (cachedSecret) return cachedSecret;
   const env = process.env.SESSION_SECRET;
   const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
-  cachedSecret = env
-    ? env
-    : dbUrl
-      ? createHash("sha256").update(`studycube:session:${dbUrl}`).digest("hex")
-      : "dev-only-local-secret";
+  if (env) {
+    cachedSecret = env;
+  } else if (dbUrl) {
+    cachedSecret = createHash("sha256").update(`studycube:session:${dbUrl}`).digest("hex");
+  } else if (process.env.NODE_ENV === "production") {
+    // 배포에서 둘 다 없으면 고정값으로 물러서지 않는다 — 그러면 소스를 읽을 수 있는 누구나 세션
+    // 쿠키와 근태 QR 토큰을 위조할 수 있다. 지금은 DATABASE_URL 이 없으면 앱이 뜨지도 않아서
+    // 실제로 이 갈래에 닿지 않지만, 나중에 접속 방식이 바뀌었을 때 조용히 뚫리는 자리다.
+    // /api/sms-worker 가 비밀 없이는 아예 안 열리는 것과 같은 원칙으로 여기서 멈춘다.
+    throw new Error("SESSION_SECRET 이 설정되지 않았습니다 — 배포에서는 고정값으로 물러서지 않습니다.");
+  } else {
+    cachedSecret = "dev-only-local-secret";
+  }
   return cachedSecret;
 }
 
