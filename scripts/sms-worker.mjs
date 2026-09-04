@@ -29,11 +29,16 @@ const ALIGO_SENDER = process.env.ALIGO_SENDER || "";
 // 알리고는 testmode_yn=Y 면 실제로 보내지 않고 형식만 검사해 준다(과금 없음).
 const LIVE = process.env.ALIGO_SEND_LIVE === "true";
 const BATCH_LIMIT = 20;
-// 느린 안전망 주기. 찌르기가 정상 도착하면 이 타이머는 사실상 아무것도 할 일이 없다(claim 결과가
-// 0건) — 그래서 짧게 잡을 이유가 없다. 5분은 "찌르기가 실패한 최악의 경우 사람이 눈치채기 전에
-// 회복되는" 정도의 여유이면서, 예전 20초 간격(하루 4,320회 호출) 대비 하루 288회로 줄여 평소엔
-// 거의 항상 빈 손으로 끝나는 호출을 최소화한다.
-const SAFETY_NET_MS = 5 * 60 * 1000;
+// 스스로 확인하는 주기. 환경변수로 조절한다 — 발송기를 어디에 두느냐에 따라 답이 달라지기 때문이다.
+//
+//   찌르기가 닿는 곳(고정 주소를 가진 서버, 또는 테일스케일 Funnel 을 붙인 PC):
+//     찌르기가 즉시 처리하므로 이 타이머는 평소 빈 손으로 끝난다 → 300(5분)이면 충분하다.
+//   찌르기가 못 닿는 곳(학원 공유기 안의 데스크 PC, 포트를 열지 않음):
+//     이 타이머가 유일한 경로다 → 30초. 입실 알림이 5분 늦으면 학부모가 체감한다.
+//
+// 기본값을 30초로 둔 이유: 못 닿는 쪽이 기본 설치 형태이고, 여기서 잘못 잡히면 "문자가 늦게 온다"는
+// 조용한 문제로 나타나 원인을 찾기 어렵다. 반대로 너무 잦아서 생기는 손해는 빈 요청 몇 번뿐이다.
+const SAFETY_NET_MS = Math.max(10, Number(process.env.SMS_POLL_SECONDS) || 30) * 1000;
 
 if (!ALIGO_API_KEY || !ALIGO_USER_ID || !ALIGO_SENDER) {
   console.warn("[sms-worker] ALIGO_API_KEY/ALIGO_USER_ID/ALIGO_SENDER 중 비어있는 값이 있습니다 — 알리고 호출은 형식 오류로 실패합니다.");
@@ -172,7 +177,7 @@ server.on("error", (err) => {
 });
 
 server.listen(WORKER_PORT, () => {
-  console.log(`[sms-worker] 시작 (${LIVE ? "실발송" : "테스트모드"}, base=${BASE_URL}, 수신 포트=${WORKER_PORT}, 안전망=${SAFETY_NET_MS / 60000}분)`);
+  console.log(`[sms-worker] 시작 (${LIVE ? "실발송" : "테스트모드"}, base=${BASE_URL}, 수신 포트=${WORKER_PORT}, 확인주기=${SAFETY_NET_MS / 1000}초)`);
   // 시작할 때 한 번은 즉시 처리 — 꺼져 있던 동안 쌓인 큐가 있을 수 있다.
   processQueue("startup");
   setInterval(() => processQueue("safety-net"), SAFETY_NET_MS);
