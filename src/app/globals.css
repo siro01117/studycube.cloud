@@ -145,6 +145,9 @@ button, .chip, [role="button"] { touch-action: manipulation; }
   }
   /* 인라인 style(display:grid/flex)을 이기려면 !important 필요 */
   .nav-rail .rail-brand, .nav-rail .rail-foot { display: none !important; }
+  /* 데스크탑 레일의 카테고리 소제목 — 폰 하단 탭(가로 5칸)에는 자리가 없어 숨김.
+     '더보기' 시트 안의 소제목(인라인 style)은 이 규칙과 무관하게 그대로 보인다. */
+  .nav-rail .rail-group-label { display: none !important; }
   .nav-rail .rail-list {
     flex-direction: row !important; overflow: visible !important;
     gap: 0 !important; width: 100%;
@@ -250,4 +253,40 @@ button, .chip, [role="button"] { touch-action: manipulation; }
 .dsk .card-sm { background: #FFFFFF; border: 1px solid #E4E6EE; border-radius: 14px; }
 
 .dsk .titlebar-drag { -webkit-app-region: drag; }
+
+/* NavRail 카테고리 구분선(rail-group-sep, DESIGN.md §5) — 폰 하단 탭(가로 한 줄)에는
+   자리가 없어 데스크탑 레일에서만 보인다. 기존 640px 폰 대응 쿼리와 같은 경계값. */
+@media (max-width: 640px) {
+  .nav-rail .rail-group-sep { display: none !important; }
+}
 .dsk .titlebar-nodrag { -webkit-app-region: no-drag; }
+
+/* 학생 관리 목록(StudentList) — 행 전체가 상세 화면 링크다. 누를 수 있다는 신호(호버 배경·화살표
+   강조)만 여기서 얹는다. .touchable 이 이미 focus-visible 링·터치 동작을 처리한다. */
+.student-row:hover { background: var(--panel2); }
+.student-row:hover .student-row-chevron { color: var(--accent); }
+.student-room-header:hover { background: var(--line); }
+
+
+/* 홈(=대시보드) "지금" 카드·트렌드 그리드 — 2열 고정(auto-fit 대신). 카드 수가 홀수면 마지막
+   카드가 왼쪽에 혼자 남아 대칭이 깨진다(집주인 지적) — 마지막 카드가 홀수 번째(=새 줄에 혼자)일
+   때만 그 카드를 전체 폭으로 펼쳐 대칭을 맞춘다. 폰(≤640px)은 어차피 1열이라 그 규칙을 끈다. */
+.now-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+.now-grid > *:last-child:nth-child(odd) { grid-column: 1 / -1; }
+@media (max-width: 640px) {
+  .now-grid { grid-template-columns: 1fr; }
+  .now-grid > *:last-child:nth-child(odd) { grid-column: auto; }
+}
+
+/* 근무표(StaffScheduleView) 사이드바 — 데스크톱은 타임테이블 옆(가로), 폰은 아래(세로)로 쌓는다.
+   좌측엔 이미 전역 네비 레일이 있어 사이드바를 왼쪽에 또 붙이면 레일+사이드바+본문 세 겹이 되어
+   시선이 더 늘어난다(DESIGN.md §1) — 그래서 우측에 둔다. 폭은 컴포넌트가 --aside-w 로 지정한다
+   (펼침 220px / 접힘 44px) — 인라인 style 이 아니라 커스텀 프로퍼티로 넘기는 이유는 아래 폰
+   미디어쿼리가 width:100% 로 덮어써야 하는데, width 를 인라인으로 박으면 스타일시트가 못 이기기
+   때문이다. 경계 640px 는 기존 폰 대응 쿼리와 동일. */
+.staff-sched-layout { display: flex; align-items: flex-start; }
+.staff-sched-aside { flex: none; width: var(--aside-w, 220px); }
+@media (max-width: 640px) {
+  .staff-sched-layout { flex-direction: column; }
+  .staff-sched-aside { width: 100%; }
+}

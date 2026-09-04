@@ -10,7 +10,9 @@ import MobilePenalty, { type PStudent } from "./MobilePenalty";
 export const runtime = "nodejs";
 export const viewport: Viewport = { width: "device-width", initialScale: 1 };
 
-// 폰용 벌점 — 이번 주 누적을 학생 리스트로. 데스크톱(/m/penalty)은 그대로.
+// 폰용 벌점 — 순찰 돌며 즉시 주는 주 사용처라 전용 모듈 제거와 무관하게 그대로 둔다(집주인 판단).
+// 데스크톱 집계는 순찰 기록 화면(/m/patrol)의 "벌점 현황" 탭으로, 개별 부여는 좌석 배치도 학생
+// 상세의 벌점 사이드 패널로 흡수됐다.
 export default async function MobilePenaltyPage() {
   const me = await getMe();
   if (!me) redirect("/login");

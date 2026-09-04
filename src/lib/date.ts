@@ -81,6 +81,18 @@ export function addDays(key: string, delta: number): string {
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
 }
 
+/** "YYYY-MM-DD" 가 형식뿐 아니라 실제 달력 날짜인지 검사(월 13, 일 32, 2월 30일처럼 자릿수는
+ *  맞지만 존재하지 않는 날짜를 막는다) — Date.UTC 는 넘치는 값을 다음 달/해로 밀어 넣어 그냥
+ *  통과시키므로(예: 2026-99-99 도 유효한 Date 가 된다), 만든 Date 를 다시 부품으로 되돌려 원래
+ *  입력과 같은지로 판정한다. 쿼리스트링으로 받은 날짜를 DB 쿼리에 쓰기 전에 항상 이걸 거친다
+ *  (형식 정규식만으로는 "99월 99일" 같은 값이 그대로 SQL 까지 가서 500 을 낸다). */
+export function isValidDateKey(key: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return false;
+  const [y, m, d] = key.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
 /** 날짜 이동 UI용 짧은 라벨 — 오늘이면 "오늘", 아니면 "8월 11일". */
 export function dayLabel(key: string, today: string): string {
   if (key === today) return "오늘";
@@ -110,4 +122,11 @@ export function weekStartLabel(key: string): string {
   return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString("ko-KR", {
     timeZone: KST, month: "long", day: "numeric", weekday: "short",
   });
+}
+
+/** "YYYY-MM-DD" → "M월 D일" — 문자 템플릿의 {만료일} 처럼 이미 알고 있는 날짜 키를 사람이 읽는
+ *  형태로 바꿀 때 쓴다(dayLabel 과 달리 "오늘" 특수취급 없음 — 학부모에게 절대 날짜로 보여야 하므로). */
+export function dateLabelKo(key: string): string {
+  const [, m, d] = key.split("-").map(Number);
+  return `${m}월 ${d}일`;
 }

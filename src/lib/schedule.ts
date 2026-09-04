@@ -110,7 +110,13 @@ export function reasonColor(reason: string): string {
 // 학생 신청 폼(f/[slug]/forms/exr8k3mq.tsx)과 서버 액션(schedule-request-actions.ts), 관리자 목록
 // (m/schedule/RequestsView.tsx·requestActions.ts) 이 공유하는 단일 출처. 순수 함수만 — DB·server-only
 // 의존 없음(클라이언트 컴포넌트에서 그대로 import 해야 하므로).
-export type RequestType = 'absent' | 'late' | 'early' | 'out' | 'custom';
+// 'hours' 는 카드 UI 에서만 고르는 갈래 표시용 유형이다 — 실제 신청 항목으로 서버에 전송되지 않고,
+// 등원·하원 각각 어느 방향으로 바뀌는지에 따라 late/arrive_early, early/leave_late 로 나뉘어
+// 최대 2건으로 쪼개져 제출된다(exr8k3mq.tsx hoursArriveItem/hoursLeaveItem 참고). 'arrive_early'·
+// 'leave_late' 는 그렇게 쪼개진 결과로만 저장되는 유형이라 카드 "유형" 타일 목록에는 노출하지 않는다
+// (exr8k3mq.tsx CARD_TILE_TYPES 가 걸러낸다) — 그래도 신청 목록·관리자 화면 라벨(requestTypeOf)에는
+// 필요해 REQUEST_TYPES 자체에는 그대로 포함한다.
+export type RequestType = 'absent' | 'late' | 'early' | 'out' | 'custom' | 'hours' | 'arrive_early' | 'leave_late';
 export type RequestTypeOption = { key: RequestType; label: string; desc: string };
 export const REQUEST_TYPES: RequestTypeOption[] = [
   { key: 'absent', label: '하루 안 와요', desc: '그날 하루 전체를 결석으로 신청해요.' },
@@ -118,6 +124,9 @@ export const REQUEST_TYPES: RequestTypeOption[] = [
   { key: 'early', label: '일찍 가요', desc: '평소보다 일찍 하원해요 — 하원 시각만 입력하면 돼요.' },
   { key: 'out', label: '나갔다 와요', desc: '학원 등으로 잠깐 나갔다가 다시 돌아와요.' },
   { key: 'custom', label: '직접 입력', desc: '위 유형에 안 맞으면 시작·종료 시간을 직접 입력해요.' },
+  { key: 'hours', label: '등·하원 시각 변경', desc: '그날의 등원·하원 시각 자체를 바꿔요 — 원래 시각에서 무엇을 바꿀지만 입력하면 돼요. 등원만, 하원만, 둘 다 바꿀 수 있어요.' },
+  { key: 'arrive_early', label: '일찍 와요', desc: '평소보다 일찍 등원해요 — 등원 시각만 입력하면 돼요.' },
+  { key: 'leave_late', label: '늦게 가요', desc: '평소보다 늦게 하원해요 — 하원 시각만 입력하면 돼요.' },
 ];
 export const requestTypeOf = (key: string): RequestTypeOption =>
   REQUEST_TYPES.find((t) => t.key === key) ?? REQUEST_TYPES[REQUEST_TYPES.length - 1];
@@ -145,13 +154,25 @@ export type RequestTypeRawInput =
   | { type: 'late'; arrive: number }
   | { type: 'early'; leave: number }
   | { type: 'out'; leaveAt: number; returnAt: number }
-  | { type: 'custom'; start: number; end: number };
+  | { type: 'custom'; start: number; end: number }
+  | { type: 'arrive_early'; arrive: number }
+  | { type: 'leave_late'; leave: number };
 
 export type ResolvedRange = { ok: true; start: number; end: number } | { ok: false; error: string };
 
 const REQ_MIN_MIN = 0;
 const REQ_MAX_MIN = 1560;
 const NO_HOURS_ERROR = '이 날은 정기 등·하원 시각이 없어요(휴무이거나 미제출). 직접 입력을 이용해주세요.';
+
+/** raw(0~1439, 그날의 시계 입력) 를 base(정기 등·하원 시각, 자정 넘김 좌표계 가능) 에 가장 가까운
+ * 좌표로 맞춘다 — raw 그대로와 raw+1440(다음날) 중 base 와 더 가까운 쪽을 고른다. "늦게 가요"(early
+ * 반대 방향인 leave_late)처럼 base 가 자정을 넘긴 값(leave_min>1440)일 때 학생이 입력한 단순 시계
+ * 값이 오늘인지 다음날인지를 판정하는 데 쓴다. arrive_early 는 등원 기준(base<1440 항상)이라
+ * 이 보정이 사실상 no-op 이지만, 좌표계를 통일해 두 방향 모두 같은 함수를 쓴다. */
+export function nearestToBase(raw: number, base: number): number {
+  const alt = raw + 1440;
+  return Math.abs(raw - base) <= Math.abs(alt - base) ? raw : alt;
+}
 
 /**
  * 신청 유형 + 원값(raw) + 그날(요일)의 정기 등·하원 시각(schedule_hours, 없으면 null) → 예외 블록
@@ -206,6 +227,23 @@ export function resolveRequestRange(
       const end = input.end <= start ? input.end + 1440 : input.end;
       return clampCheck(start, end);
     }
+    // 'late' 의 반대 방향 — 평소보다 일찍 등원. 항상 [새 등원, 원래 등원) 로 저장한다(원래 쪽이 end).
+    case 'arrive_early': {
+      if (!hours) return { ok: false, error: NO_HOURS_ERROR };
+      if (input.arrive >= hours.arrive_min) {
+        return { ok: false, error: '등원 시각이 원래보다 늦어요. "늦게 와요"를 이용해주세요.' };
+      }
+      return clampCheck(input.arrive, hours.arrive_min);
+    }
+    // 'early' 의 반대 방향 — 평소보다 늦게 하원. 항상 [원래 하원, 새 하원) 로 저장한다(원래 쪽이 start).
+    case 'leave_late': {
+      if (!hours) return { ok: false, error: NO_HOURS_ERROR };
+      const adjusted = nearestToBase(input.leave, hours.leave_min);
+      if (adjusted <= hours.leave_min) {
+        return { ok: false, error: '하원 시각이 원래보다 빨라요. "일찍 가요"를 이용해주세요.' };
+      }
+      return clampCheck(hours.leave_min, adjusted);
+    }
   }
 }
 
@@ -248,6 +286,8 @@ export function requestTimeLabel(reqType: string, start: number, end: number): s
     case 'absent': return '하루 안 옴';
     case 'late': return `${reqFmtClock(end)} 등원`;
     case 'early': return `${reqFmtClock(start)} 하원`;
+    case 'arrive_early': return `${reqFmtClock(start)} 등원`;
+    case 'leave_late': return `${reqFmtClock(end)} 하원`;
     case 'out': return `${reqFmtRange(start, end)} 외출`;
     default: return reqFmtRange(start, end);
   }

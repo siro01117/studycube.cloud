@@ -7,12 +7,12 @@ import {
   setSeatStatus, addStudent, createRoom,
 } from './actions';
 import { checkIn, checkOut } from './attendanceActions';
+import { useAttendanceSmsPrompt } from './useAttendanceSmsPrompt';
 import { updateRoom, deleteRoom, saveRoomPositions } from './roomActions';
 import StudentPopup, { ReleaseSeatIcon, MoveSeatIcon } from '../_shared/StudentPopup';
 import ContextMenu, { type MenuItem } from '../_shared/ContextMenu';
 import Modal from '../_shared/Modal';
 import { useLongPress } from '../_shared/useLongPress';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { recordPatrol, clearPatrolMark, startPatrol, endPatrol, getPatrolSessionDetail, type OpenPatrolSession, type PatrolPace } from './patrolActions';
 import { PATROL_STATES, PATROL_BY_KEY } from '@/lib/patrol';
@@ -181,7 +181,6 @@ const I_GRID = 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z';
 const I_TRASH = 'M4 7h16M6 7l1 13h10l1-13M9 7V4h6v3M10 11v6M14 11v6';
 const I_GEAR = 'M4 8h10M18 8h2M4 16h2M10 16h10M14 6v4M8 14v4'; // 슬라이더형 설정 아이콘
 const I_PATROL = 'M12 3l7 3v5c0 4-3 7-7 8-4-1-7-4-7-8V6z'; // 방패(순찰)
-const I_CLOCK = 'M12 21a9 9 0 110-18 9 9 0 010 18M12 8v4l3 2'; // 시계(순찰 기록)
 const I_LOGOUT = 'M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9'; // 퇴실(문 밖으로 화살표)
 
 // ---------------- 좌석 프레젠테이션 헬퍼 (state 미사용 → 모듈 스코프) ----------------
@@ -468,6 +467,7 @@ const OvRoom = memo(function OvRoom({
 export default function FloorEditor({
   rooms, seats, students, canManage, canEditStudent, initialRoomId, occupancy, canAttend, canPatrol, lastPatrolAt,
   openSession, patrolPace, scheduleMap, periods, actual, serverNowMin,
+  canPenaltyView, canPenaltyManage, today, weekStart,
 }: {
   rooms: Room[]; seats: Seat[]; students: Student[];
   canManage: boolean; canEditStudent: boolean; initialRoomId: string | null;
@@ -477,6 +477,8 @@ export default function FloorEditor({
   periods: Period[];
   actual: Record<string, ActualAttendance>; // 학생별 오늘 실제 출결 요약(statusAt 5번째 인자)
   serverNowMin: number; // 서버가 계산해 내려준 지금 KST 분 — "확인 필요" 판정 전용(클라 new Date() 금지 원칙)
+  canPenaltyView: boolean; canPenaltyManage: boolean; // 학생 상세에 흡수된 벌점 패널 권한
+  today: string; weekStart: string; // 벌점 패널의 "이번 주" 기준(서버 KST)
 }) {
   const router = useRouter();
   const floors = useMemo(
@@ -506,6 +508,23 @@ export default function FloorEditor({
     Object.entries(fields).forEach(([k, v]) => fd.set(k, String(v)));
     start(async () => { await action(fd); after?.(); });
   }, [start]);
+
+  // 입·퇴실 전용 — checkIn/checkOut 은 문자를 보내지 않고 promptSms 만 돌려준다(attendanceActions.ts).
+  // call() 은 반환값을 버리므로 이 둘만 별도로 감싼다.
+  const { maybePrompt: maybePromptAttSms, node: attSmsPromptNode } = useAttendanceSmsPrompt();
+  const callAttendance = useCallback(
+    (action: typeof checkIn | typeof checkOut, studentId: string, note: string | null, kind: 'attend_in' | 'attend_out', studentName: string, after?: () => void) => {
+      const fd = new FormData();
+      fd.set('studentId', studentId);
+      if (note != null) fd.set('note', note);
+      start(async () => {
+        const r = await action(fd);
+        maybePromptAttSms(r, studentId, studentName, kind);
+        after?.();
+      });
+    },
+    [start, maybePromptAttSms],
+  );
 
   // 전체 배치 편집(방 드래그)
   const [arrange, setArrange] = useState(false);
@@ -989,7 +1008,7 @@ export default function FloorEditor({
     const sid = s.current_student_id;
     if (sid) {
       return [
-        { label: '입실 기록', onClick: () => call(checkIn, { studentId: sid }), disabled: !canAttend },
+        { label: '입실 기록', onClick: () => callAttendance(checkIn, sid, null, 'attend_in', stuById.get(sid)?.name ?? '학생'), disabled: !canAttend },
         { label: '퇴실 기록', onClick: () => openCheckoutConfirm(sid), disabled: !canAttend },
         { separator: true },
         { label: '학생 정보', onClick: () => openSeat(s.id) },
@@ -1436,27 +1455,33 @@ export default function FloorEditor({
 
         {/* 우측 액션 */}
         <div className="flex items-center gap-2" style={{ flex: 'none', position: 'relative' }}>
+          {/* 순찰 — 이 화면에서 가장 자주 누르는 동작이라 상단 액션 맨 앞에 큰 알약으로 둔다.
+              (한때 화면 중앙 하단 고정이었으나 집주인 요청으로 상단으로 올렸다.) 옆의 작은
+              아이콘 칩들과 크기·채움으로 구별돼 눈이 먼저 여기로 온다. 순찰 중에는 위험색으로
+              바뀌어 "지금 돌고 있다"가 보인다. */}
+          {!arrange && mode === 'view' && floorSel !== 'all' && canPatrol && (
+            <button
+              onClick={() => setPatrolConfirm(patrolMode ? 'end' : (resume ? 'resume' : 'start'))}
+              title="순찰 모드"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 7, height: 36, padding: '0 16px',
+                borderRadius: 999, border: 'none', cursor: 'pointer', fontSize: 13.5, fontWeight: 800,
+                background: patrolMode ? 'var(--danger-strong)' : 'var(--accent)',
+                color: '#fff', whiteSpace: 'nowrap',
+              }}
+            >
+              <Ic d={I_PATROL} size={16} /> {patrolMode ? '순찰 종료' : resume ? '순찰 이어하기' : '순찰 시작'}
+            </button>
+          )}
           {!arrange && mode === 'view' && !patrolMode && floorSel !== 'all' && canPatrol && patrolPace && (
             // 직원이 감으로 돌지 않도록 — 오늘 순찰 횟수·마지막 순찰 이후 경과는 서버가 계산해 내려준 값 그대로.
             <span title="순찰 페이스" style={{ fontSize: 12, color: 'var(--dim)', whiteSpace: 'nowrap' }}>
               오늘 순찰 {patrolPace.todayCount}회{patrolPace.lastLabel ? ` · 마지막 ${patrolPace.lastLabel}` : ''}
             </span>
           )}
-          {!arrange && mode === 'view' && floorSel !== 'all' && canPatrol && (
-            <button
-              className="btn"
-              onClick={() => setPatrolConfirm(patrolMode ? 'end' : (resume ? 'resume' : 'start'))}
-              title="순찰 모드"
-              style={{ height: 36, padding: '0 14px', fontSize: 13, ...(patrolMode ? { background: 'var(--danger-strong)', borderColor: 'var(--danger-strong)', color: '#fff' } : {}) }}
-            >
-              <Ic d={I_PATROL} /> {patrolMode ? '순찰 종료' : resume ? '이어하기' : '순찰'}
-            </button>
-          )}
-          {!arrange && mode === 'view' && canPatrol && (
-            <Link href="/m/patrol" className="btn" title="순찰 기록" style={{ height: 36, padding: '0 12px', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}>
-              <Ic d={I_CLOCK} /> 기록
-            </Link>
-          )}
+          {/* "기록"(순찰 세션 기록)·"벌점"(전체 벌점) 아이콘 칩 제거(집주인 지시) — 순찰 기록은 좌측
+              전역 메뉴(순찰 기록 모듈, /m/patrol)로 충분히 닿고, 벌점은 모듈 자체가 없어져 학생 상세
+              팝업의 사이드 패널로 흡수됐다. 상단에는 순찰 시작 알약만 남는다. */}
           {!arrange && mode === 'view' && floorSel !== 'all' && (
             <div className="flex items-center" style={{ border: '1px solid var(--line)', borderRadius: 9, overflow: 'hidden', height: 36 }}>
               <button onClick={() => zoomBy(-0.15)} title="축소" style={{ border: 'none', background: 'var(--panel)', width: 32, height: 34, cursor: 'pointer', fontSize: 17, color: 'var(--dim)' }}>−</button>
@@ -1605,6 +1630,7 @@ export default function FloorEditor({
                 canAttend={canAttend}
                 onClose={closeDrawer}
                 onCheckOutRequest={(sid) => { closeDrawer(); openCheckoutConfirm(sid); }}
+                penalty={canPenaltyView ? { canManage: canPenaltyManage, canPatrolManage: canPatrol, today, weekStart } : undefined}
                 actions={<>
                   {canManage && <button className="btn" onClick={() => call(releaseSeat, { seatId: selSeat.id }, closeDrawer)} style={{ height: 40, fontSize: 13, gap: 6 }}><ReleaseSeatIcon /> 자리 비우기</button>}
                   {canManage && <button className="btn" onClick={() => { setMovingStudentId(openStudent.id); closeDrawer(); }} style={{ height: 40, fontSize: 13, gap: 6 }}><MoveSeatIcon /> 자리 이동</button>}
@@ -1758,7 +1784,7 @@ export default function FloorEditor({
         const occ = occupancy[cc.studentId];
         const close = () => setCheckoutConfirm(null);
         const confirmWith = (note: string | null) => {
-          call(checkOut, { studentId: cc.studentId, note: note ?? '' }, close);
+          callAttendance(checkOut, cc.studentId, note ?? '', 'attend_out', name, close);
         };
         const presetPicker = (
           <>
@@ -1961,6 +1987,7 @@ export default function FloorEditor({
           </Modal>
         );
       })()}
+      {attSmsPromptNode}
     </div>
   );
 }

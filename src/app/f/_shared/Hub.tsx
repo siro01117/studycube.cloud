@@ -18,6 +18,8 @@ import type { FormDef } from "../registry";
 // 하려면 허브 단계에서부터 같은 판정이 필요하다.
 import { checkScheduleWindow } from "../[slug]/forms/schedule-window-actions";
 import type { EditState } from "@/lib/schedule-window";
+// 학생 공지(ntc7h2qm) 안 읽은 개수 — 카드 배지용. 스케쥴 입력 판정과 같은 자리(신원 확인 직후)에서 재사용.
+import { getUnreadMyNoticeCount } from "../[slug]/forms/notice-actions";
 
 // 빌드 타임에 고정되는 값 — 프로덕션 빌드에서는 이 분기가 아예 번들에 남지 않는다.
 const IS_DEV = process.env.NODE_ENV !== "production";
@@ -69,6 +71,27 @@ export default function Hub() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identity?.name, identity?.code, scheduleItem?.slug]);
 
+  // 학생 공지 안 읽은 개수 — 있으면 "내 정보" 카드에 배지로 보여준다(스케쥴 입력 판정과 같은 이유로
+  // 허브 단계에서부터 확인: 폼에 들어가지 않고도 안 읽은 공지가 있는지 알 수 있어야 한다).
+  const noticeItem = infoItems.find((item) => item.type === "notice") ?? null;
+  const [unreadNotices, setUnreadNotices] = useState<number | null>(null);
+  useEffect(() => {
+    if (!identity || !noticeItem) return;
+    let alive = true;
+    const fd = new FormData();
+    fd.set("name", identity.name);
+    fd.set("code", identity.code);
+    if (identity._test) fd.set("test", "1");
+    getUnreadMyNoticeCount(fd).then((r) => {
+      if (!alive) return;
+      setUnreadNotices(r.ok ? r.count : 0);
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identity?.name, identity?.code, noticeItem?.slug]);
+
   const [lockPopup, setLockPopup] = useState<{ title: string; lines: string[] } | null>(null);
 
   return (
@@ -111,9 +134,21 @@ export default function Hub() {
                 내 정보
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {infoItems.map((item) => (
-                  <HubCard key={item.slug} item={item} onLocked={() => setLockPopup({ title: item.title, lines: GENERIC_LOCKED_LINES })} />
-                ))}
+                {infoItems.map((item) => {
+                  const banner =
+                    item.type === "notice" && unreadNotices !== null && unreadNotices > 0
+                      ? `안 읽은 공지 ${unreadNotices}건`
+                      : null;
+                  return (
+                    <HubCard
+                      key={item.slug}
+                      item={item}
+                      banner={banner}
+                      bannerIcon="dot"
+                      onLocked={() => setLockPopup({ title: item.title, lines: GENERIC_LOCKED_LINES })}
+                    />
+                  );
+                })}
               </div>
             </div>
           )}
@@ -287,6 +322,7 @@ function HubCard({
   readyOverride,
   lockedLabel = "준비 중",
   banner,
+  bannerIcon = "clock",
   onLocked,
 }: {
   item: FormDef;
@@ -296,6 +332,8 @@ function HubCard({
   lockedLabel?: string;
   /** 열려 있을 때 desc 아래에 보여줄 한 줄(예: "오늘 21:30까지 수정할 수 있어요"). */
   banner?: string | null;
+  /** banner 앞에 붙는 아이콘 — 기본은 시계(기간성 안내), 안 읽은 개수처럼 시간과 무관한 안내는 "dot". */
+  bannerIcon?: "clock" | "dot";
   /** 잠긴 카드를 눌렀을 때 — 없으면(예: 판정 확인 중) 클릭해도 반응하지 않는다. */
   onLocked?: () => void;
 }) {
@@ -339,7 +377,11 @@ function HubCard({
         )}
         {ready && banner && (
           <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 700, color: "var(--warn)", marginTop: 4 }}>
-            <ClockGlyph />
+            {bannerIcon === "dot" ? (
+              <span aria-hidden style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--warn)", flex: "none" }} />
+            ) : (
+              <ClockGlyph />
+            )}
             {banner}
           </span>
         )}
@@ -401,7 +443,18 @@ function ItemIcon({ type }: { type: string }) {
   if (type === "my_schedule") return <ScheduleIcon />;
   if (type === "my_attendance") return <AttendanceIcon />;
   if (type === "my_penalty") return <PenaltyIcon />;
+  if (type === "notice") return <NoticeIcon />;
   return <DocIcon />;
+}
+
+function NoticeIcon() {
+  // 종(벨): 공지 카드 전용 — 다른 조회 항목(달력·방패류)과 구분.
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 8a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6" />
+      <path d="M10 20a2 2 0 0 0 4 0" />
+    </svg>
+  );
 }
 
 function AttendanceIcon() {

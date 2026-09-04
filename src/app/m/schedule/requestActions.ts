@@ -54,6 +54,10 @@ export type RequestRow = {
   createdAt: string; // 정렬용 원시 timestamptz(표시는 라벨만 쓴다)
   decidedLabel: string | null;
   decidedByName: string | null;
+  // 등원/하원 시각 변경(late/arrive_early/early/leave_late) 만 채워진다 — "원래 X → 요청 Y" 를 한눈에
+  // 보여주기 위한 값(신청 당시 start_min/end_min 을 유형별 고정 방향대로 풀어낸 라벨, fromToLabelOf 참고).
+  changeFromLabel: string | null;
+  changeToLabel: string | null;
 };
 
 type RequestRowDb = {
@@ -70,18 +74,34 @@ function summaryOf(r: RequestRowDb): string {
   }
   return requestTimeLabel(r.req_type, r.start_min, r.end_min);
 }
-const toRow = (r: RequestRowDb): RequestRow => ({
-  id: r.id, studentId: r.student_id, studentName: r.student_name, seatNumber: r.seat_number,
-  reqKind: (r.req_kind as RequestKind) ?? "temp",
-  date: r.date, dateLabel: r.date ? dateLabelOf(r.date) : null,
-  kind: r.kind, reason: r.reason, title: r.title,
-  reqType: r.req_type as RequestType,
-  timeLabel: summaryOf(r), status: r.status as RequestStatus, note: r.note,
-  mode: r.skip_rule_id ? "replace" : "add",
-  createdLabel: dateTimeLabel(r.created_at), createdAt: r.created_at,
-  decidedLabel: r.decided_at ? dateTimeLabel(r.decided_at) : null,
-  decidedByName: r.decided_by_name,
-});
+/** 등원/하원 시각 변경 신청은 [start_min,end_min) 안에 "원래"와 "요청" 이 방향에 따라 뒤바뀌어
+ * 들어 있다(스키마 제약 end>start 를 지키려고 작은 쪽을 항상 start 에 둔다 — src/lib/schedule.ts
+ * resolveRequestRange 참고). late/leave_late 는 원래가 start, 요청이 end. early/arrive_early 는 그 반대.
+ * 그 외 유형은 이 구분이 의미 없어 null. */
+function fromToOf(reqType: string, start: number, end: number): { from: number; to: number } | null {
+  switch (reqType) {
+    case "late": case "leave_late": return { from: start, to: end };
+    case "early": case "arrive_early": return { from: end, to: start };
+    default: return null;
+  }
+}
+const toRow = (r: RequestRowDb): RequestRow => {
+  const ft = r.req_kind === "temp" ? fromToOf(r.req_type, r.start_min, r.end_min) : null;
+  return {
+    id: r.id, studentId: r.student_id, studentName: r.student_name, seatNumber: r.seat_number,
+    reqKind: (r.req_kind as RequestKind) ?? "temp",
+    date: r.date, dateLabel: r.date ? dateLabelOf(r.date) : null,
+    kind: r.kind, reason: r.reason, title: r.title,
+    reqType: r.req_type as RequestType,
+    timeLabel: summaryOf(r), status: r.status as RequestStatus, note: r.note,
+    mode: r.skip_rule_id ? "replace" : "add",
+    createdLabel: dateTimeLabel(r.created_at), createdAt: r.created_at,
+    decidedLabel: r.decided_at ? dateTimeLabel(r.decided_at) : null,
+    decidedByName: r.decided_by_name,
+    changeFromLabel: ft ? fmtLeave(ft.from) : null,
+    changeToLabel: ft ? fmtLeave(ft.to) : null,
+  };
+};
 
 // ---------------- 목록 + 자동 승인 설정 ----------------
 export type RequestListResult = { rows: RequestRow[]; autoApprove: boolean; pendingCount: number };

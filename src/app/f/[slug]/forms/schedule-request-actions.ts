@@ -341,7 +341,10 @@ async function createTempRequests(branch: string, studentId: string, items: Reco
     if (!reasonOpt) return { ok: false, error: "사유를 확인해주세요." };
 
     const reqType = typeof it.reqType === "string" && REQ_TYPE_KEYS.has(it.reqType) ? (it.reqType as RequestType) : null;
-    if (!reqType) return { ok: false, error: "신청 유형을 확인해주세요." };
+    // 'hours'(등·하원 시각 변경)는 카드 UI 전용 갈래 표시일 뿐 실제 신청 항목으로는 전송되지 않는다
+    // (exr8k3mq.tsx 가 방향에 따라 late/arrive_early, early/leave_late 로 쪼개서 보낸다) — 여기 도달하면
+    // 잘못된 요청이다.
+    if (!reqType || reqType === "hours") return { ok: false, error: "신청 유형을 확인해주세요." };
 
     // raw 는 클라가 만든 원값(0~1439 minute-of-day)일 뿐 — reqType 자체 기준으로 서버가 다시 구성한다
     // (raw.type 필드는 신뢰하지 않고 무시, reqType 으로만 분기).
@@ -355,6 +358,12 @@ async function createTempRequests(branch: string, studentId: string, items: Reco
     } else if (reqType === "early") {
       if (!isRawMin(ro.leave)) return { ok: false, error: "하원 시각을 확인해주세요." };
       raw = { type: "early", leave: ro.leave };
+    } else if (reqType === "arrive_early") {
+      if (!isRawMin(ro.arrive)) return { ok: false, error: "등원 시각을 확인해주세요." };
+      raw = { type: "arrive_early", arrive: ro.arrive };
+    } else if (reqType === "leave_late") {
+      if (!isRawMin(ro.leave)) return { ok: false, error: "하원 시각을 확인해주세요." };
+      raw = { type: "leave_late", leave: ro.leave };
     } else if (reqType === "out") {
       if (!isRawMin(ro.leaveAt) || !isRawMin(ro.returnAt)) return { ok: false, error: "외출 시간을 확인해주세요." };
       raw = { type: "out", leaveAt: ro.leaveAt, returnAt: ro.returnAt };

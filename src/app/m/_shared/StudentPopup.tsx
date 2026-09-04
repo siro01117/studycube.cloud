@@ -2,9 +2,11 @@
 
 // 학생 상세 팝업(좌석 배치도·학생 관리 공용). 내부 UI + 입·퇴실 기록 조회를 모두 자급.
 // 좌석 컨텍스트(자리 비우기·이동 등)는 부모가 actions 슬롯으로 주입.
-import { useEffect, useState, useTransition, type ReactNode } from "react";
-import { checkIn, checkOut, undoLastEvent, getAttendanceEvents, setAbsent, clearDailyStatus, getDailyStatus } from "@/app/m/seat/attendanceActions";
+import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import { checkIn, checkOut, undoLastEvent, getAttendanceEvents, setAbsent, clearDailyStatus, getDailyStatus, type AttendanceRecordResult } from "@/app/m/seat/attendanceActions";
+import { useAttendanceSmsPrompt } from "@/app/m/seat/useAttendanceSmsPrompt";
 import { ABSENCE_REASONS, absenceReasonLabel } from "@/lib/attendance";
+import PenaltySidePanel from "./PenaltySidePanel";
 
 export type PopupStudent = {
   id: string; name: string; level: string | null; grade: string | null; is_repeat: boolean | null;
@@ -103,9 +105,15 @@ const RestoreIcon = () => (
     <path d="M3 8V4.5M3 8h3.5" />
   </svg>
 );
+const PenaltyIcon = () => (
+  <svg {...iconProps}>
+    <circle cx="8" cy="8" r="6.2" />
+    <path d="M8 5v3.5M8 10.8h.01" />
+  </svg>
+);
 
 export default function StudentPopup({
-  student, seatLabel, accessCode, canManage, canAttend, onClose, actions, onCheckOutRequest,
+  student, seatLabel, accessCode, canManage, canAttend, onClose, actions, onCheckOutRequest, penalty,
 }: {
   student: PopupStudent;
   seatLabel: string | null;   // 예: "1번" / null(미배정)
@@ -117,6 +125,9 @@ export default function StudentPopup({
   // 퇴실 버튼을 즉시 처리하지 않고 확인창을 띄우고 싶은 화면(좌석 배치도)이 넘긴다 — 있으면 직접
   // checkOut 대신 이걸 호출한다. 없으면(예: StudentList) 기존처럼 즉시 checkOut.
   onCheckOutRequest?: (studentId: string) => void;
+  // 벌점 패널(좌석 배치도에 흡수) — penalty.view 권한 있는 화면만 넘긴다. 없으면 섹션 자체를 렌더하지
+  // 않아(쿼리도 안 나감) 벌점 화면 없는 컨텍스트(예: 다른 곳에서 재사용 시)에 영향 없다.
+  penalty?: { canManage: boolean; canPatrolManage: boolean; today: string; weekStart: string };
 }) {
   const [attDate, setAttDate] = useState(todayLocal());
   const [attEvents, setAttEvents] = useState<{ kind: string; auto: boolean; at: string }[]>([]);
@@ -124,11 +135,28 @@ export default function StudentPopup({
   const [absentPick, setAbsentPick] = useState(false); // 결석 사유 고르기 펼침
   const [tick, setTick] = useState(0);
   const [pending, start] = useTransition();
+  const [penaltyOpen, setPenaltyOpen] = useState(false);
+  const penaltyBtnRef = useRef<HTMLButtonElement>(null);
 
   const call = (action: (fd: FormData) => Promise<unknown>, fields: Record<string, string>) => {
     const fd = new FormData();
     Object.entries(fields).forEach(([k, v]) => fd.set(k, v));
     start(async () => { await action(fd); setAbsentPick(false); setTick((t) => t + 1); });
+  };
+
+  // 입·퇴실 전용(위 call 은 반환값을 버리는데, checkIn/checkOut 은 문자를 보낼지 물어야 하는 promptSms
+  // 신호를 돌려준다 — attendanceActions.ts). onCheckOutRequest 가 있는 화면(좌석 배치도)은 퇴실을
+  // 부모가 처리하므로 거기서 이미 같은 훅으로 물어본다 — 여기서는 이 팝업이 직접 부르는 경로(입실
+  // 항상, 퇴실은 onCheckOutRequest 없을 때만)만 담당한다.
+  const { maybePrompt: maybePromptAttSms, node: attSmsPromptNode } = useAttendanceSmsPrompt();
+  const callAttendance = (action: (fd: FormData) => Promise<AttendanceRecordResult>, kind: "attend_in" | "attend_out") => {
+    const fd = new FormData();
+    fd.set("studentId", student.id);
+    start(async () => {
+      const r = await action(fd);
+      maybePromptAttSms(r, student.id, student.name, kind);
+      setAbsentPick(false); setTick((t) => t + 1);
+    });
   };
 
   useEffect(() => {
@@ -233,8 +261,8 @@ export default function StudentPopup({
             <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
               {isToday && !isAbsent && (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                  <button className="btn btn-accent" disabled={pending} onClick={() => call(checkIn, { studentId: student.id })} style={{ height: 38, fontSize: 12.5, gap: 6 }}><CheckInIcon /> 입실</button>
-                  <button className="btn" disabled={pending} onClick={() => (onCheckOutRequest ? onCheckOutRequest(student.id) : call(checkOut, { studentId: student.id }))} style={{ height: 38, fontSize: 12.5, gap: 6, border: "1px solid #cdd2dd" }}><CheckOutIcon /> 퇴실</button>
+                  <button className="btn btn-accent" disabled={pending} onClick={() => callAttendance(checkIn, "attend_in")} style={{ height: 38, fontSize: 12.5, gap: 6 }}><CheckInIcon /> 입실</button>
+                  <button className="btn" disabled={pending} onClick={() => (onCheckOutRequest ? onCheckOutRequest(student.id) : callAttendance(checkOut, "attend_out"))} style={{ height: 38, fontSize: 12.5, gap: 6, border: "1px solid #cdd2dd" }}><CheckOutIcon /> 퇴실</button>
                 </div>
               )}
               {/* 결석 처리 / 취소 (선택한 날짜 기준) */}
@@ -256,8 +284,10 @@ export default function StudentPopup({
         </div>
       </div>
 
-      {/* 스케쥴·상세 이동 — 위 동작 버튼들과 구분되는 팝업 맨 아래 줄(이동 성격 = accent 틴트) */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, padding: "14px 22px", borderTop: "1px solid var(--line)" }}>
+      {/* 스케쥴·상세·벌점 이동 — 위 동작 버튼들과 구분되는 팝업 맨 아래 줄(이동 성격 = accent 틴트).
+          벌점은 팝업 안에 내역을 붙이지 않고, 누르면 이 팝업이 살짝 왼쪽으로 밀리며 오른쪽에 사이드
+          패널이 뜬다(PenaltySidePanel) — penalty.view 권한 있는 화면만 넘겨받아 렌더한다. */}
+      <div style={{ display: "grid", gridTemplateColumns: penalty ? "1fr 1fr 1fr" : "1fr 1fr", gap: 10, padding: "14px 22px", borderTop: "1px solid var(--line)" }}>
         <a
           href={`/m/schedule?student=${student.id}`}
           className="btn"
@@ -272,7 +302,37 @@ export default function StudentPopup({
         >
           <DetailIcon /> 상세 보기
         </a>
+        {penalty && (
+          <button
+            ref={penaltyBtnRef}
+            type="button"
+            onClick={() => setPenaltyOpen(true)}
+            aria-haspopup="dialog"
+            aria-expanded={penaltyOpen}
+            className="btn"
+            style={{ height: 40, gap: 6, fontSize: 13.5, fontWeight: 700, cursor: "pointer", background: "var(--accent-soft)", color: "var(--accent)", border: "1px solid rgba(79,70,229,.28)" }}
+          >
+            <PenaltyIcon /> 벌점
+          </button>
+        )}
       </div>
+
+      {/* 벌점 사이드 패널 — 학생 상세를 열 때가 아니라 "벌점" 버튼을 누를 때만 마운트되므로 그때만
+          벌점 쿼리가 나간다(좌석 격자·팝업 로딩엔 영향 없음). */}
+      {penalty && (
+        <PenaltySidePanel
+          open={penaltyOpen}
+          onClose={() => setPenaltyOpen(false)}
+          triggerRef={penaltyBtnRef}
+          studentId={student.id}
+          studentName={student.name}
+          canManage={penalty.canManage}
+          canPatrolManage={penalty.canPatrolManage}
+          today={penalty.today}
+          weekStart={penalty.weekStart}
+        />
+      )}
+      {attSmsPromptNode}
     </>
   );
 }

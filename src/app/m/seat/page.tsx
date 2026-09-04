@@ -6,7 +6,7 @@ import { db } from "@/lib/db";
 import FloorEditor, { type Room, type Seat, type Student, type ScheduleInfo } from "./FloorEditor";
 import PhoneRedirect from "../_shared/PhoneRedirect";
 import PageHeader from "../_shared/PageHeader";
-import { todayKey as todayStr, weekdayOf, minuteOfKST } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
+import { todayKey as todayStr, weekdayOf, minuteOfKST, weekStartKey } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
 import type { DaySlot, Period, ActualAttendance } from "@/lib/schedule";
 import { getOpenPatrolSession, getPatrolPace } from "./patrolActions";
 import { buildOccupancy, type SeatOcc } from "@/lib/occupancy";
@@ -23,12 +23,15 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
   const canAttend = can(me, "attendance.edit");
   const canPatrol = can(me, "patrol.manage");
   const canPatrolView = can(me, "patrol.view");
+  const canPenaltyView = can(me, "penalty.view");
+  const canPenaltyManage = can(me, "penalty.manage");
   const branch = me.activeBranchId;
   const sp = await searchParams;
 
   // 오늘 요일 — KST 날짜 문자열에서 산출(무인자 new Date() 금지). schedule_rule.days / schedule_hours.day
   // 는 1=월..7=일 좌표계 — JS getUTCDay()(0=일..6=토)에서 변환한다. (모바일 순찰 page.tsx 와 동일 로직)
   const today = todayStr();
+  const weekStart = weekStartKey(); // 벌점 패널(학생 상세 흡수분)의 "이번 주" 기준
   const jsDow = weekdayOf(today);
   const dbDay = jsDow === 0 ? 7 : jsDow;
 
@@ -151,7 +154,7 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
       <PhoneRedirect to="/seat" />
       <PageHeader
         backHref="/home"
-        backLabel="홈"
+        backLabel="대시보드"
         title="좌석 배치도"
         titleExtra={branchName && <span className="chip">{branchName}</span>}
         right={
@@ -180,6 +183,10 @@ export default async function SeatPage({ searchParams }: { searchParams: Promise
         periods={periods}
         actual={actual}
         serverNowMin={nowMin}
+        canPenaltyView={canPenaltyView}
+        canPenaltyManage={canPenaltyManage}
+        today={today}
+        weekStart={weekStart}
       />
     </main>
   );

@@ -277,7 +277,17 @@ function RequestRowItem({ row, onChanged }: { row: RequestRow; onChanged: () => 
         </td>
         <td style={{ ...td, fontVariantNumeric: "tabular-nums", color: row.dateLabel ? "var(--ink)" : "var(--sub)" }}>{row.dateLabel ?? "—"}</td>
         <td style={td}><ReasonChip reason={row.reason} /> {row.mode === "replace" && row.reqKind === "temp" && <span style={{ fontSize: 10.5, color: "var(--sub)", marginLeft: 4 }}>대체</span>}</td>
-        <td style={{ ...td, fontVariantNumeric: "tabular-nums" }}>{row.timeLabel}</td>
+        <td style={{ ...td, fontVariantNumeric: "tabular-nums" }}>
+          {row.changeFromLabel && row.changeToLabel ? (
+            <span>
+              <span style={{ color: "var(--sub)" }}>{row.changeFromLabel}</span>
+              <span style={{ color: "var(--faint)", margin: "0 4px" }}>→</span>
+              <span style={{ fontWeight: 700 }}>{row.changeToLabel}</span>
+            </span>
+          ) : (
+            row.timeLabel
+          )}
+        </td>
         <td style={{ ...td, color: "var(--sub)", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.title || "–"}</td>
         <td style={td}><StatusChip status={row.status} /></td>
         <td style={{ ...td, fontVariantNumeric: "tabular-nums", color: "var(--sub)", whiteSpace: "nowrap" }}>{row.createdLabel}</td>
@@ -406,6 +416,14 @@ function DetailPanel({ row, detail }: { row: RequestRow; detail: RequestDetail |
       <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--sub)" }}>{row.dateLabel} · {row.studentName} 학생의 정기 일정</div>
       {detail.hours && (
         <div style={{ fontSize: 12.5, color: "var(--sub)" }}>등원~하원 {fmtClock(detail.hours.arrive)}–{fmtLeave(detail.hours.leave)}</div>
+      )}
+      {row.changeFromLabel && row.changeToLabel && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
+          <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--sub)" }}>등·하원 시각 변경</span>
+          <span style={{ color: "var(--sub)" }}>{row.changeFromLabel}</span>
+          <IconArrowRight />
+          <span style={{ fontWeight: 700 }}>{row.changeToLabel}</span>
+        </div>
       )}
       {detail.rules.length === 0 ? (
         <div style={{ fontSize: 12.5, color: "var(--sub)" }}>그 요일에 걸려 있는 정기 일정이 없어요.</div>

@@ -9,6 +9,7 @@ import ScheduleRequestForm from "./exr8k3mq";
 import MyScheduleView from "./myts7fq2";
 import MyAttendanceView from "./myat4wkd";
 import MyPenaltyView from "./mypt9rxb";
+import MyNotice from "./ntc7h2qm";
 
 export const FORM_COMPONENTS: Record<string, ComponentType<{ def: FormDef }>> = {
   svq82fk1: SurveySample,
@@ -18,4 +19,5 @@ export const FORM_COMPONENTS: Record<string, ComponentType<{ def: FormDef }>> = 
   myts7fq2: MyScheduleView,
   myat4wkd: MyAttendanceView,
   mypt9rxb: MyPenaltyView,
+  ntc7h2qm: MyNotice,
 };

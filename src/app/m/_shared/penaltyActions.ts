@@ -1,9 +1,13 @@
 "use server";
 
+// 벌점 서버 액션 — 전용 모듈(/m/penalty)이 없어지면서 이 파일 하나로 합쳐졌다. 세 곳에서 쓴다:
+// 1) 좌석 배치도 학생 상세의 벌점 사이드 패널(PenaltySidePanel) — 학생 1명의 이번 주 조회·부여·삭제.
+// 2) 순찰 기록 화면의 "벌점 현황" 탭(PenaltyOverview) — 지점 전체 집계 + 학생별 상세도 같은 패널 재사용.
+// 3) 폰 전용 벌점 화면(/penalty, MobilePenalty) — 그대로 이 파일을 가져다 쓴다.
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { guard } from "@/lib/auth";
-import { PENALTY_BY_KEY, weekStartKey } from "@/lib/penalty";
+import { guard, can } from "@/lib/auth";
+import { PENALTY_BY_KEY, weekStartKey, weekStartLabel } from "@/lib/penalty";
 import { PATROL_BY_KEY } from "@/lib/patrol";
 import { todayKey as todayStr, addDays } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
 
@@ -21,6 +25,13 @@ function resolveWeek(week?: string | null): string {
   if (!week || !WEEK_RE.test(week)) return currentWeek;
   const normalized = weekStartKey(new Date(`${week}T00:00:00Z`));
   return normalized > currentWeek ? currentWeek : normalized;
+}
+
+// 벌점 관련 화면을 새로고침 없이 최신 상태로 — 데스크톱 집계(순찰 기록의 벌점 현황 탭)와 폰 화면.
+// 좌석 배치도 사이드 패널은 클라이언트가 직접 다시 조회하므로 경로 재검증이 필요 없다.
+function revalidatePenaltyViews() {
+  revalidatePath("/m/patrol");
+  revalidatePath("/penalty");
 }
 
 // 수동 벌점 부여 (프리셋 사유). points 는 프리셋에서 스냅샷 → 나중 프리셋 바꿔도 과거 불변.
@@ -42,7 +53,7 @@ export async function givePenalty(formData: FormData) {
      values ($1,$2,$3,$4,$5,$6,$7)`,
     [me.activeBranchId, id, reason, preset.points, note, date, me.id],
   );
-  revalidatePath("/m/penalty");
+  revalidatePenaltyViews();
 }
 
 // 수동 벌점 1건 삭제(정정)
@@ -51,7 +62,7 @@ export async function removePenalty(formData: FormData) {
   const id = s(formData.get("id"));
   if (!id) return;
   await db.query(`delete from penalty_event where id=$1 and branch_id=$2`, [id, me.activeBranchId]);
-  revalidatePath("/m/penalty");
+  revalidatePenaltyViews();
 }
 
 // removePenalty 로 지운 벌점 실행취소 — 클라가 삭제 직전에 들고 있던 원본 값(id·시각·부여자 포함)
@@ -72,12 +83,12 @@ export async function restorePenalty(formData: FormData) {
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
     [id, me.activeBranchId, studentId, reason, points, note, at, date, createdBy],
   );
-  revalidatePath("/m/penalty");
+  revalidatePenaltyViews();
 }
 
 // 한 학생의 특정 주 벌점 내역 (순찰 + 수동 합쳐 시간순). 순찰 것은 삭제 불가(순찰 기록에서 정정).
-// weekStart 생략(또는 미래/형식 오류) 시 이번 주로 클램프 — 과거 주 조회(page.tsx week 파라미터)와
-// 학생 상세 모달이 같은 규칙(resolveWeek)으로 "조회할 주"를 맞춘다.
+// weekStart 생략(또는 미래/형식 오류) 시 이번 주로 클램프 — 과거 주 조회와 학생 상세가 같은 규칙
+// (resolveWeek)으로 "조회할 주"를 맞춘다.
 export async function getStudentPenaltyWeek(studentId: string, weekStart?: string) {
   const me = await guard("penalty.view");
   const ws = resolveWeek(weekStart);
@@ -103,7 +114,7 @@ export async function getStudentPenaltyWeek(studentId: string, weekStart?: strin
 }
 
 // 학생 상세 모달의 "최근 몇 주 추이" — 상습 여부 판단용. 6주(약 1개월 반): 매주 반복되는 패턴을
-// 알아보기엔 충분하고, 모달(440px 폭)에 막대 6개가 부담 없이 들어가는 선.
+// 알아보기엔 충분하고, 440px 폭 패널에 막대 6개가 부담 없이 들어가는 선.
 // weekStart(조회 중인 주)로 끝나는 6주를 오래된→최신 순으로 반환.
 const TREND_WEEKS = 6;
 export type PenaltyTrendWeek = { weekStart: string; points: number };
@@ -137,4 +148,85 @@ export async function getStudentPenaltyTrend(studentId: string, weekStart?: stri
     if (b >= 0 && b < TREND_WEEKS) totals[b] += r.points;
   }
   return weeks.map((w, i) => ({ weekStart: w, points: totals[i] }));
+}
+
+// 지점 전체 집계 — 순찰 기록 화면 "벌점 현황" 탭(PenaltyOverview) 전용. 예전 /m/penalty 페이지가
+// 서버 컴포넌트에서 하던 걸 그대로 서버 액션으로 옮겨 클라에서 주 이동마다 다시 불러온다(풀 페이지
+// 이동 없이). 재원생만 집계 → 목록·좌석뷰(재원생 기준)와 정확히 일치.
+export type OverviewStudent = { id: string; name: string; level: string | null; grade: string | null; is_repeat: boolean | null; seat_number: number | null };
+export type OverviewBreakdown = { label: string; points: number; count: number; sessions?: number };
+export type PenaltyOverview = {
+  students: OverviewStudent[];
+  weekly: Record<string, number>;
+  breakdown: OverviewBreakdown[];
+  weekLabel: string;
+  weekStart: string;
+  isCurrentWeek: boolean;
+  today: string;
+  canManage: boolean;
+  canPatrolManage: boolean;
+};
+export async function getPenaltyOverview(weekStart?: string): Promise<PenaltyOverview> {
+  const me = await guard("penalty.view");
+  const branch = me.activeBranchId;
+  const ws = resolveWeek(weekStart);
+  const currentWeek = weekStartKey();
+  const isCurrentWeek = ws === currentWeek;
+  const weekEnd = addDays(ws, 7); // 다음 주 월요일(배타적 상한)
+
+  const [students, patRows, manRows, patrolSessions] = await Promise.all([
+    db.query<OverviewStudent>(
+      `select s.id, s.name, s.level, s.grade, s.is_repeat, seat.number as seat_number
+         from student s left join seat on seat.current_student_id = s.id and seat.branch_id = s.branch_id
+        where s.branch_id=$1 and s.status='enrolled' order by s.name`,
+      [branch],
+    ),
+    db.query<{ student_id: string; state: string; pts: number; cnt: number }>(
+      `select pe.student_id, pe.state, sum(pe.points)::int as pts, count(*)::int as cnt from patrol_event pe
+         join student s on s.id=pe.student_id and s.status='enrolled'
+        where pe.branch_id=$1 and pe.date>=$2 and pe.date<$3 and pe.points<>0 group by pe.student_id, pe.state`,
+      [branch, ws, weekEnd],
+    ),
+    db.query<{ student_id: string; reason: string; pts: number; cnt: number }>(
+      `select pn.student_id, pn.reason, sum(pn.points)::int as pts, count(*)::int as cnt from penalty_event pn
+         join student s on s.id=pn.student_id and s.status='enrolled'
+        where pn.branch_id=$1 and pn.date>=$2 and pn.date<$3 group by pn.student_id, pn.reason`,
+      [branch, ws, weekEnd],
+    ),
+    // 이 주 안에 지점이 실제로 돌린 순찰 세션 수(학생별 아님) — 순찰 기인 점수 옆에 분모로 보여줘
+    // "직원마다 순찰 횟수가 달라 같은 행동이 다른 점수가 된다"는 편차가 해석을 왜곡하지 않게 한다.
+    db.query<{ n: number }>(`select count(*)::int as n from patrol_session where branch_id=$1 and date>=$2 and date<$3`, [branch, ws, weekEnd]),
+  ]);
+  const sessionCount = patrolSessions.rows[0]?.n ?? 0;
+
+  const weekly: Record<string, number> = {};
+  const patByState = new Map<string, { pts: number; cnt: number }>();
+  for (const r of patRows.rows) {
+    weekly[r.student_id] = (weekly[r.student_id] ?? 0) + r.pts;
+    const c = patByState.get(r.state) ?? { pts: 0, cnt: 0 };
+    c.pts += r.pts; c.cnt += r.cnt; patByState.set(r.state, c);
+  }
+  const manByReason = new Map<string, { pts: number; cnt: number }>();
+  for (const r of manRows.rows) {
+    weekly[r.student_id] = (weekly[r.student_id] ?? 0) + r.pts;
+    const c = manByReason.get(r.reason) ?? { pts: 0, cnt: 0 };
+    c.pts += r.pts; c.cnt += r.cnt; manByReason.set(r.reason, c);
+  }
+
+  const breakdown: OverviewBreakdown[] = [
+    ...[...patByState].map(([state, v]) => ({ label: `순찰 · ${PATROL_BY_KEY[state]?.label ?? state}`, points: v.pts, count: v.cnt, sessions: sessionCount })),
+    ...[...manByReason].map(([reason, v]) => ({ label: PENALTY_BY_KEY[reason]?.label ?? reason, points: v.pts, count: v.cnt })),
+  ].filter((b) => b.points > 0).sort((a, b) => b.points - a.points);
+
+  return {
+    students: students.rows,
+    weekly,
+    breakdown,
+    weekLabel: weekStartLabel(ws),
+    weekStart: ws,
+    isCurrentWeek,
+    today: todayStr(),
+    canManage: can(me, "penalty.manage"),
+    canPatrolManage: can(me, "patrol.manage"),
+  };
 }

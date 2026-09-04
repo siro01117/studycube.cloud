@@ -54,6 +54,11 @@ function dateLabelOf(date: string): string {
   const [, m, d] = date.split("-").map(Number);
   return `${m}월 ${d}일 (${WD_KR[weekdayOf(date)]})`;
 }
+/** 좁은 화면 추이 그래프용 짧은 라벨("8/25", 요일 없음) — 폰 폭에서 6개를 나란히 놓아야 해서. */
+function shortDateLabel(date: string): string {
+  const [, m, d] = date.split("-").map(Number);
+  return `${m}/${d}`;
+}
 /** DB 요일값(1=월..7=일, schedule_hours/schedule_rule 저장 규약) ← date.ts weekdayOf(0=일..6=토) 변환.
  * src/app/m/student/[id]/util.ts 의 dbDayOf 와 같은 계산이지만, 관리 화면 파일을 import 하지 않기 위해
  * (재사용은 lib 수준에서만) 여기 새로 작게 둔다. */
@@ -286,29 +291,47 @@ export async function getMyAttendanceOverview(formData: FormData): Promise<Atten
 
 // ================= 3) 내 벌점 =================
 export type PenaltyReasonBar = { label: string; count: number; points: number; pct: number };
-export type PenaltyRecentItem = { date: string; dateLabel: string; time: string; label: string; points: number; dot: string };
+// src: 순찰 중 자동 기록됐는지("patrol") 카운터가 직접 부여했는지("manual") — 관리 화면(m/penalty)은
+// 이미 이 둘을 구분해 보여준다(DetailRow.source). 학생 화면도 "누가 줬는지" 알 수 있게 같이 내려준다.
+export type PenaltyRecentItem = { date: string; dateLabel: string; time: string; label: string; points: number; dot: string; src: "patrol" | "manual" };
+export type PenaltyTrendWeek = { weekStart: string; weekLabel: string; points: number; isCurrent: boolean };
 export type PenaltyOverviewResult =
   | {
       ok: true;
       testBypass: boolean;
       thisWeekPoints: number;
+      /** 이번 주 집계 기간 — "몇 점"뿐 아니라 "언제부터 언제까지"를 화면에 명시하기 위함(월요일 0시 리셋). */
+      weekStartLabel: string;
+      weekEndLabel: string;
       last30ViolationCount: number;
       reasonBars: PenaltyReasonBar[];
       recent: PenaltyRecentItem[];
+      /** 최근 6주 추이(관리 화면 getStudentPenaltyTrend 와 같은 방식 — 주 단위 합계, 오래된→최근 순).
+       *  m/penalty/actions.ts 는 admin guard 를 거는 관리자 전용 파일이라 그대로 import 할 수 없어
+       *  같은 로직을 이 파일(학생 신원 검증 경로)에 맞춰 다시 작게 둔다. */
+      weeklyTrend: PenaltyTrendWeek[];
     }
   | { ok: false; error: string; kind?: "identity" };
+
+const PENALTY_TREND_WEEKS = 6;
 
 /** FormData: slug, name, code, (개발전용) test. 판정 기준은 관리 화면(m/student/[id]/util.ts
  * isPatrolViolation)과 동일: 위반 = 점수가 0보다 큰 이벤트(입석·학원·원내 수업·주간 상담은 프리셋 자체가
  * points=0 이라 자동으로 빠진다). 순찰(patrol_event)·수동 벌점(penalty_event) 둘 다 points>0 만 세고,
- * union all 로 한 번에 조회해 이벤트 축을 합친다(쿼리 추가 없이 최근 30일 데이터로 이번 주 벌점 합계까지
- * 함께 계산). */
+ * union all 로 한 번에 조회해 이벤트 축을 합친다. 6주 추이는 범위가 달라(월요일 정렬 42일) 쿼리 하나를
+ * 더 쓴다 — 학생 1명 기준이라 N+1 이 아니라 이 화면당 고정 2쿼리. */
 export async function getMyPenaltyOverview(formData: FormData): Promise<PenaltyOverviewResult> {
   await ready();
   const id = await verifyIdentity(formData);
   if (!id.ok) return id;
   if (id.testBypass || !id.studentId) {
-    return { ok: true, testBypass: true, thisWeekPoints: 0, last30ViolationCount: 0, reasonBars: [], recent: [] };
+    const today = todayKey();
+    const weekStart = weekStartKey(new Date(`${today}T12:00:00Z`));
+    return {
+      ok: true, testBypass: true, thisWeekPoints: 0,
+      weekStartLabel: dateLabelOf(weekStart), weekEndLabel: dateLabelOf(addDays(weekStart, 6)),
+      last30ViolationCount: 0, reasonBars: [], recent: [], weeklyTrend: [],
+    };
   }
 
   const branch = await branchId();
@@ -316,6 +339,13 @@ export async function getMyPenaltyOverview(formData: FormData): Promise<PenaltyO
 
   const today = todayKey();
   const start = addDays(today, -29);
+  const weekStart = weekStartKey(new Date(`${today}T12:00:00Z`));
+
+  // 6주 추이 범위(월요일 정렬) — 지난 5주 시작 ~ 이번 주 시작 + 7일(배타적 상한). 30일 범위와 겹치므로
+  // 한 번에 넉넉히 뽑아 자바스크립트에서 두 용도(최근 30일 집계 / 6주 버킷)로 나눠 쓴다.
+  const trendWeeks = Array.from({ length: PENALTY_TREND_WEEKS }, (_, i) => addDays(weekStart, -7 * (PENALTY_TREND_WEEKS - 1 - i)));
+  const rangeStart = trendWeeks[0] < start ? trendWeeks[0] : start;
+  const rangeEnd = addDays(weekStart, 6); // 이번 주 일요일(포함 상한 — start 는 오늘까지지만 이번 주는 끝까지 커버)
 
   const rows = await db.query<{ date: string; at: string; points: number; key: string; src: string }>(
     `select date::text as date, at, points, state as key, 'patrol' as src
@@ -326,36 +356,62 @@ export async function getMyPenaltyOverview(formData: FormData): Promise<PenaltyO
        from penalty_event
       where branch_id=$1 and student_id=$2 and date between $3 and $4 and points > 0
       order by at desc`,
-    [branch, id.studentId, start, today],
+    [branch, id.studentId, rangeStart, rangeEnd],
   );
 
-  const weekStart = weekStartKey(new Date(`${today}T12:00:00Z`));
   const labelOf = (key: string, src: string) => (src === "patrol" ? (PATROL_BY_KEY[key]?.label ?? key) : (PENALTY_BY_KEY[key]?.label ?? key));
   const dotOf = (key: string, src: string) => (src === "patrol" ? (PATROL_BY_KEY[key]?.dot ?? solid("distract")) : solid("distract"));
 
   let thisWeekPoints = 0;
+  let last30ViolationCount = 0;
   const reasonAgg = new Map<string, { count: number; points: number }>();
+  const trendTotals = new Array(PENALTY_TREND_WEEKS).fill(0);
+  const trendBucketOf = (date: string): number => {
+    const [y1, m1, d1] = trendWeeks[0].split("-").map(Number);
+    const [y2, m2, d2] = date.split("-").map(Number);
+    return Math.floor((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86_400_000 / 7);
+  };
   for (const r of rows.rows) {
     if (r.date >= weekStart) thisWeekPoints += r.points;
-    const label = labelOf(r.key, r.src);
-    const cur = reasonAgg.get(label) ?? { count: 0, points: 0 };
-    cur.count += 1;
-    cur.points += r.points;
-    reasonAgg.set(label, cur);
+    if (r.date >= start) {
+      last30ViolationCount += 1;
+      const label = labelOf(r.key, r.src);
+      const cur = reasonAgg.get(label) ?? { count: 0, points: 0 };
+      cur.count += 1;
+      cur.points += r.points;
+      reasonAgg.set(label, cur);
+    }
+    const b = trendBucketOf(r.date);
+    if (b >= 0 && b < PENALTY_TREND_WEEKS) trendTotals[b] += r.points;
   }
   const maxCount = Math.max(1, ...[...reasonAgg.values()].map((v) => v.count));
   const reasonBars: PenaltyReasonBar[] = [...reasonAgg.entries()]
     .map(([label, v]) => ({ label, count: v.count, points: v.points, pct: Math.round((v.count / maxCount) * 100) }))
     .sort((a, b) => b.count - a.count);
 
-  const recent: PenaltyRecentItem[] = rows.rows.slice(0, 10).map((r) => ({
-    date: r.date,
-    dateLabel: dateLabelOf(r.date),
-    time: timeLabel(r.at),
-    label: labelOf(r.key, r.src),
-    points: r.points,
-    dot: dotOf(r.key, r.src),
+  const recent: PenaltyRecentItem[] = rows.rows
+    .filter((r) => r.date >= start)
+    .slice(0, 10)
+    .map((r) => ({
+      date: r.date,
+      dateLabel: dateLabelOf(r.date),
+      time: timeLabel(r.at),
+      label: labelOf(r.key, r.src),
+      points: r.points,
+      dot: dotOf(r.key, r.src),
+      src: r.src as "patrol" | "manual",
+    }));
+
+  const weeklyTrend: PenaltyTrendWeek[] = trendWeeks.map((w, i) => ({
+    weekStart: w,
+    weekLabel: shortDateLabel(w),
+    points: trendTotals[i],
+    isCurrent: w === weekStart,
   }));
 
-  return { ok: true, testBypass: false, thisWeekPoints, last30ViolationCount: rows.rows.length, reasonBars, recent };
+  return {
+    ok: true, testBypass: false, thisWeekPoints,
+    weekStartLabel: dateLabelOf(weekStart), weekEndLabel: dateLabelOf(addDays(weekStart, 6)),
+    last30ViolationCount, reasonBars, recent, weeklyTrend,
+  };
 }

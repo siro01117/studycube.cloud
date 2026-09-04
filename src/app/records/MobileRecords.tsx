@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import MobileNav from "../_shared/MobileNav";
+import DeviceGate from "../_shared/DeviceGate";
 import SeatCanvas from "../_shared/SeatCanvas";
 import { SW, xyOf } from "@/lib/seatmap";
 import { PATROL_BY_KEY } from "@/lib/patrol";
@@ -17,11 +18,16 @@ export type RSeat = { id: string; room_id: string | null; grid_x: number | null;
 type Detail = { student_id: string; seat_id: string | null; name: string; state: string; points: number; at: string };
 
 export default function MobileRecords({
-  sessions, rooms, seats, canManage, date, dateLabel, prevDate, nextDate, hasRecord,
+  sessions, rooms, seats, canManage, date, dateLabel, prevDate, nextDate, hasRecord, nav, sheetMaxWidth, allowEdit = true, basePath = "/records",
 }: {
   sessions: Session[]; rooms: RRoom[]; seats: RSeat[]; canManage: boolean;
   date: string; dateLabel: string; prevDate: string | null; nextDate: string | null; hasRecord: boolean;
+  nav?: React.ReactNode;       // 상단 이동 컨트롤 — 기본은 폰용 시트 메뉴(MobileNav). 태블릿은 TabletNav 를 넘겨 대체.
+  sheetMaxWidth?: number;      // 바텀시트 폭 상한(px) — 태블릿에서 화면 끝까지 늘어지지 않게.
+  allowEdit?: boolean;         // 정정(기록 고치기) 허용 여부 — 태블릿은 "살짝 확인"만이라 false 로 끈다(권한 있어도).
+  basePath?: string;           // 날짜 이동(‹›) 링크 기준 경로 — 태블릿은 /t/records 로 넘겨 폰 화면으로 안 튀게.
 }) {
+  const canEdit = canManage && allowEdit;
   const [selId, setSelId] = useState<string | null>(sessions[0]?.id ?? null);
   // 날짜 이동(‹ ›)으로 sessions 가 통째로 바뀌면 선택을 그 날의 첫 세션으로 되돌린다.
   useEffect(() => { setSelId(sessions[0]?.id ?? null); }, [date]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -79,9 +85,10 @@ export default function MobileRecords({
 
   return (
     <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column", background: "var(--bg)" }}>
+      {!nav && <DeviceGate current="/records" />}
       {/* 상단 */}
       <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
-        <MobileNav current="/records" />
+        {nav ?? <MobileNav current="/records" />}
         <div style={{ flex: 1, minWidth: 0, textAlign: "center", lineHeight: 1.25 }}>
           <div style={{ fontSize: 16, fontWeight: 800 }}>순찰 기록</div>
           <div style={{ fontSize: 11, color: "var(--faint)" }}>
@@ -103,7 +110,7 @@ export default function MobileRecords({
       {/* 날짜 이동 — 서버가 내려준 날짜/라벨만 사용(클라 new Date()/toLocale* 금지) */}
       <div style={{ flex: "none", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, padding: "6px 12px", background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
         {prevDate ? (
-          <Link href={`/records?date=${prevDate}`} aria-label="이전 기록 날짜" style={{ width: 34, height: 34, display: "grid", placeItems: "center", color: "var(--sub)", fontSize: 18, textDecoration: "none" }}>‹</Link>
+          <Link href={`${basePath}?date=${prevDate}`} aria-label="이전 기록 날짜" style={{ width: 34, height: 34, display: "grid", placeItems: "center", color: "var(--sub)", fontSize: 18, textDecoration: "none" }}>‹</Link>
         ) : (
           <span aria-hidden style={{ width: 34, height: 34, display: "grid", placeItems: "center", color: "var(--faint)", fontSize: 18 }}>‹</span>
         )}
@@ -112,7 +119,7 @@ export default function MobileRecords({
           {hasRecord && <span aria-hidden style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--accent)" }} />}
         </span>
         {nextDate ? (
-          <Link href={`/records?date=${nextDate}`} aria-label="다음 기록 날짜" style={{ width: 34, height: 34, display: "grid", placeItems: "center", color: "var(--sub)", fontSize: 18, textDecoration: "none" }}>›</Link>
+          <Link href={`${basePath}?date=${nextDate}`} aria-label="다음 기록 날짜" style={{ width: 34, height: 34, display: "grid", placeItems: "center", color: "var(--sub)", fontSize: 18, textDecoration: "none" }}>›</Link>
         ) : (
           <span aria-hidden style={{ width: 34, height: 34, display: "grid", placeItems: "center", color: "var(--faint)", fontSize: 18 }}>›</span>
         )}
@@ -156,7 +163,7 @@ export default function MobileRecords({
         <>
           <SeatCanvas
             seats={canvasSeats}
-            onTap={(id) => { const d = bySeat.get(id); if (d && canManage) setEdit(d); }}
+            onTap={(id) => { const d = bySeat.get(id); if (d && canEdit) setEdit(d); }}
             renderSeat={(id) => {
               const s = seatById.get(id)!;
               const d = bySeat.get(id);
@@ -202,8 +209,8 @@ export default function MobileRecords({
           {rows.map((r) => {
             const p = PATROL_BY_KEY[r.state];
             return (
-              <button key={r.student_id} onClick={() => canManage && setEdit(r)}
-                style={{ display: "flex", alignItems: "center", gap: 12, minHeight: 58, padding: "0 14px", borderRadius: 14, border: "1px solid var(--line)", background: "var(--card)", cursor: canManage ? "pointer" : "default", textAlign: "left" }}>
+              <button key={r.student_id} onClick={() => canEdit && setEdit(r)}
+                style={{ display: "flex", alignItems: "center", gap: 12, minHeight: 58, padding: "0 14px", borderRadius: 14, border: "1px solid var(--line)", background: "var(--card)", cursor: canEdit ? "pointer" : "default", textAlign: "left" }}>
                 <span style={{ flex: 1, minWidth: 0, fontSize: 15.5, fontWeight: 700 }}>{r.name}</span>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, fontWeight: 800, color: p?.dot ?? "var(--sub)" }}>
                   <span style={{ width: 8, height: 8, borderRadius: "50%", background: p?.dot ?? "var(--faint)" }} />
@@ -218,10 +225,10 @@ export default function MobileRecords({
       )}
 
       {/* 정정 시트 */}
-      {edit && canManage && (
+      {edit && canEdit && (
         <>
           <div onClick={() => setEdit(null)} style={{ position: "fixed", inset: 0, background: "rgba(10,12,18,.45)", zIndex: 40 }} />
-          <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 41, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "18px 16px calc(16px + env(safe-area-inset-bottom))" }}>
+          <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 41, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "18px 16px calc(16px + env(safe-area-inset-bottom))", maxWidth: sheetMaxWidth, margin: sheetMaxWidth ? "0 auto" : undefined }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 12 }}>
               <span style={{ fontSize: 19, fontWeight: 800 }}>{edit.name}</span>
               <span style={{ fontSize: 12.5, color: "var(--faint)" }}>기록 정정</span>

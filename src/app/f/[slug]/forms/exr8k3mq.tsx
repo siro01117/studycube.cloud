@@ -20,26 +20,34 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import FormShell from "../../_shared/FormShell";
 import IdentityExpired from "../../_shared/IdentityExpired";
+import { InfoPopup } from "../../_shared/LockedInfo";
 import { useIdentity, useRedirectIfNoIdentity, type StoredIdentity } from "../../_shared/useIdentity";
 import { useScrollFocusOn } from "../../_shared/useScrollFocus";
-import { getHubSlug } from "../../registry";
+import { getHubSlug, getFormSlugByType } from "../../registry";
 import type { FormDef } from "../../registry";
 import {
   SCHEDULE_REASONS, blockStyleOf,
   REQUEST_TYPES, type RequestType, type RequestTypeRawInput, type ResolvedRange, resolveRequestRange, requestTypeOf,
-  REQUEST_KINDS, type RequestKind,
+  REQUEST_KINDS, type RequestKind, nearestToBase,
 } from "@/lib/schedule";
 import {
   getDateBounds, getDayRules, getMySchedule, createRequests, listMyRequests, cancelRequest,
   type DayRuleRow, type MyHoursRow, type MyRuleRow, type MyRequestRow,
   type RequestItemInput, type TempItemInput, type RuleEditItemInput, type RuleDeleteItemInput,
 } from "./schedule-request-actions";
+// 스케쥴 입력이 재개방(관리자 활성화)됐는지 확인 — Hub.tsx 가 허브 카드에 쓰는 것과 같은 서버액션을
+// 그대로 재사용한다(로직 재발명 금지). "첫 제출 전"(reason=first)은 신규 학생의 정상 상태라 안내 대상이
+// 아니고, "관리자가 다시 열어줌"(reason=grant)만 "새 스케쥴을 내주세요" 안내 대상이다(2026-09-01).
+import { checkScheduleWindow } from "./schedule-window-actions";
 
 type HM = { h: string; m: string };
 const emptyHM = (): HM => ({ h: "", m: "" });
 const clampInt = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const pad2 = (n: number) => String(n).padStart(2, "0");
 const DAY_LABELS = ["월", "화", "수", "목", "금", "토", "일"]; // index+1 = schedule_rule.days 좌표(1..7)
+// "유형" 타일에 실제로 보여줄 목록 — arrive_early/leave_late 는 hours 카드가 방향에 따라 대신 골라
+// 제출하는 결과 유형일 뿐, 학생이 직접 고르는 타일이 아니다(REQUEST_TYPES 에는 라벨용으로 남아있다).
+const CARD_TILE_TYPES = REQUEST_TYPES.filter((t) => t.key !== "arrive_early" && t.key !== "leave_late");
 
 function parseHM(v: HM): number | null {
   if (v.h === "" || v.m === "") return null;
@@ -97,7 +105,8 @@ type DraftCard = {
   reasonKey: string;
   title: string;
   // t1/t2 의미는 reqType 에 따라 다르다: late=등원 시각(t1), early=하원 시각(t1),
-  // out=나가는 시각(t1)/돌아오는 시각(t2), custom=시작(t1)/종료(t2). absent 는 미사용.
+  // out=나가는 시각(t1)/돌아오는 시각(t2), custom=시작(t1)/종료(t2), hours=새 등원 시각(t1, 선택)/새
+  // 하원 시각(t2, 선택, 둘 중 하나는 있어야 함). absent 는 미사용.
   t1: HM;
   t2: HM;
   mode: "add" | "replace";
@@ -138,6 +147,13 @@ function rawInputOf(card: DraftCard): RequestTypeRawInput | null {
       const end = parseHM(card.t2);
       return start == null || end == null ? null : { type: "custom", start, end };
     }
+    // hours 는 단일 range 가 아니라 등원·하원 최대 2건으로 쪼개진다 — hoursArriveItem/hoursLeaveItem 이
+    // 대신 만든다(아래). arrive_early/leave_late 는 그렇게 쪼개진 "결과"로만 존재해 카드가 직접 이
+    // reqType 을 갖지 않는다(REQUEST_TYPES 에는 라벨용으로 있지만 카드 타일에는 안 보인다).
+    case "hours":
+    case "arrive_early":
+    case "leave_late":
+      return null;
   }
 }
 
@@ -149,8 +165,46 @@ function resolvedOf(card: DraftCard): ResolvedRange | null {
   return resolveRequestRange(raw, hours);
 }
 
+/** hours 카드 한 장에서 나올 수 있는 신청 항목(최대 2건: 등원 변경 1건 + 하원 변경 1건) 중 하나.
+ * 방향(늦게/일찍)은 그 날짜의 정기 시각(card.hours) 과 비교해 여기서 정하고, 서버는 이 reqType 이
+ * 실제로 그 방향인지(예: arrive_early 인데 원래보다 안 이르면) 다시 검증한다(resolveRequestRange 가
+ * late/early 와 완전히 같은 방식으로 거부한다 — 클라 판정 신뢰 금지 원칙 그대로). */
+type HoursItem = { reqType: RequestType; raw: RequestTypeRawInput; resolved: ResolvedRange };
+
+/** t1(새 등원 시각) 이 비어 있으면 null(그 필드는 안 바꾸는 것) — 원래 등원 시각(card.hours.arrive)보다
+ * 늦으면 late(기존 유형 재사용), 이르면 arrive_early(새 유형)로 나뉜다. */
+function hoursArriveItem(card: DraftCard): HoursItem | null {
+  if (!card.hours) return null;
+  const newArrive = parseHM(card.t1);
+  if (newArrive == null) return null;
+  const hours = { arrive_min: card.hours.arrive, leave_min: card.hours.leave };
+  const raw: RequestTypeRawInput =
+    newArrive > card.hours.arrive ? { type: "late", arrive: newArrive } : { type: "arrive_early", arrive: newArrive };
+  return { reqType: raw.type, raw, resolved: resolveRequestRange(raw, hours) };
+}
+
+/** t2(새 하원 시각) 이 비어 있으면 null. 자정 넘김 판정은 nearestToBase(서버와 같은 함수)로 — 원래
+ * 하원 시각보다 이르면 early(기존 유형 재사용), 늦으면 leave_late(새 유형)로 나뉜다. */
+function hoursLeaveItem(card: DraftCard): HoursItem | null {
+  if (!card.hours) return null;
+  const newLeaveRaw = parseHM(card.t2);
+  if (newLeaveRaw == null) return null;
+  const hours = { arrive_min: card.hours.arrive, leave_min: card.hours.leave };
+  const adjusted = nearestToBase(newLeaveRaw, card.hours.leave);
+  const raw: RequestTypeRawInput =
+    adjusted >= card.hours.leave ? { type: "leave_late", leave: newLeaveRaw } : { type: "early", leave: newLeaveRaw };
+  return { reqType: raw.type, raw, resolved: resolveRequestRange(raw, hours) };
+}
+
 function overlapsOf(card: DraftCard): DayRuleRow[] {
   if (!card.overlap || card.overlap.length === 0) return [];
+  if (card.reqType === "hours") {
+    const ranges = [hoursArriveItem(card), hoursLeaveItem(card)]
+      .filter((it): it is HoursItem => !!it && it.resolved.ok)
+      .map((it) => it.resolved as Extract<ResolvedRange, { ok: true }>);
+    if (ranges.length === 0) return [];
+    return card.overlap.filter((r) => ranges.some((res) => res.start < r.end && r.start < res.end));
+  }
   const resolved = resolvedOf(card);
   if (!resolved || !resolved.ok) return [];
   return card.overlap.filter((r) => resolved.start < r.end && r.start < resolved.end);
@@ -170,6 +224,13 @@ function Wizard({
   const [toast, setToast] = useState<string | null>(null);
   const [submitTick, setSubmitTick] = useState(0); // 성공 제출마다 +1 — 결과 목록 스크롤-포커스 트리거 전용.
   const [submittedOnce, setSubmittedOnce] = useState(false); // 신청이 한 번이라도 성공했는지 — "홈으로" 버튼 노출 트리거.
+
+  // 스케쥴 입력이 관리자 활성화로 다시 열려 있는지 — 열려 있으면(재개방) 새 스케쥴을 낼 수 있다고
+  // 안내한다. false=닫힘/첫 제출 전(안내 대상 아님), true=재개방(안내 대상), null=확인 전.
+  const [scheduleReopened, setScheduleReopened] = useState<boolean | null>(null);
+  const [showReopenPopup, setShowReopenPopup] = useState(false);
+  const scheduleSlug = getFormSlugByType("schedule");
+  const seenKey = `f:scheduleReopenSeen:${identity.studentId}`;
 
   // temp 갈래는 카드에 실제로 뭔가 넣었는지까지 보고, rule_edit/rule_delete 는 갈래를 고른 순간부터
   // "작성 중"으로 본다(대상 정기 일정을 고르는 것 자체가 신청 준비 단계라서).
@@ -222,6 +283,42 @@ function Wizard({
   }, []);
 
   useEffect(() => {
+    if (!scheduleSlug) return;
+    let alive = true;
+    checkScheduleWindow(idFD()).then((r) => {
+      if (!alive) return;
+      setScheduleReopened(r.ok && r.state.open && r.state.reason === "grant");
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scheduleSlug]);
+
+  // 재개방을 확인했고, 이번 세션(sessionStorage)에서 아직 안 봤으면 한 번만 팝업 — 매번 뜨면 성가시다.
+  // 신원 자체가 sessionStorage 로 세션 단위 캐시라(useIdentity 참고) 그 수명에 맞췄다: 팝업을 닫으면
+  // 이 탭에서는 다시 안 뜨고, 카드 안내 배너(항상 보임)로 충분히 알 수 있다.
+  useEffect(() => {
+    if (!scheduleReopened) return;
+    try {
+      if (sessionStorage.getItem(seenKey)) return;
+    } catch {
+      // 저장 불가(프라이빗 모드 등) — 그래도 이번 렌더에서는 한 번 보여준다.
+    }
+    setShowReopenPopup(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scheduleReopened]);
+
+  const closeReopenPopup = () => {
+    setShowReopenPopup(false);
+    try {
+      sessionStorage.setItem(seenKey, "1");
+    } catch {
+      // no-op
+    }
+  };
+
+  useEffect(() => {
     if (toast) {
       const t = setTimeout(() => setToast(null), 2600);
       return () => clearTimeout(t);
@@ -262,6 +359,15 @@ function Wizard({
     if (!c.date) return false;
     if (!bounds || c.date < bounds.today || c.date > bounds.maxDate) return false;
     if (c.dayLoading) return false;
+    if (c.reqType === "hours") {
+      if (!c.hours) return false;
+      const a = hoursArriveItem(c);
+      const l = hoursLeaveItem(c);
+      if (!a && !l) return false; // 둘 다 비어 있으면(아무 것도 안 바꿈) 제출 불가
+      if (a && !a.resolved.ok) return false;
+      if (l && !l.resolved.ok) return false;
+      return true; // hours 는 항상 "추가"로만 신청한다(아래 submitTemp 참고) — replace 모드 없음
+    }
     const resolved = resolvedOf(c);
     if (!resolved || !resolved.ok) return false;
     if (c.mode === "replace" && !c.skipRuleId) return false;
@@ -271,13 +377,28 @@ function Wizard({
 
   const submitTemp = async () => {
     setErr(null);
-    const items: TempItemInput[] = cards.map((c) => {
+    // hours 카드 한 장은 최대 2건(등원 변경/하원 변경)으로 쪼개진다 — canSubmitTemp 이 이미 각 필드가
+    // ok 임을 보장(canSubmitCard). "이 일정 대신"(replace)은 hours 타입에는 없다(두 방향이 서로 다른
+    // 정기 일정과 겹칠 수 있어 하나의 skipRuleId 로 표현할 수 없다 — 항상 "추가"로만 신청).
+    const items: TempItemInput[] = cards.flatMap((c): TempItemInput[] => {
+      if (c.reqType === "hours") {
+        const built: TempItemInput[] = [];
+        const a = hoursArriveItem(c);
+        const l = hoursLeaveItem(c);
+        if (a && a.resolved.ok) {
+          built.push({ reqKind: "temp", date: c.date, reasonKey: c.reasonKey, title: c.title.trim(), reqType: a.reqType, raw: a.raw, mode: "add", skipRuleId: null });
+        }
+        if (l && l.resolved.ok) {
+          built.push({ reqKind: "temp", date: c.date, reasonKey: c.reasonKey, title: c.title.trim(), reqType: l.reqType, raw: l.raw, mode: "add", skipRuleId: null });
+        }
+        return built;
+      }
       const raw = rawInputOf(c)!; // canSubmitTemp 이 이미 보장
-      return {
+      return [{
         reqKind: "temp", date: c.date, reasonKey: c.reasonKey, title: c.title.trim(),
         reqType: c.reqType!, raw,
         mode: c.mode, skipRuleId: c.mode === "replace" ? c.skipRuleId : null,
-      };
+      }];
     });
     const fd = idFD();
     fd.set("items", JSON.stringify(items));
@@ -340,9 +461,26 @@ function Wizard({
 
       <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4, marginTop: 18 }}>일정 변경 신청</div>
       <div style={{ fontSize: 13.5, color: "var(--dim)", marginBottom: 16, lineHeight: 1.5 }}>
-        신청은 관리자 승인 후 반영돼요. 등·하원 시간을 바꾸고 싶다면 이 신청이 아니라 정기 스케쥴 입력
-        기간에 다시 제출해주세요.
+        신청은 관리자 승인 후 반영돼요. 매주 반복되는 등·하원 시간 자체를 바꾸고 싶다면(하루가 아니라
+        계속) 이 신청이 아니라 정기 스케쥴 입력 기간에 다시 제출해주세요.
       </div>
+
+      {scheduleReopened && scheduleSlug && (
+        <Link
+          href={`/f/${scheduleSlug}`}
+          style={{
+            display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 10,
+            border: "1px solid var(--accent)", background: "var(--accent-soft)", color: "var(--accent)",
+            fontSize: 12.5, fontWeight: 700, textDecoration: "none", marginBottom: 16,
+          }}
+        >
+          <CalendarBellIcon />
+          새 스케쥴을 입력할 수 있어요 — 지금까지의 신청은 기존 스케쥴 기준으로 처리돼요.
+          <span style={{ marginLeft: "auto", flex: "none" }}>
+            <ArrowRightIcon />
+          </span>
+        </Link>
+      )}
 
       {reqKind == null ? (
         <KindPicker onPick={changeKind} />
@@ -379,6 +517,16 @@ function Wizard({
         <div style={{ marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "var(--accent-soft)", color: "var(--accent)", fontSize: 12.5, fontWeight: 700, textAlign: "center" }}>
           {toast}
         </div>
+      )}
+
+      {showReopenPopup && scheduleSlug && (
+        <InfoPopup
+          title="새 스케쥴을 입력할 수 있어요"
+          lines={["관리자가 스케쥴 입력을 다시 열어줬어요.", "새 시간표를 내기 전까지, 일정 변경 신청은 지금 등록된 스케쥴을 기준으로 처리돼요."]}
+          actionHref={`/f/${scheduleSlug}`}
+          actionLabel="스케쥴 입력하러 가기"
+          onClose={closeReopenPopup}
+        />
       )}
 
       {submittedOnce && (
@@ -871,10 +1019,12 @@ function RequestCard({
   onRemove?: () => void;
 }) {
   const dateInvalid = !!card.date && (card.date < bounds.today || card.date > bounds.maxDate);
-  const needsHours = card.reqType === "absent" || card.reqType === "late" || card.reqType === "early";
+  const needsHours = card.reqType === "absent" || card.reqType === "late" || card.reqType === "early" || card.reqType === "hours";
   const missingHours = needsHours && !!card.date && !card.dayLoading && card.hours === null;
   const resolved = resolvedOf(card);
   const overlapping = overlapsOf(card);
+  const hoursArrive = card.reqType === "hours" ? hoursArriveItem(card) : null;
+  const hoursLeave = card.reqType === "hours" ? hoursLeaveItem(card) : null;
 
   // 5유형 중 하나를 고르면 시간 입력 영역으로 스크롤-포커스한다("absent" 는 시간 입력이 없어서 no-op).
   const timeAreaRef = useRef<HTMLDivElement>(null);
@@ -899,7 +1049,7 @@ function RequestCard({
       <div>
         <span className="label">유형</span>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(84px, 1fr))", gap: 6 }}>
-          {REQUEST_TYPES.map((t) => {
+          {CARD_TILE_TYPES.map((t) => {
             const active = card.reqType === t.key;
             return (
               <button
@@ -966,7 +1116,42 @@ function RequestCard({
 
           {card.dayLoading && <div style={{ fontSize: 12, color: "var(--faint)" }}>정기 일정 확인 중…</div>}
 
-          {!card.dayLoading && card.reqType !== "absent" && (
+          {!card.dayLoading && card.reqType === "hours" && card.hours && (
+            <div ref={timeAreaRef}>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                <div style={{ flex: "1 1 140px", minWidth: 130 }}>
+                  <span className="label">등원 시각(원래 {fmtMin(card.hours.arrive)})</span>
+                  <ClockInput value={card.t1} onChange={(v) => onChange({ t1: v })} />
+                  {hoursArrive && !hoursArrive.resolved.ok && (
+                    <div style={{ fontSize: 12, color: "var(--danger)", fontWeight: 700, marginTop: 6 }}>{hoursArrive.resolved.error}</div>
+                  )}
+                  {hoursArrive && hoursArrive.resolved.ok && (
+                    <div style={{ fontSize: 12, color: "var(--sub)", marginTop: 6 }}>
+                      → {fmtMin(card.hours.arrive)}에서 {fmtMin(parseHM(card.t1)!)}로 바뀌어요.
+                    </div>
+                  )}
+                </div>
+                <div style={{ flex: "1 1 140px", minWidth: 130 }}>
+                  <span className="label">하원 시각(원래 {fmtLeave(card.hours.leave)})</span>
+                  <ClockInput value={card.t2} onChange={(v) => onChange({ t2: v })} />
+                  {hoursLeave && !hoursLeave.resolved.ok && (
+                    <div style={{ fontSize: 12, color: "var(--danger)", fontWeight: 700, marginTop: 6 }}>{hoursLeave.resolved.error}</div>
+                  )}
+                  {hoursLeave && hoursLeave.resolved.ok && (
+                    <div style={{ fontSize: 12, color: "var(--sub)", marginTop: 6 }}>
+                      → {fmtLeave(card.hours.leave)}에서 {fmtMin(parseHM(card.t2)!)}로 바뀌어요.
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 8 }}>등원·하원 중 바뀌는 시각만 입력하세요. 한쪽만 바꿀 수도 있어요.</div>
+              {!hoursArrive && !hoursLeave && (
+                <div style={{ fontSize: 12, color: "var(--danger)", fontWeight: 700, marginTop: 8 }}>등원·하원 중 적어도 하나는 입력해주세요.</div>
+              )}
+            </div>
+          )}
+
+          {!card.dayLoading && card.reqType !== "absent" && card.reqType !== "hours" && (
             <div ref={timeAreaRef}>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                 {card.reqType === "late" && (
@@ -1047,26 +1232,32 @@ function RequestCard({
                   </div>
                 ))}
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <ModeButton label="추가로" active={card.mode === "add"} onClick={() => onChange({ mode: "add", skipRuleId: null })} />
-                <ModeButton
-                  label="이 일정 대신"
-                  active={card.mode === "replace"}
-                  onClick={() => onChange({ mode: "replace", skipRuleId: overlapping.length === 1 ? overlapping[0].id : card.skipRuleId })}
-                />
-              </div>
-              {card.mode === "replace" && overlapping.length > 1 && (
-                <select
-                  className="input"
-                  value={card.skipRuleId ?? ""}
-                  onChange={(e) => onChange({ skipRuleId: e.target.value || null })}
-                  style={{ height: 38 }}
-                >
-                  <option value="">대체할 일정을 선택하세요</option>
-                  {overlapping.map((r) => (
-                    <option key={r.id} value={r.id}>{r.title ? `${r.title}(${r.reason})` : r.reason} · {fmtMin(r.start)}–{fmtLeave(r.end)}</option>
-                  ))}
-                </select>
+              {/* hours 는 등원 변경·하원 변경이 서로 다른 정기 일정과 겹칠 수 있어 skipRuleId 하나로
+                  "대체"를 표현할 수 없다 — 항상 "추가"로만 신청하고, 여기서는 겹침 정보만 보여준다. */}
+              {card.reqType !== "hours" && (
+                <>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <ModeButton label="추가로" active={card.mode === "add"} onClick={() => onChange({ mode: "add", skipRuleId: null })} />
+                    <ModeButton
+                      label="이 일정 대신"
+                      active={card.mode === "replace"}
+                      onClick={() => onChange({ mode: "replace", skipRuleId: overlapping.length === 1 ? overlapping[0].id : card.skipRuleId })}
+                    />
+                  </div>
+                  {card.mode === "replace" && overlapping.length > 1 && (
+                    <select
+                      className="input"
+                      value={card.skipRuleId ?? ""}
+                      onChange={(e) => onChange({ skipRuleId: e.target.value || null })}
+                      style={{ height: 38 }}
+                    >
+                      <option value="">대체할 일정을 선택하세요</option>
+                      {overlapping.map((r) => (
+                        <option key={r.id} value={r.id}>{r.title ? `${r.title}(${r.reason})` : r.reason} · {fmtMin(r.start)}–{fmtLeave(r.end)}</option>
+                      ))}
+                    </select>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -1232,6 +1423,22 @@ function BackIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="10.5 3.5 5.5 8 10.5 12.5" />
+    </svg>
+  );
+}
+function CalendarBellIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="17" rx="2.5" />
+      <path d="M3 9h18" />
+      <path d="M8 2.5v3M16 2.5v3" />
+    </svg>
+  );
+}
+function ArrowRightIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9 6 15 12 9 18" />
     </svg>
   );
 }

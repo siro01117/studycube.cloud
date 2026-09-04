@@ -1,10 +1,12 @@
 "use client";
 
-// 학생 목록 + 즉시 검색. 재원/휴원 탭. 행 클릭 → 상세 팝업, 우클릭 → 컨텍스트 메뉴(휴원/복귀).
-// 추가 = 팝업 폼. 상태 드롭다운은 우클릭 메뉴로 대체(자주 안 쓰는 걸 메인에서 뺌).
-import { useMemo, useState, useTransition } from "react";
-import Link from "next/link";
+// 학생 목록 + 즉시 검색. 재원/휴원 탭. 행 전체 클릭(또는 Enter) → 상세 화면(/m/student/[id]) 이동,
+// 우클릭·꾹누르기 → 컨텍스트 메뉴(빠른 정보 팝업·휴원/복귀). 추가 = 팝업 폼.
+// 재원 탭 + 검색어 없음일 때만 교실(room)별로 묶어 접고 펼 수 있다 — 검색·휴원 탭처럼 이미 걸러진
+// 목록에 접힌 묶음까지 씌우면 오히려 찾기 방해라 그때는 평평한 목록으로 되돌린다.
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { addStudent, setStudentStatus, deleteStudent, issueAccessCodes } from "./actions";
+import { getAccessCodeSmsCandidates, sendAccessCodeSms, type SmsCandidate, type SmsTemplateInfo } from "./smsActions";
 import { releaseSeat } from "../seat/actions";
 import { levelLabel, STU_STATUS, type Student } from "./util";
 import StudentPopup, { ReleaseSeatIcon } from "../_shared/StudentPopup";
@@ -12,6 +14,8 @@ import ContextMenu, { type MenuItem } from "../_shared/ContextMenu";
 import { useLongPress } from "../_shared/useLongPress";
 import { useSort, SortPicker, type SortColumn } from "../_shared/sort";
 import Modal from "../_shared/Modal";
+import SmsBatchSendModal from "../sms/SmsBatchSendModal";
+import Link from "next/link";
 
 // 정렬 가능한 속성: 좌석번호 / 이름 / 구분(학년·N수) / 상태(재원·휴원) / 등록일 / 코드 발급 여부.
 const SORT_COLUMNS: SortColumn<Student>[] = [
@@ -23,20 +27,28 @@ const SORT_COLUMNS: SortColumn<Student>[] = [
   { key: "code", label: "코드 발급 여부", sortValue: (s) => (s.access_code ? "발급" : "미발급") },
 ];
 
-// 행 끝 '상세 보기' 화살표 — 인라인 stroke SVG(이모지 금지 원칙).
-const ChevronIcon = () => (
-  <svg viewBox="0 0 16 16" style={{ width: 14, height: 14, fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round" }}>
+// 행 끝 '상세 보기' 화살표 — 이제 행 전체가 링크라 장식용(누를 수 있다는 신호만, 클릭 대상 아님).
+const RowChevron = () => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" style={{ width: 16, height: 16, fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round", flex: "none" }}>
+    <path d="M6 3.5l5 4.5-5 4.5" />
+  </svg>
+);
+
+// 교실 묶음 접힘/펼침 화살표 — 펼쳐지면 아래(세로), 접히면 오른쪽(가로)을 가리킨다.
+const RoomChevron = ({ open }: { open: boolean }) => (
+  <svg viewBox="0 0 16 16" aria-hidden="true" style={{ width: 13, height: 13, fill: "none", stroke: "currentColor", strokeWidth: 1.9, strokeLinecap: "round", strokeLinejoin: "round", flex: "none", transition: "transform .12s ease", transform: open ? "rotate(90deg)" : "none" }}>
     <path d="M6 3.5l5 4.5-5 4.5" />
   </svg>
 );
 
 export default function StudentList({
-  students, canEdit, canAttend, canManageSeat,
+  students, canEdit, canAttend, canManageSeat, canSms,
 }: {
   students: Student[];
   canEdit: boolean;
   canAttend: boolean;
   canManageSeat: boolean;
+  canSms: boolean;
 }) {
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<"enrolled" | "leave">("enrolled");
@@ -46,6 +58,16 @@ export default function StudentList({
   const [rowMenu, setRowMenu] = useState<{ x: number; y: number; s: Student } | null>(null);
   const [codeMsg, setCodeMsg] = useState<string | null>(null);
   const [pending, start] = useTransition();
+
+  // 링크·로그인 코드 안내 문자 — 열 때 후보(코드 발급된 재원생)+템플릿을 불러온다(모달이 직접, 여기선
+  // 열림 상태와 불러온 데이터만 들고 있는다).
+  const [smsModalOpen, setSmsModalOpen] = useState(false);
+  const [smsData, setSmsData] = useState<{ candidates: SmsCandidate[]; tmpl: SmsTemplateInfo; branchName: string; loginUrl: string } | null>(null);
+  const openSmsModal = () => {
+    setSmsModalOpen(true);
+    setSmsData(null);
+    getAccessCodeSmsCandidates().then(setSmsData).catch(() => setSmsData({ candidates: [], tmpl: { title: "", body: "", enabled: false }, branchName: "", loginUrl: "" }));
+  };
 
   const openStudent = (id: string | null) => { setConfirmDel(false); setOpenId(id); };
   // 터치 꾹누르기 = 행 컨텍스트 메뉴(우클릭 대체)
@@ -65,13 +87,65 @@ export default function StudentList({
           levelLabel(s).toLowerCase().includes(needle) ||
           (s.guardian_phone ?? "").includes(needle) ||
           (s.student_phone ?? "").includes(needle) ||
-          String(s.seat_number ?? "").includes(needle)
+          String(s.seat_number ?? "").includes(needle) ||
+          (s.room_name ?? "").toLowerCase().includes(needle)
         );
       });
   }, [students, q, tab]);
 
   // 정렬 상태는 화면(student-list)별로 localStorage 에 유지 — 기본값은 기존 쿼리 순서(이름 오름차순, page.tsx `order by s.name`)와 동일하게 둔다.
   const { sorted: list, sortKey, sortDir, requestSort } = useSort(filtered, SORT_COLUMNS, "name", "student-list");
+
+  // 교실별 묶음은 재원 탭 + 검색어 없을 때만. 검색이나 휴원 탭은 이미 좁혀진 목록이라 묶음이 오히려 방해.
+  const groupable = tab === "enrolled" && q.trim() === "";
+  const groups = useMemo(() => {
+    if (!groupable) return null;
+    const byRoom = new Map<string, { key: string; label: string; floor: number | null; students: Student[] }>();
+    for (const s of list) {
+      const key = s.room_id ?? "__unassigned__";
+      let g = byRoom.get(key);
+      if (!g) {
+        g = { key, label: s.room_id ? (s.room_name ?? "이름 없는 교실") : "좌석 미배정", floor: s.room_floor, students: [] };
+        byRoom.set(key, g);
+      }
+      g.students.push(s);
+    }
+    return Array.from(byRoom.values()).sort((a, b) => {
+      if (a.key === "__unassigned__") return 1; // 미배정은 항상 맨 아래
+      if (b.key === "__unassigned__") return -1;
+      if ((a.floor ?? 0) !== (b.floor ?? 0)) return (a.floor ?? 0) - (b.floor ?? 0);
+      return a.label.localeCompare(b.label, "ko");
+    });
+  }, [groupable, list]);
+
+  // 펼침 상태 — 화면(student-rooms)별로 localStorage 에 유지(정렬 상태와 같은 관례, sort.tsx 참고).
+  // 기본값은 "전부 접힘"(집주인 지시: 처음 들어오면 교실 목록만 보이는 게 근무자에게 빠르다) —
+  // 그래서 이 Set 은 "펼친 적 있는 교실" 키만 담는다(과거엔 반대로 "접은 교실"을 담아 기본 펼침
+  // 이었다). 저장 키(sc-collapse:student-rooms)는 그대로 두고 의미만 뒤집었다 — 한 번이라도 편
+  // 교실은 이 Set 에 남아 다음에도 펴져 있고, 건드린 적 없는 교실은 기본값(접힘)으로 보인다.
+  // 마운트 이후에만 읽는다(SSR/hydration 안전 — sort.tsx 와 동일 이유. 초기 렌더는 서버·클라 모두
+  // 빈 Set = 전부 접힘으로 일치해야 hydration 이 깨지지 않는다).
+  const [opened, setOpened] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("sc-collapse:student-rooms");
+      if (raw) setOpened(new Set(JSON.parse(raw) as string[]));
+    } catch {
+      // 저장값이 깨졌으면 전부 접힌 기본값 그대로.
+    }
+  }, []);
+  const toggleRoom = (key: string) => {
+    setOpened((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      try {
+        window.localStorage.setItem("sc-collapse:student-rooms", JSON.stringify(Array.from(next)));
+      } catch {
+        // 저장 실패(프라이빗 모드 등)는 무시 — 이번 세션 동안만 펼침이 유지된다.
+      }
+      return next;
+    });
+  };
 
   const enrolledCount = students.filter((s) => s.status !== "leave").length;
   const leaveCount = students.filter((s) => s.status === "leave").length;
@@ -91,6 +165,62 @@ export default function StudentList({
     const fd = new FormData();
     fd.set("id", id);
     start(async () => { await deleteStudent(fd); openStudent(null); });
+  };
+
+  // 학생 한 명 = 목록의 한 행. 행 전체가 상세 화면(/m/student/[id])으로 가는 링크다 — 근무자가
+  // 카운터에서 급히 찾을 때 좁은 화살표 한 개보다 줄 전체를 누르는 편이 훨씬 크고 직관적이라 판단
+  // (근거는 파일 상단 주석 및 보고 참고). 빠른 정보 팝업(재원/휴원 전환·좌석 비우기 등)은 우클릭·
+  // 꾹누르기 컨텍스트 메뉴로 남겨 링크 클릭과 겹치지 않게 분리했다.
+  const renderRow = (s: Student) => {
+    const lv = levelLabel(s);
+    return (
+      <Link
+        key={s.id}
+        href={`/m/student/${s.id}`}
+        className="touchable student-row"
+        {...rowLP.bind(s)}
+        onClick={(e) => { if (rowLP.consumed()) e.preventDefault(); }}
+        onContextMenu={canEdit ? (e) => { e.preventDefault(); setRowMenu({ x: e.clientX, y: e.clientY, s }); } : undefined}
+        title={`${s.name} 상세 보기`}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "56px 1fr 20px",
+          alignItems: "center",
+          gap: 10,
+          padding: "12px 8px",
+          borderTop: "1px solid var(--line)",
+          cursor: "pointer",
+          textDecoration: "none",
+          color: "inherit",
+        }}
+      >
+        {/* 좌석 번호 */}
+        <span style={{ fontSize: 13, fontWeight: 800, color: s.seat_number != null ? "var(--accent)" : "var(--sub)", fontVariantNumeric: "tabular-nums" }}>
+          {s.seat_number != null ? s.seat_number : "—"}
+        </span>
+
+        {/* 이름 · 학년 · 학교 — 같은 행 동작(상세 보기)과 붙어 있으니 여기서 눈이 더 움직일 일이 없다 */}
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {s.name}
+            {lv && <span style={{ fontSize: 12, color: "var(--sub)", fontWeight: 500, marginLeft: 6 }}>{lv}</span>}
+            {s.school && <span style={{ fontSize: 12, color: "var(--sub)", marginLeft: 6 }}>{s.school}</span>}
+          </div>
+          {(s.guardian_phone || s.student_phone) && (
+            <div style={{ fontSize: 11.5, color: "var(--sub)", marginTop: 2 }}>
+              {s.student_phone && `학생 ${s.student_phone}`}
+              {s.student_phone && s.guardian_phone && " · "}
+              {s.guardian_phone && `보호자 ${s.guardian_phone}`}
+            </div>
+          )}
+        </div>
+
+        {/* 누를 수 있다는 신호 — 장식용(행 전체가 링크라 이 화살표 자체는 클릭 대상 아님) */}
+        <span className="student-row-chevron" style={{ display: "grid", placeItems: "center", color: "var(--faint)" }}>
+          <RowChevron />
+        </span>
+      </Link>
+    );
   };
 
   return (
@@ -118,6 +248,16 @@ export default function StudentList({
               >
                 {noCode > 0 ? `코드 발급 (${noCode})` : "코드 발급됨"}
               </button>
+              {canSms && (
+                <button
+                  className="btn"
+                  onClick={openSmsModal}
+                  title="코드가 발급된 재원생에게 링크·로그인 코드 문자를 보냅니다"
+                  style={{ height: 40, padding: "0 14px", whiteSpace: "nowrap", flexShrink: 0, fontSize: 13 }}
+                >
+                  코드 문자 보내기
+                </button>
+              )}
               <button className="btn btn-accent" onClick={() => setAddOpen(true)} style={{ height: 40, padding: "0 16px", whiteSpace: "nowrap", flexShrink: 0 }}>학생 추가</button>
             </>
           );
@@ -167,66 +307,43 @@ export default function StudentList({
                 ? "등록된 학생이 없습니다. ‘학생 추가’로 등록하세요."
                 : "재원 중인 학생이 없습니다."}
         </div>
-      ) : (
+      ) : groups ? (
+        // 교실별 묶음 — 방마다 접힘 헤더 + (접히지 않았으면) 그 방 학생 행들. 좌석 미배정은 항상 맨 아래 묶음.
         <div style={{ display: "flex", flexDirection: "column" }}>
-          {list.map((s) => {
-            const lv = levelLabel(s);
+          {groups.map((g, i) => {
+            const isOpen = opened.has(g.key);
+            // 층이 바뀌는 자리는 제목이 아니라 여백으로 표시한다(DESIGN.md §5) — 같은 층 교실끼리는
+            // 붙어 보이고, 층이 바뀌면 위 여백이 커져 그 자리가 경계라는 게 눈에 들어온다.
+            const floorBoundary = i > 0 && g.floor !== groups[i - 1].floor;
             return (
-              <div
-                key={s.id}
-                className="touchable"
-                {...rowLP.bind(s)}
-                onClick={() => { if (rowLP.consumed()) return; openStudent(s.id); }}
-                onContextMenu={canEdit ? (e) => { e.preventDefault(); setRowMenu({ x: e.clientX, y: e.clientY, s }); } : undefined}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => { if (e.key === "Enter") openStudent(s.id); }}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "56px 1fr 26px",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "10px 6px",
-                  borderTop: "1px solid var(--line)",
-                  cursor: "pointer",
-                }}
-              >
-                {/* 좌석 번호 */}
-                <span style={{ fontSize: 13, fontWeight: 800, color: s.seat_number != null ? "var(--accent)" : "var(--sub)" }}>
-                  {s.seat_number != null ? s.seat_number : "—"}
-                </span>
-
-                {/* 이름 · 학년 · 학교 */}
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {s.name}
-                    {lv && <span style={{ fontSize: 12, color: "var(--sub)", fontWeight: 500, marginLeft: 6 }}>{lv}</span>}
-                    {s.school && <span style={{ fontSize: 12, color: "var(--sub)", marginLeft: 6 }}>{s.school}</span>}
-                  </div>
-                  {(s.guardian_phone || s.student_phone) && (
-                    <div style={{ fontSize: 11.5, color: "var(--sub)", marginTop: 2 }}>
-                      {s.student_phone && `학생 ${s.student_phone}`}
-                      {s.student_phone && s.guardian_phone && " · "}
-                      {s.guardian_phone && `보호자 ${s.guardian_phone}`}
-                    </div>
-                  )}
-                </div>
-
-                {/* 상세 화면 진입 — 팝업 열기와 별개 동작이라 클릭 전파 차단 */}
-                <Link
-                  href={`/m/student/${s.id}`}
-                  onClick={(e) => e.stopPropagation()}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  aria-label={`${s.name} 상세 보기`}
-                  title="상세 보기"
-                  className="chip"
-                  style={{ width: 26, height: 26, padding: 0, justifyContent: "center", color: "var(--faint)" }}
+              <div key={g.key}>
+                <button
+                  type="button"
+                  className="touchable student-room-header"
+                  onClick={() => toggleRoom(g.key)}
+                  aria-expanded={isOpen}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8, width: "100%",
+                    padding: "10px 8px", marginTop: floorBoundary ? 18 : 4,
+                    borderTop: "1px solid var(--line)",
+                    background: "transparent", cursor: "pointer", textAlign: "left",
+                  }}
                 >
-                  <ChevronIcon />
-                </Link>
+                  <RoomChevron open={isOpen} />
+                  {g.floor != null && (
+                    <span style={{ fontSize: 11.5, color: "var(--sub)", fontWeight: 700, fontVariantNumeric: "tabular-nums", flex: "none" }}>{g.floor}층</span>
+                  )}
+                  <span style={{ fontSize: 12.5, fontWeight: 700 }}>{g.label}</span>
+                  <span style={{ fontSize: 12, color: "var(--sub)", fontVariantNumeric: "tabular-nums" }}>{g.students.length}명</span>
+                </button>
+                {isOpen && g.students.map((s) => renderRow(s))}
               </div>
             );
           })}
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {list.map((s) => renderRow(s))}
         </div>
       )}
 
@@ -382,6 +499,31 @@ export default function StudentList({
               <button className="btn btn-accent" style={{ height: 44, marginTop: 4 }}>추가</button>
             </form>
         </Modal>
+      )}
+
+      {/* 링크·로그인 코드 안내 문자 — 데이터 로딩 중엔 최소 스켈레톤만(모달 자체는 바로 뜬다) */}
+      {smsModalOpen && (
+        smsData ? (
+          <SmsBatchSendModal
+            title="링크·로그인 코드 안내 보내기"
+            situationLabel="링크·로그인 코드 안내"
+            candidates={smsData.candidates}
+            template={smsData.tmpl}
+            vars={(c) => ({ 학생이름: c.name, 코드: c.code ?? "", 링크: smsData.loginUrl, 학원이름: smsData.branchName })}
+            onClose={() => setSmsModalOpen(false)}
+            onSend={sendAccessCodeSms}
+          />
+        ) : (
+          <Modal
+            onClose={() => setSmsModalOpen(false)}
+            backdropBackground="rgba(20,22,30,.45)"
+            backdropZIndex={70}
+            panelZIndex={71}
+            panelStyle={{ width: 320, background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 20, boxShadow: "var(--shadow-lg)" }}
+          >
+            <div style={{ padding: 40, textAlign: "center", color: "var(--sub)", fontSize: 13 }}>불러오는 중…</div>
+          </Modal>
+        )
       )}
     </div>
   );

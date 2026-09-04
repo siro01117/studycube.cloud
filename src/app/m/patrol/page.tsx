@@ -17,6 +17,7 @@ export default async function PatrolPage() {
   if (!can(me, "patrol.view")) redirect("/home");
   await ready();
   const canManage = can(me, "patrol.manage");
+  const canPenaltyView = can(me, "penalty.view"); // 벌점 현황 탭 노출 — 전용 모듈(/m/penalty) 제거 후 이 화면에 흡수됨
   const branch = me.activeBranchId;
 
   const [rooms, seats, students, sessions, dates] = await Promise.all([
@@ -54,6 +55,7 @@ export default async function PatrolPage() {
         dates={dates}
         today={todayKey()}
         canManage={canManage}
+        canPenaltyView={canPenaltyView}
       />
     </main>
   );

@@ -5,6 +5,7 @@ import { ready } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
 import { todayKey } from "@/lib/date";
 import ScheduleDemo, { type SStudent } from "./ScheduleDemo";
+import ScheduleReminderButton from "./ScheduleReminderButton";
 import PageHeader from "../_shared/PageHeader";
 import type { Period } from "./actions";
 
@@ -22,6 +23,7 @@ export default async function SchedulePage({
   if (!me) redirect("/login");
   if (!can(me, "schedule.view")) redirect("/home");
   await ready();
+  const canSms = can(me, "sms.manage"); // sms.* 축, schedule.manage 와 별개(집주인 지시)
 
   const [studentRows, periodRows, hoursCountRows] = await Promise.all([
     db.query<{ id: string; name: string; seat_number: number | null }>(
@@ -54,11 +56,12 @@ export default async function SchedulePage({
     <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <PageHeader
         backHref="/home"
-        backLabel="홈"
+        backLabel="대시보드"
         title="학생 스케쥴러"
         flexNone
         right={
           <div className="flex items-center gap-3">
+            {canSms && <ScheduleReminderButton />}
             <Link href="/m/schedule/import" className="chip" style={{ textDecoration: "none" }}>JSON 일괄 반영</Link>
             <div className="hide-mobile" style={{ fontSize: 12.5, color: "var(--dim)" }}>
               학생 {students.length}명

@@ -4,6 +4,7 @@
 // 페이지 스크롤 없는 100dvh 고정 셸 → 크롬 주소창 접힘/펼침 레이아웃 점프 없음.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import MobileNav from "../_shared/MobileNav";
+import DeviceGate from "../_shared/DeviceGate";
 import { PATROL_STATES, PATROL_BY_KEY } from "@/lib/patrol";
 import { SW, SH, xyOf, boundsOf } from "@/lib/seatmap";
 import { PatrolQueue, type QueueStatus } from "@/lib/patrol-queue";
@@ -60,7 +61,7 @@ function Elapsed({ startedAt }: { startedAt: number }) {
   return <span style={{ fontVariantNumeric: "tabular-nums" }}>{(hh > 0 ? hh + ":" : "") + String(mm).padStart(2, "0") + ":" + String(ss).padStart(2, "0")}</span>;
 }
 
-export default function MobilePatrol({ rooms, seats, students, attendance, canManage, branchKey, openSession, patrolPace, scheduleMap, periods, actual }: {
+export default function MobilePatrol({ rooms, seats, students, attendance, canManage, branchKey, openSession, patrolPace, scheduleMap, periods, actual, nav, sheetMaxWidth }: {
   rooms: MRoom[]; seats: MSeat[]; students: MStudent[];
   attendance: Record<string, "in" | "out">; canManage: boolean; branchKey: string;
   openSession: MOpenSession | null;
@@ -68,6 +69,8 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
   scheduleMap: Record<string, MScheduleInfo>;
   periods: Period[];
   actual: MActual;
+  nav?: React.ReactNode;       // 상단 이동 컨트롤 — 기본은 폰용 시트 메뉴(MobileNav). 태블릿은 TabletNav 를 넘겨 대체.
+  sheetMaxWidth?: number;      // 바텀시트 폭 상한(px) — 태블릿에서 화면 끝까지 늘어지지 않게.
 }) {
   const [roomIdx, setRoomIdx] = useState(0);
   const [view, setView] = useState({ tx: 12, ty: 12, s: 1 });
@@ -399,9 +402,10 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
 
   return (
     <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column", background: "var(--bg)", touchAction: "none" }}>
+      {!nav && <DeviceGate current="/patrol" />}
       {/* ── 상단바: 현재 방 타이틀 중앙 (방 전환은 하단 ‹›) ── */}
       <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
-        <MobileNav current="/patrol" />
+        {nav ?? <MobileNav current="/patrol" />}
         <div style={{ flex: 1, minWidth: 0, textAlign: "center", lineHeight: 1.25 }}>
           <div style={{ fontSize: 16, fontWeight: 800 }}>{room ? `${room.floor}층 ${room.name}` : "방 없음"}</div>
           <div style={{ fontSize: 11, color: "var(--faint)", fontVariantNumeric: "tabular-nums" }}>
@@ -537,7 +541,7 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
       {sheet && sheetStudent && (
         <>
           <div onClick={() => setSheet(null)} style={{ position: "fixed", inset: 0, background: "rgba(10,12,18,.4)", zIndex: 40 }} />
-          <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 41, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "16px 16px calc(16px + env(safe-area-inset-bottom))", boxShadow: "0 -8px 30px rgba(10,12,18,.18)" }}>
+          <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 41, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "16px 16px calc(16px + env(safe-area-inset-bottom))", boxShadow: "0 -8px 30px rgba(10,12,18,.18)", maxWidth: sheetMaxWidth, margin: sheetMaxWidth ? "0 auto" : undefined }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 12 }}>
               <span style={{ fontSize: 17, fontWeight: 800 }}>{sheetStudent}</span>
               <span style={{ fontSize: 12.5, color: "var(--faint)" }}>{sheet.number ?? sheet.label}번</span>
@@ -581,7 +585,7 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
       {confirm === "resume" && resume && (
         <>
           <div onClick={() => setConfirm(null)} style={{ position: "fixed", inset: 0, background: "rgba(10,12,18,.4)", zIndex: 40 }} />
-          <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 41, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "18px 16px calc(16px + env(safe-area-inset-bottom))" }}>
+          <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 41, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "18px 16px calc(16px + env(safe-area-inset-bottom))", maxWidth: sheetMaxWidth, margin: sheetMaxWidth ? "0 auto" : undefined }}>
             <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>하던 순찰을 이어할까요?</div>
             <div style={{ fontSize: 12.5, color: "var(--dim)", marginBottom: 14, lineHeight: 1.6 }}>
               {resume.dayLabel} {resume.timeLabel} 시작 · {resume.startedByName} · {resume.markedCount}명 점검
@@ -609,7 +613,7 @@ export default function MobilePatrol({ rooms, seats, students, attendance, canMa
         return (
           <>
             <div onClick={() => setConfirm(null)} style={{ position: "fixed", inset: 0, background: "rgba(10,12,18,.4)", zIndex: 40 }} />
-            <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 41, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "18px 16px calc(16px + env(safe-area-inset-bottom))" }}>
+            <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 41, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "18px 16px calc(16px + env(safe-area-inset-bottom))", maxWidth: sheetMaxWidth, margin: sheetMaxWidth ? "0 auto" : undefined }}>
               <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 6 }}>{title}</div>
               {hasWarn ? (
                 <div style={{ background: "var(--warn-soft)", border: "1px solid var(--warn)", borderRadius: 12, padding: "10px 12px", marginBottom: 14, fontSize: 12.5, color: "var(--ink)", lineHeight: 1.6 }}>

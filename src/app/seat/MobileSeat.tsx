@@ -6,8 +6,10 @@ import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import SeatCanvas from "../_shared/SeatCanvas";
 import MobileNav from "../_shared/MobileNav";
+import DeviceGate from "../_shared/DeviceGate";
 import { SW, xyOf } from "@/lib/seatmap";
 import { checkIn, checkOut } from "../m/seat/attendanceActions";
+import { useAttendanceSmsPrompt } from "../m/seat/useAttendanceSmsPrompt";
 import { tint, line, ink, solid } from "@/lib/semantic-color";
 import { needsAttentionCheck, type OccKind, type SeatOcc } from "@/lib/occupancy";
 import {
@@ -53,13 +55,15 @@ function checkoutReasonStyle(label: string, filled: boolean): CSSProperties {
     : { backgroundColor: tint(key, 16), borderColor: line(key, 55), color: ink(key) };
 }
 
-export default function MobileSeat({ rooms, seats, students, occupancy, canAttend, scheduleMap, periods, actual, nowMin }: {
+export default function MobileSeat({ rooms, seats, students, occupancy, canAttend, scheduleMap, periods, actual, nowMin, nav, sheetMaxWidth }: {
   rooms: SRoom[]; seats: SSeat[]; students: SStudent[];
   occupancy: Record<string, SeatOcc>; canAttend: boolean;
   scheduleMap: Record<string, SScheduleInfo>;
   periods: Period[];
   actual: Record<string, ActualAttendance>;
   nowMin: number; // 서버가 계산해 내려준 지금 KST 분(자정부터 경과) — "확인 필요" 판정 전용(클라 new Date() 금지 원칙)
+  nav?: React.ReactNode;       // 상단 이동 컨트롤 — 기본은 폰용 시트 메뉴(MobileNav). 태블릿은 TabletNav 를 넘겨 대체.
+  sheetMaxWidth?: number;      // 바텀시트 폭 상한(px) — 태블릿에서 화면 끝까지 늘어지지 않게. 기본(폰)은 풀블리드 유지.
 }) {
   const [roomIdx, setRoomIdx] = useState(0);
   const [sel, setSel] = useState<SSeat | null>(null);
@@ -103,9 +107,15 @@ export default function MobileSeat({ rooms, seats, students, occupancy, canAtten
   // 수동 입/퇴실 버튼 — 로컬에 낙관적 상태를 두지 않고 서버 액션의 revalidatePath("/m/seat") 로 이
   // 페이지가 다시 렌더될 때 새로 내려오는 occupancy 를 그대로 반영한다(FloorEditor.tsx 와 동일 방식).
   // 예전엔 로컬 낙관적 state 가 순찰 기록 우선순위 버그와 겹쳐 수동 버튼을 눌러도 화면이 안 바뀌었다.
+  const { maybePrompt: maybePromptAttSms, node: attSmsPromptNode } = useAttendanceSmsPrompt();
+
   const mark = (studentId: string, kind: Att) => {
     const fd = new FormData(); fd.set("studentId", studentId);
-    start(async () => { await (kind === "in" ? checkIn(fd) : checkOut(fd)); });
+    const name = stOf.get(studentId)?.name ?? "학생";
+    start(async () => {
+      const r = kind === "in" ? await checkIn(fd) : await checkOut(fd);
+      maybePromptAttSms(r, studentId, name, kind === "in" ? "attend_in" : "attend_out");
+    });
     setSel(null);
   };
 
@@ -121,7 +131,12 @@ export default function MobileSeat({ rooms, seats, students, occupancy, canAtten
     const fd = new FormData();
     fd.set("studentId", checkoutConfirm.studentId);
     fd.set("note", note ?? "");
-    start(async () => { await checkOut(fd); });
+    const studentId = checkoutConfirm.studentId;
+    const name = stOf.get(studentId)?.name ?? "학생";
+    start(async () => {
+      const r = await checkOut(fd);
+      maybePromptAttSms(r, studentId, name, "attend_out");
+    });
     setCheckoutConfirm(null);
     setSel(null);
   };
@@ -131,9 +146,10 @@ export default function MobileSeat({ rooms, seats, students, occupancy, canAtten
 
   return (
     <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column", background: "var(--bg)" }}>
+      {!nav && <DeviceGate current="/seat" />}
       {/* 상단: 현재 방 (전환은 하단 ‹ ›) */}
       <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: "var(--card)", borderBottom: "1px solid var(--line)" }}>
-        <MobileNav current="/seat" />
+        {nav ?? <MobileNav current="/seat" />}
         <div style={{ flex: 1, minWidth: 0, textAlign: "center", lineHeight: 1.25 }}>
           <div style={{ fontSize: 16, fontWeight: 800 }}>{room ? `${room.floor}층 ${room.name}` : "방 없음"}</div>
           <div style={{ fontSize: 11, color: "var(--faint)", fontVariantNumeric: "tabular-nums" }}>
@@ -141,7 +157,8 @@ export default function MobileSeat({ rooms, seats, students, occupancy, canAtten
             {attentionCount > 0 && <span style={{ color: "var(--warn)", fontWeight: 700 }}> · 확인 필요 {attentionCount}명</span>}
           </div>
         </div>
-        <Link href="/patrol" className="chip" style={{ textDecoration: "none", height: 36, flex: "none", color: "var(--accent)", fontWeight: 700 }}>순찰</Link>
+        {/* 태블릿(nav 있음)은 상단 탭에 이미 순찰 탭이 있어 중복 — 폰에서만 이 지름길을 보여준다. */}
+        {!nav && <Link href="/patrol" className="chip" style={{ textDecoration: "none", height: 36, flex: "none", color: "var(--accent)", fontWeight: 700 }}>순찰</Link>}
       </div>
 
       <SeatCanvas
@@ -206,7 +223,7 @@ export default function MobileSeat({ rooms, seats, students, occupancy, canAtten
       {sel && selStudent && (
         <>
           <div onClick={() => setSel(null)} style={{ position: "fixed", inset: 0, background: "rgba(10,12,18,.45)", zIndex: 40 }} />
-          <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 41, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "18px 16px calc(16px + env(safe-area-inset-bottom))" }}>
+          <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 41, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "18px 16px calc(16px + env(safe-area-inset-bottom))", maxWidth: sheetMaxWidth, margin: sheetMaxWidth ? "0 auto" : undefined }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
               <span style={{ fontSize: 19, fontWeight: 800 }}>{selStudent.name}</span>
               <span style={{ fontSize: 13, color: "var(--faint)" }}>{sel.number ?? sel.label}번</span>
@@ -295,7 +312,7 @@ export default function MobileSeat({ rooms, seats, students, occupancy, canAtten
         return (
           <>
             <div onClick={() => setCheckoutConfirm(null)} style={{ position: "fixed", inset: 0, background: "rgba(10,12,18,.45)", zIndex: 42 }} />
-            <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 43, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "18px 16px calc(16px + env(safe-area-inset-bottom))" }}>
+            <div style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 43, background: "var(--card)", borderRadius: "18px 18px 0 0", padding: "18px 16px calc(16px + env(safe-area-inset-bottom))", maxWidth: sheetMaxWidth, margin: sheetMaxWidth ? "0 auto" : undefined }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
                 <span style={{ fontSize: 20, fontWeight: 700 }}>{name}</span>
                 {cc.studentId === sel?.current_student_id && sel && <span style={{ fontSize: 12.5, color: "var(--dim)" }}>{sel.number ?? sel.label}번</span>}
@@ -330,6 +347,7 @@ export default function MobileSeat({ rooms, seats, students, occupancy, canAtten
           </>
         );
       })()}
+      {attSmsPromptNode}
     </main>
   );
 }

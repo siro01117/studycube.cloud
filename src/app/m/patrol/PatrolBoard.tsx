@@ -9,6 +9,7 @@ import ContextMenu, { type MenuItem } from "../_shared/ContextMenu";
 import FitBox from "../_shared/FitBox";
 import { getPatrolSessions, getPatrolSessionDetail, setPatrolMark, clearPatrolMark, restorePatrolEvent, deletePatrolSession } from "../seat/patrolActions";
 import { useUndoToast } from "../_shared/UndoToast";
+import PenaltyOverview from "./PenaltyOverview";
 
 export type PRoom = { id: string; name: string; floor: number };
 export type PSeat = { id: string; room_id: string | null; grid_x: number | null; grid_y: number | null; number: number | null; label: string; current_student_id: string | null };
@@ -125,10 +126,12 @@ function MonthCalendar({
 }
 
 export default function PatrolBoard({
-  rooms, seats, students, sessions: initialSessions, dates, today, canManage,
+  rooms, seats, students, sessions: initialSessions, dates, today, canManage, canPenaltyView,
 }: {
   rooms: PRoom[]; seats: PSeat[]; students: PStudent[]; sessions: Session[]; dates: string[]; today: string; canManage: boolean;
+  canPenaltyView: boolean; // "벌점 현황" 탭 노출 여부 — 전용 모듈(/m/penalty) 제거 후 이 화면에 흡수됨
 }) {
+  const [tab, setTab] = useState<"session" | "penalty">("session");
   // sessions = 현재 selDate 하루치(서버에서 그 날짜로 걸러 옴 — 60개 제한이던 예전 방식과 달리
   // 날짜 내에서는 잘리지 않는다). initialSessions 는 페이지 진입 시(=오늘) 서버가 이미 조회해 온 것.
   const [sessions, setSessions] = useState<Session[]>(initialSessions);
@@ -251,7 +254,7 @@ export default function PatrolBoard({
     ];
   };
 
-  return (
+  const sessionBoard = (
     <div className="split" style={{ flex: 1, display: "flex", minHeight: 0 }}>
       {/* 왼쪽: 날짜 선택 + 그 날 순찰 목록 (폰에선 위쪽 스택) */}
       <div className="split-side" style={{ flex: "none", width: 300, borderRight: "1px solid var(--line)", background: "var(--card)", overflowY: "auto", padding: 12 }}>
@@ -396,6 +399,20 @@ export default function PatrolBoard({
       )}
 
       {toast.element}
+    </div>
+  );
+
+  if (!canPenaltyView) return sessionBoard;
+
+  // 벌점 전용 모듈(/m/penalty)이 없어지면서 이 화면에 탭으로 흡수됨 — 같은 사람(순찰 담당)이 같은
+  // 목적(학생 행동 관리)으로 보는 지표라 자연스러운 자리(근거는 FloorEditor/DESIGN 보고 참고).
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div className="tabbar-scroll" style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 20px 0", flex: "none" }}>
+        <button onClick={() => setTab("session")} style={{ height: 32, padding: "0 14px", borderRadius: 9, border: `1px solid ${tab === "session" ? "var(--accent)" : "var(--line)"}`, background: tab === "session" ? "var(--accent-soft)" : "transparent", color: tab === "session" ? "var(--accent)" : "var(--sub)", fontWeight: tab === "session" ? 800 : 500, fontSize: 12.5, cursor: "pointer" }}>순찰 세션</button>
+        <button onClick={() => setTab("penalty")} style={{ height: 32, padding: "0 14px", borderRadius: 9, border: `1px solid ${tab === "penalty" ? "var(--accent)" : "var(--line)"}`, background: tab === "penalty" ? "var(--accent-soft)" : "transparent", color: tab === "penalty" ? "var(--accent)" : "var(--sub)", fontWeight: tab === "penalty" ? 800 : 500, fontSize: 12.5, cursor: "pointer" }}>벌점 현황</button>
+      </div>
+      {tab === "penalty" ? <PenaltyOverview /> : sessionBoard}
     </div>
   );
 }

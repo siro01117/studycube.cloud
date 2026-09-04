@@ -102,6 +102,21 @@ export const FORMS: FormDef[] = [
     section: "info",
     order: 3,
   },
+  {
+    // 학생용 공지. 직원 공지(m/notice, /notice)와 같은 notice 테이블을 audience='student' 로 공유하고
+    // (관리 화면 src/app/m/notice), 읽음만 학생 전용 테이블(notice_student_read)에 별도로 남긴다 —
+    // 자세한 이유는 schema.modules.ts notice 섹션 주석 참고. 읽기 전용이라 "내 정보"와 성격이 같아
+    // 같은 섹션에 둔다(다만 대상은 "내 데이터"가 아니라 학원 공지라 order 를 맨 뒤로).
+    slug: "ntc7h2qm",
+    type: "notice",
+    title: "공지사항",
+    desc: "학원 공지를 확인해요",
+    requiresStudent: true,
+    open: true,
+    hub: true,
+    section: "info",
+    order: 4,
+  },
 ];
 
 /** 허브 목록에 노출할 항목만, order 오름차순(미지정은 뒤). */

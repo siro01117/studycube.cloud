@@ -90,9 +90,11 @@ export async function activateStudents(fd: FormData): Promise<number> {
   // 이 지점 학생인지 확인하며 한 번의 다중 VALUES insert(학생별 왕복 쿼리 없이). 이미 제출한 적 있는
   // 학생(=잠길 수 있는 학생)만 대상 — 첫 제출로 이미 열려 있는 학생을 활성화해도 의미가 없으니 걸러낸다.
   const params: (string | number | null)[] = [branchId, label, note, me.id];
+  // values 목록의 파라미터는 Postgres 가 text 로 추론한다 — 아래 join 이 student.id(uuid) 와 비교하므로
+  // uuid 로 명시 캐스팅하지 않으면 "operator does not exist: uuid = text" 로 통째로 실패한다.
   const values = uniqIds.map((id) => {
     params.push(id);
-    return `($1,$${params.length},$2,$3,$4)`;
+    return `($1::uuid,$${params.length}::uuid,$2,$3,$4::uuid)`;
   });
   const ins = await db.query<{ student_id: string }>(
     `insert into schedule_grant(branch_id, student_id, label, note, created_by, opens_at, closes_at)

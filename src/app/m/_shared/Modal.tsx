@@ -11,6 +11,28 @@ import { useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 // 전부 이 컴포넌트 안에서 처리하므로 화면마다 따로 구현할 필요가 없다.
 const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+// 중첩 Modal(예: 학생 상세 팝업 위에 뜨는 벌점 사이드 패널) 지원용 스택. 각 인스턴스가 마운트 시
+// 자기 id 를 넣고 언마운트 시 뺀다. Esc·Tab 트랩은 "지금 스택 맨 위(가장 나중에 열린 것)"인 인스턴스만
+// 반응한다 — 이게 없으면 중첩된 두 Modal 이 같은 Esc 한 번에 동시에 닫혀 버린다(둘 다 window 의
+// keydown 을 버블 단계에서 듣기 때문). 모듈 스코프 배열이라 페이지 전역에서 공유된다.
+const modalStack: symbol[] = [];
+
+// 위 스택을 Modal 이 아닌 다른 "떠 있는 레이어"(예: 사이드 패널 — 가운데 정렬이 아니라 옆에 붙어야
+// 해서 Modal 컴포넌트 자체를 못 쓰는 경우)도 같은 규칙으로 줄 세우고 싶을 때 쓰는 export.
+export function pushModalLayer(): symbol {
+  const id = Symbol();
+  modalStack.push(id);
+  return id;
+}
+export function popModalLayer(id: symbol) {
+  const i = modalStack.indexOf(id);
+  if (i !== -1) modalStack.splice(i, 1);
+}
+export function isTopModalLayer(id: symbol): boolean {
+  return modalStack[modalStack.length - 1] === id;
+}
+export { FOCUSABLE };
+
 export default function Modal({
   onClose,
   backdropBackground,
@@ -31,12 +53,17 @@ export default function Modal({
   ariaLabelledBy?: string;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const idRef = useRef<symbol>(Symbol());
 
   useEffect(() => {
     const prevFocused = document.activeElement as HTMLElement | null;
     panelRef.current?.focus();
+    modalStack.push(idRef.current);
+
+    const isTop = () => modalStack[modalStack.length - 1] === idRef.current;
 
     const onKeyDown = (e: KeyboardEvent) => {
+      if (!isTop()) return; // 이 Modal 위에 더 나중에 열린 Modal 이 있으면 그쪽이 먼저 반응한다
       if (e.key === "Escape") {
         onClose();
         return;
@@ -68,6 +95,8 @@ export default function Modal({
     window.addEventListener("keydown", onKeyDown);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
+      const i = modalStack.indexOf(idRef.current);
+      if (i !== -1) modalStack.splice(i, 1);
       prevFocused?.focus?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

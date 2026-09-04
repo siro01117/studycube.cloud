@@ -168,6 +168,10 @@ function MonthPanel({
   const dirty = useMemo(() => !setsEqual(selected, original), [selected, original]);
   useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
 
+  // 저장 직전에 이미 낸 신청이 있었는지 — 완료 화면 문구를 "신청됐습니다"/"수정됐습니다"로 가른다.
+  // 저장에 성공하면 original 이 갱신되므로 저장 후 값으로는 판단할 수 없어 그 순간을 붙잡아 둔다.
+  const [savedAsEdit, setSavedAsEdit] = useState(false);
+
   // priceMap: 저장된 끼니의 단가 스냅샷(lm.price, 관리자 화면 actions.ts listApps 과 같은 원칙).
   // appliedLocked: 마감 & 이미 신청됨(dot 표시용). lockedAll: 이 달의 모든 잠긴 끼니(그리드 톤·비활성용,
   // 신청 여부 무관 — 한 번도 신청 안 한 과거 날짜도 잠긴 것으로 보여야 한다).
@@ -218,7 +222,7 @@ function MonthPanel({
         <div style={{ width: 52, height: 52, borderRadius: "50%", background: "var(--accent-soft)", color: "var(--accent)", display: "grid", placeItems: "center", margin: "0 auto 14px" }}>
           <CheckIcon />
         </div>
-        <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 8 }}>신청됐습니다</div>
+        <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 8 }}>{savedAsEdit ? "수정됐습니다" : "신청됐습니다"}</div>
         <div style={{ fontSize: 14, color: "var(--dim)", lineHeight: 1.6, marginBottom: 20 }}>
           당일 오전 8시 전까지는 이 페이지에서 다시 들어와 신청 내용을 바꿀 수 있어요.
           <br />
@@ -321,6 +325,7 @@ function MonthPanel({
     startSave(async () => {
       const res = await saveLunchOrder(fd);
       if (res.ok) {
+        setSavedAsEdit(original.size > 0 || appliedLocked.size > 0);
         setOriginal(new Set(selected));
         onDoneChange(true);
       } else if (res.kind === "identity") {
@@ -370,6 +375,7 @@ function MonthPanel({
         dirty={dirty}
         saving={saving}
         onSave={save}
+        editing={original.size > 0 || appliedLocked.size > 0}
       />
     </div>
   );
@@ -421,11 +427,13 @@ function PriceUnsetNotice() {
 }
 
 // ---------------- 요약 바 ----------------
+// editing: 이 달에 이미 낸 신청이 있으면 버튼이 "신청"이 아니라 "신청 수정"이 된다 —
+// 처음 내는 것인지 고치는 것인지 헷갈리지 않게.
 function SummaryBar({
-  lunchLabel, dinnerLabel, lunchCount, dinnerCount, total, dirty, saving, onSave,
+  lunchLabel, dinnerLabel, lunchCount, dinnerCount, total, dirty, saving, onSave, editing,
 }: {
   lunchLabel: string; dinnerLabel: string; lunchCount: number; dinnerCount: number; total: number;
-  dirty: boolean; saving: boolean; onSave: () => void;
+  dirty: boolean; saving: boolean; onSave: () => void; editing: boolean;
 }) {
   return (
     <div
@@ -447,7 +455,7 @@ function SummaryBar({
         onClick={onSave}
         style={{ height: 48, padding: "0 22px", fontSize: 14.5, fontWeight: 700, flex: "none" }}
       >
-        {saving ? "신청 중…" : "신청"}
+        {saving ? (editing ? "수정 중…" : "신청 중…") : editing ? "신청 수정" : "신청"}
       </button>
     </div>
   );

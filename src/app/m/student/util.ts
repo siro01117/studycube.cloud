@@ -13,6 +13,9 @@ export type Student = {
   enrolled_at: string | null;
   seat_number: number | null;
   seat_id: string | null;
+  room_id: string | null;
+  room_name: string | null;
+  room_floor: number | null;
   access_code: string | null; // 공개 폼 로그인 코드
 };
 

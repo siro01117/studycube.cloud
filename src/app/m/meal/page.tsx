@@ -23,7 +23,7 @@ export default async function MealAdminPage() {
     <main style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <PageHeader
         backHref="/home"
-        backLabel="홈"
+        backLabel="대시보드"
         title="도시락 관리"
         flexNone
         right={

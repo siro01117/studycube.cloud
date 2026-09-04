@@ -65,7 +65,7 @@ export default async function SubmissionPage({
     <main style={{ minHeight: "100dvh" }}>
       <PageHeader
         backHref="/home"
-        backLabel="홈"
+        backLabel="대시보드"
         title="신청·설문 응답"
         maxWidth
         right={<div style={{ fontSize: 12.5, color: "var(--sub)" }}>최근 {list.length}건</div>}

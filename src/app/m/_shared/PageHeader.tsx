@@ -21,7 +21,7 @@ export default function PageHeader({
   title: string;
   titleExtra?: ReactNode;
   right?: ReactNode;
-  maxWidth?: boolean;
+  maxWidth?: boolean | number; // true → 기존 1080px 고정 클래스. 숫자 → 그 폭(본문과 맞출 때, 인라인 스타일).
   flexNone?: boolean;
 }) {
   return (
@@ -33,9 +33,8 @@ export default function PageHeader({
       }}
     >
       <div
-        className={
-          (maxWidth ? "mx-auto max-w-[1080px] " : "") + "px-5 h-14 flex items-center justify-between"
-        }
+        className={(maxWidth === true ? "mx-auto max-w-[1080px] " : "") + "px-5 h-14 flex items-center justify-between"}
+        style={typeof maxWidth === "number" ? { maxWidth, marginLeft: "auto", marginRight: "auto" } : undefined}
       >
         <div className="flex items-center gap-3">
           <Link href={backHref} className="chip" style={backLinkStyle}>

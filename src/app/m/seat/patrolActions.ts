@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { guard } from "@/lib/auth";
 import { PATROL_BY_KEY } from "@/lib/patrol";
 import { todayKey as todayStr, elapsedLabel } from "@/lib/date"; // KST 기준(서버 UTC 어긋남 방지)
+import { sendAttendanceSms, sendAttendanceSmsBatch } from "@/lib/sms-auto";
 
 const s = (v: FormDataEntryValue | null): string | null => {
   const t = String(v ?? "").trim();
@@ -26,6 +27,9 @@ async function ensureCheckedInFromPatrol(branchId: string | null, studentId: str
      values ($1,$2,'in',true,$3,$4)`,
     [branchId, studentId, date, by],
   );
+  // 순찰이 자동으로 확정한 입실 — 사람이 누른 게 아니라 진짜 자동 처리라 확인 없이 곧바로 큐잉한다
+  // (attendanceActions.ts 의 수동 checkIn 과 다른 점 — 그쪽은 확인을 거친다).
+  if (branchId) await sendAttendanceSms(branchId, studentId, "attend_in", by);
 }
 
 // 순찰 상태 원탭 기록. points 는 프리셋에서 스냅샷 → 나중에 프리셋 바꿔도 과거 기록 불변.
@@ -138,6 +142,10 @@ export async function recordPatrolBulk(formData: FormData) {
          values ${attValues.join(",")}`,
         attParams,
       );
+      // 순찰 자동 처리(사람이 누른 게 아님) — 확인 없이 곧바로, 배치로(N+1 금지) 큐잉.
+      if (me.activeBranchId) {
+        await sendAttendanceSmsBatch(me.activeBranchId, needCheckIn.map((id) => ({ studentId: id, kind: "attend_in" as const })), me.id);
+      }
     }
   }
 
@@ -151,7 +159,6 @@ export async function removePatrolEvent(formData: FormData) {
   const id = s(formData.get("id"));
   if (!id) return;
   await db.query(`delete from patrol_event where id=$1 and branch_id=$2`, [id, me.activeBranchId]);
-  revalidatePath("/m/penalty");
   revalidatePath("/m/patrol");
   revalidatePath("/m/seat");
   revalidatePath("/seat");
@@ -176,7 +183,6 @@ export async function restorePatrolEvent(formData: FormData) {
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
     [id, me.activeBranchId, studentId, state, points, sessionId, seatId, at, date, createdBy],
   );
-  revalidatePath("/m/penalty");
   revalidatePath("/m/patrol");
   revalidatePath("/m/seat");
   revalidatePath("/seat");
@@ -234,6 +240,7 @@ export async function endPatrol(formData: FormData) {
     // params 앞 3개(branch_id/date/created_by)는 모든 행이 공유 — 학생별로는 student_id/kind/at 만 붙인다.
     const params: (string | null)[] = [me.activeBranchId, date, me.id];
     const values: string[] = [];
+    const smsItems: { studentId: string; kind: "attend_in" | "attend_out" }[] = [];
     for (const r of marks.rows) {
       const asIn = PATROL_BY_KEY[r.state]?.asIn ?? true;
       const kind = asIn ? "in" : "out";
@@ -241,6 +248,7 @@ export async function endPatrol(formData: FormData) {
       const i = params.length;
       params.push(r.student_id, kind, r.at);
       values.push(`($1,$${i + 1},$${i + 2},true,$2,$3,$${i + 3},'순찰 자동 처리')`);
+      smsItems.push({ studentId: r.student_id, kind: kind === "in" ? "attend_in" : "attend_out" });
     }
     if (values.length > 0) {
       // at 은 그 학생의 마지막 마크 시각을 그대로 쓴다(종료 시각 대신 — 실제 상태가 확정된 시점).
@@ -250,6 +258,8 @@ export async function endPatrol(formData: FormData) {
          values ${values.join(",")}`,
         params,
       );
+      // 순찰 종료가 자동으로 확정한 입·퇴실(사람이 누른 게 아님) — 확인 없이 곧바로, 배치로 큐잉.
+      if (me.activeBranchId) await sendAttendanceSmsBatch(me.activeBranchId, smsItems, me.id);
     }
   }
 
@@ -460,7 +470,9 @@ export async function getOpenPatrolSession(): Promise<OpenPatrolSession | null> 
 // (순찰 화면에 상시 노출용, 클라 시각 계산 금지 원칙 — startPatrol 확인창의 line1 과 달리 이건 순찰
 // 시작 전에도 항상 보여야 해서 별도 액션으로 분리). 지점 기준(학생별 아님).
 // 지난 세션(가장 최근 시작된 것) 하나만 보면 되므로 학생 수·세션 수와 무관하게 쿼리 1회.
-export type PatrolPace = { todayCount: number; lastLabel: string | null };
+// minutes: lastLabel 을 만든 원본 분값(숫자) — 대시보드가 "40분째 없음" 같은 임계값 판정에 문자열
+// 파싱 없이 직접 쓰기 위해 추가(대시보드 nowActions.ts 전용, 기존 호출부는 lastLabel 만 계속 사용).
+export type PatrolPace = { todayCount: number; lastLabel: string | null; minutes: number | null };
 export async function getPatrolPace(): Promise<PatrolPace> {
   const me = await guard("patrol.view");
   const today = todayStr();
@@ -477,5 +489,9 @@ export async function getPatrolPace(): Promise<PatrolPace> {
     [me.activeBranchId, today],
   );
   const row = r.rows[0];
-  return { todayCount: row?.today_count ?? 0, lastLabel: row?.mins != null ? elapsedLabel(row.mins) : null };
+  return {
+    todayCount: row?.today_count ?? 0,
+    lastLabel: row?.mins != null ? elapsedLabel(row.mins) : null,
+    minutes: row?.mins ?? null,
+  };
 }

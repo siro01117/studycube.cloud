@@ -5,7 +5,7 @@
 import { useMemo, useState, useTransition } from "react";
 import MobileNav from "../_shared/MobileNav";
 import { PENALTY_REASONS, PENALTY_WARN, penaltyHeat } from "@/lib/penalty";
-import { givePenalty, getStudentPenaltyWeek } from "../m/penalty/actions";
+import { givePenalty, getStudentPenaltyWeek } from "../m/_shared/penaltyActions";
 
 export type PStudent = { id: string; name: string; grade: string | null; seat_number: number | null };
 type Row = { id: string; label: string; points: number; at: string; source: "patrol" | "manual"; note: string | null };
