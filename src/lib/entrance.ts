@@ -1,12 +1,12 @@
 // 입구 태블릿(출입 키패드) 도메인 로직 — 기기 토큰 발급·검증, 학생 코드 무차별 대입 방어,
-// 연타 방지, 입·퇴실 자동 토글. src/lib/staff-attendance.ts(QR 근태)와 같은 위치의 "그 화면 단일
+// 연타 방지, 학생이 고른 입·퇴실 기록. src/lib/staff-attendance.ts(QR 근태)와 같은 위치의 "그 화면 단일
 // 출처" 파일 — DB·crypto 를 다루므로 서버 전용.
 import "server-only";
 import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { db } from "./db";
 import { hashPin, verifyPin } from "./hash";
-import { todayKey } from "./date";
+import { todayKey, timeLabel } from "./date";
 import { sendAttendanceSms } from "./sms-auto";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -126,20 +126,34 @@ async function clearDeviceFailure(deviceId: string): Promise<void> {
 // 결과를 보여주는 시간(2~3초, 아래 클라이언트) 안에 실수로 재입력되는 사고는 7초면 충분히 덮는다.
 const DEBOUNCE_SECONDS = 7;
 
+// status 로 갈래를 나눈다(ok 불리언 하나로는 부족해서) — "이미 그 상태"는 실패가 아니라 사실을
+// 알려주는 세 번째 결과다. 화면도 빨간 오류가 아니라 안내 색으로 보여주고, 오류보다 오래 띄운다
+// (읽어야 하는 정보이기 때문 — route.ts 의 HOLD_MS 참고).
 export type SubmitResult =
-  | { ok: true; name: string; kind: "in" | "out" }
-  | { ok: false; error: string };
+  | { status: "ok"; name: string; kind: "in" | "out"; at: string }
+  | { status: "already"; name: string; kind: "in" | "out"; at: string }
+  | { status: "error"; message: string };
 
-/** 코드 제출 처리 — 학생을 찾아 마지막 출결의 반대로 자동 토글하고, 그 지점의 attend_in/attend_out
- *  알림이 켜져 있으면 확인 없이 곧바로 문자 큐에 쌓는다(patrolActions.ts ensureCheckedInFromPatrol
- *  과 같은 "사람이 누른 게 아니라 진짜 자동 처리라 확인이 필요 없다" 취급 — 여기는 학생 본인이
- *  코드를 눌렀을 뿐 직원 확인 절차가 없는 무인 경로이기 때문). */
-export async function submitEntranceCode(deviceId: string, branchId: string, code: string): Promise<SubmitResult> {
+/** 코드 제출 처리 — 학생이 화면에서 고른 kind(입실/퇴실) 그대로 기록한다. 예전에는 마지막 기록의
+ *  반대로 자동 토글했는데, 그러면 학생은 자기가 무엇으로 찍히는지 누르기 전에 알 수 없고 직전
+ *  기록이 어긋나 있으면(직원이 수동으로 만져둔 경우 등) 의도와 반대로 찍혔다 — 무인 경로에서
+ *  되돌릴 사람이 없다는 점이 결정적이라 "고르고 누른다"로 바꿨다.
+ *
+ *  그 지점의 attend_in/attend_out 알림이 켜져 있으면 확인 없이 곧바로 문자 큐에 쌓는다
+ *  (patrolActions.ts ensureCheckedInFromPatrol 과 같은 "사람이 누른 게 아니라 진짜 자동 처리라
+ *  확인이 필요 없다" 취급 — 여기는 학생 본인이 코드를 눌렀을 뿐 직원 확인 절차가 없는 무인 경로다). */
+export async function submitEntranceCode(
+  deviceId: string,
+  branchId: string,
+  code: string,
+  kind: "in" | "out",
+): Promise<SubmitResult> {
   const cd = code.trim();
-  if (!/^\d{5}$/.test(cd)) return { ok: false, error: "코드를 확인해주세요." };
+  if (!/^\d{5}$/.test(cd)) return { status: "error", message: "코드를 확인해주세요." };
+  if (kind !== "in" && kind !== "out") return { status: "error", message: "다시 시도해주세요." };
 
   if (await isDeviceLocked(deviceId)) {
-    return { ok: false, error: "시도가 너무 많습니다. 잠시 후 다시 시도해주세요." };
+    return { status: "error", message: "시도가 너무 많습니다. 잠시 후 다시 시도해주세요." };
   }
 
   const st = await db.query<{ id: string; name: string }>(
@@ -149,7 +163,7 @@ export async function submitEntranceCode(deviceId: string, branchId: string, cod
   const student = st.rows[0];
   if (!student) {
     await recordDeviceFailure(deviceId);
-    return { ok: false, error: "코드를 확인해주세요." };
+    return { status: "error", message: "코드를 확인해주세요." };
   }
   await clearDeviceFailure(deviceId);
   await db.query(`update entrance_device set last_seen_at=now() where id=$1::uuid`, [deviceId]);
@@ -161,15 +175,19 @@ export async function submitEntranceCode(deviceId: string, branchId: string, cod
   );
   const lastRow = last.rows[0];
 
-  // 연타 방지 — 직전 기록이 DEBOUNCE_SECONDS 안이면 새로 찍지 않고 그 결과를 그대로 돌려준다.
-  if (lastRow && Date.now() - new Date(lastRow.at).getTime() < DEBOUNCE_SECONDS * 1000) {
-    return { ok: true, name: student.name, kind: lastRow.kind as "in" | "out" };
+  // 이미 그 상태인가 — 고른 것과 직전 기록이 같으면 새로 찍지 않는다(입실 두 번, 퇴실 두 번 방지).
+  // 두 갈래로 나뉘는 이유: DEBOUNCE_SECONDS 안의 재입력은 "화면이 느려 두 번 누른" 사고에 가까워
+  // 그대로 성공을 다시 보여주는 게 맞고(학생을 혼내지 않는다), 그보다 오래된 기록이면 진짜로
+  // 이미 처리된 것이라 몇 시에 찍혔는지 알려줘야 학생이 상황을 안다.
+  if (lastRow && lastRow.kind === kind) {
+    const at = timeLabel(lastRow.at);
+    const fresh = Date.now() - new Date(lastRow.at).getTime() < DEBOUNCE_SECONDS * 1000;
+    return { status: fresh ? "ok" : "already", name: student.name, kind, at };
   }
 
-  const kind: "in" | "out" = lastRow?.kind === "in" ? "out" : "in";
-  await db.query(
+  const r = await db.query<{ at: string }>(
     `insert into attendance_event(branch_id, student_id, kind, auto, date, created_by)
-     values ($1,$2,$3,true,$4,null)`,
+     values ($1,$2,$3,true,$4,null) returning at::text as at`,
     [branchId, student.id, kind, date],
   );
   await sendAttendanceSms(branchId, student.id, kind === "in" ? "attend_in" : "attend_out", null);
@@ -177,5 +195,7 @@ export async function submitEntranceCode(deviceId: string, branchId: string, cod
   revalidatePath("/m/seat");
   revalidatePath("/seat");
 
-  return { ok: true, name: student.name, kind };
+  // 시각은 서버가 KST 로 만들어 내려준다 — 태블릿 시계가 틀어져 있어도(공장초기화 후 시간 미설정
+  // 같은 흔한 상태) 화면에 엉뚱한 시각이 뜨지 않게. 클라 렌더에서 new Date() 금지 원칙과도 같은 결.
+  return { status: "ok", name: student.name, kind, at: timeLabel(r.rows[0]!.at) };
 }

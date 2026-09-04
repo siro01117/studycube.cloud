@@ -1,7 +1,7 @@
 "use client";
 
-// 학생 목록 + 즉시 검색. 재원/휴원 탭. 행 전체 클릭(또는 Enter) → 상세 화면(/m/student/[id]) 이동,
-// 우클릭·꾹누르기 → 컨텍스트 메뉴(빠른 정보 팝업·휴원/복귀). 추가 = 팝업 폼.
+// 학생 목록 + 즉시 검색. 재원/휴원 탭. 행 전체 클릭(또는 Enter) → 학생 정보 팝업(거기 '상세 보기'
+// 버튼이 /m/student/[id] 로 간다), 우클릭·꾹누르기 → 컨텍스트 메뉴(휴원/복귀 등). 추가 = 팝업 폼.
 // 재원 탭 + 검색어 없음일 때만 교실(room)별로 묶어 접고 펼 수 있다 — 검색·휴원 탭처럼 이미 걸러진
 // 목록에 접힌 묶음까지 씌우면 오히려 찾기 방해라 그때는 평평한 목록으로 되돌린다.
 import { useEffect, useMemo, useState, useTransition } from "react";
@@ -15,7 +15,6 @@ import { useLongPress } from "../_shared/useLongPress";
 import { useSort, SortPicker, type SortColumn } from "../_shared/sort";
 import Modal from "../_shared/Modal";
 import SmsBatchSendModal from "../sms/SmsBatchSendModal";
-import Link from "next/link";
 
 // 정렬 가능한 속성: 좌석번호 / 이름 / 구분(학년·N수) / 상태(재원·휴원) / 등록일 / 코드 발급 여부.
 const SORT_COLUMNS: SortColumn<Student>[] = [
@@ -27,7 +26,7 @@ const SORT_COLUMNS: SortColumn<Student>[] = [
   { key: "code", label: "코드 발급 여부", sortValue: (s) => (s.access_code ? "발급" : "미발급") },
 ];
 
-// 행 끝 '상세 보기' 화살표 — 이제 행 전체가 링크라 장식용(누를 수 있다는 신호만, 클릭 대상 아님).
+// 행 끝 화살표 — 행 전체가 누를 수 있다는 신호만 주는 장식용(클릭 대상 아님).
 const RowChevron = () => (
   <svg viewBox="0 0 16 16" aria-hidden="true" style={{ width: 16, height: 16, fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round", flex: "none" }}>
     <path d="M6 3.5l5 4.5-5 4.5" />
@@ -167,21 +166,24 @@ export default function StudentList({
     start(async () => { await deleteStudent(fd); openStudent(null); });
   };
 
-  // 학생 한 명 = 목록의 한 행. 행 전체가 상세 화면(/m/student/[id])으로 가는 링크다 — 근무자가
-  // 카운터에서 급히 찾을 때 좁은 화살표 한 개보다 줄 전체를 누르는 편이 훨씬 크고 직관적이라 판단
-  // (근거는 파일 상단 주석 및 보고 참고). 빠른 정보 팝업(재원/휴원 전환·좌석 비우기 등)은 우클릭·
-  // 꾹누르기 컨텍스트 메뉴로 남겨 링크 클릭과 겹치지 않게 분리했다.
+  // 학생 한 명 = 목록의 한 행. 행을 누르면 상세 화면으로 바로 가는 게 아니라 먼저 학생 정보
+  // 팝업이 뜬다 — 카운터에서 목록을 누르는 대부분의 용무(연락처 확인·좌석 확인·재원/휴원 전환)는
+  // 그 팝업 안에서 끝나고, 화면을 통째로 갈아타고 되돌아오는 값이 그보다 비쌌다. 팝업 안의
+  // '상세 보기' 버튼이 /m/student/[id] 로 가는 유일한 입구다(StudentPopup.tsx). 우클릭·꾹누르기
+  // 컨텍스트 메뉴(휴원/복귀 등 빠른 동작)는 그대로 둔다.
   const renderRow = (s: Student) => {
     const lv = levelLabel(s);
     return (
-      <Link
+      <div
         key={s.id}
-        href={`/m/student/${s.id}`}
+        role="button"
+        tabIndex={0}
         className="touchable student-row"
         {...rowLP.bind(s)}
-        onClick={(e) => { if (rowLP.consumed()) e.preventDefault(); }}
+        onClick={() => { if (!rowLP.consumed()) openStudent(s.id); }}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openStudent(s.id); } }}
         onContextMenu={canEdit ? (e) => { e.preventDefault(); setRowMenu({ x: e.clientX, y: e.clientY, s }); } : undefined}
-        title={`${s.name} 상세 보기`}
+        title={`${s.name} 정보 보기`}
         style={{
           display: "grid",
           gridTemplateColumns: "56px 1fr 20px",
@@ -190,7 +192,6 @@ export default function StudentList({
           padding: "12px 8px",
           borderTop: "1px solid var(--line)",
           cursor: "pointer",
-          textDecoration: "none",
           color: "inherit",
         }}
       >
@@ -215,11 +216,11 @@ export default function StudentList({
           )}
         </div>
 
-        {/* 누를 수 있다는 신호 — 장식용(행 전체가 링크라 이 화살표 자체는 클릭 대상 아님) */}
+        {/* 누를 수 있다는 신호 — 장식용(행 전체가 버튼이라 이 화살표 자체는 클릭 대상 아님) */}
         <span className="student-row-chevron" style={{ display: "grid", placeItems: "center", color: "var(--faint)" }}>
           <RowChevron />
         </span>
-      </Link>
+      </div>
     );
   };
 
