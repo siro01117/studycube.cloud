@@ -121,7 +121,8 @@ async function insertOne(params: EnqueueParams): Promise<EnqueueResult> {
       `select count(*)::text as n from sms_message
         where branch_id = $1::uuid and kind = any($2::text[])
           and (requested_at at time zone 'Asia/Seoul')::date = $3::date`,
-      [params.branchId, AUTO_SMS_KINDS, today],
+      // fetch_types:false 인 배포 드라이버는 JS 배열을 배열로 못 보낸다 — 리터럴 "{a,b}" 로 넘긴다(patrolActions.ts 선례).
+      [params.branchId, "{" + AUTO_SMS_KINDS.join(",") + "}", today],
     );
     const autoCountToday = Number(autoCapR.rows[0]?.n ?? "0");
     if (autoCountToday >= AUTO_SMS_DAILY_CAP) {

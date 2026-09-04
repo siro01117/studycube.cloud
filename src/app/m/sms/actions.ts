@@ -54,7 +54,8 @@ export async function getSmsMessages(tab: "pending" | "sent" | "failed"): Promis
       where sm.branch_id = $1::uuid and sm.status = any($2::text[])
       order by sm.requested_at desc
       limit 300`,
-    [branchId, statuses],
+    // fetch_types:false 인 배포 드라이버는 JS 배열을 배열로 못 보낸다 — 리터럴 "{a,b}" 로 넘긴다(patrolActions.ts 선례).
+    [branchId, "{" + statuses.join(",") + "}"],
   );
   return r.rows.map((x) => ({
     id: x.id, phone: x.phone, body: x.body, kind: x.kind, status: x.status, attempts: x.attempts,

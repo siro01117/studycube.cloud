@@ -112,7 +112,10 @@ export async function updateNotice(formData: FormData): Promise<NoticeActionResu
   if (owned.rows.length === 0) return { ok: false, error: "공지를 찾을 수 없습니다." };
 
   if (removeIds.length) {
-    await db.query(`delete from notice_image where notice_id=$1 and id = any($2::uuid[])`, [id, removeIds]);
+    // fetch_types:false 인 배포 드라이버는 JS 배열을 배열로 못 보낸다 — 리터럴 "{a,b}" 로 넘긴다
+    // (같은 파일 아래 idArr, patrolActions.ts 선례). uuid 형식만 남겨 리터럴에 이상한 값이 못 들어가게 한다.
+    const rmArr = "{" + removeIds.filter((x) => UUID_RE_BROADCAST.test(x)).join(",") + "}";
+    await db.query(`delete from notice_image where notice_id=$1 and id = any($2::uuid[])`, [id, rmArr]);
   }
   if (validated.length) {
     const countRow = await db.query<{ n: number }>(`select count(*)::int as n from notice_image where notice_id=$1`, [id]);

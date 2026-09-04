@@ -46,3 +46,6 @@ next-env.d.ts
 
 # 로컬 개발 로그
 dev.log
+
+.vercel
+.env*
