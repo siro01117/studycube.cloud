@@ -6,13 +6,23 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { TemplateRow, WorkerSecretMeta } from "./templateActions";
 import { saveSmsTemplate, saveExpiryDailyTime, issueSmsWorkerSecretAction, saveAcademyName } from "./templateActions";
-import { smsByteLength, SMS_LMS_BYTE_THRESHOLD, unknownVariablesIn, renderTemplate, type SmsSituation } from "@/lib/sms-template";
+import { smsByteLength, SMS_LMS_BYTE_THRESHOLD, unknownVariablesIn, renderTemplate, STUDENT_LOGIN_URL, type SmsSituation } from "@/lib/sms-template";
 
-// 미리보기용 예시 값 — 실제 발송값이 아니라 "이 변수 자리에 이런 게 들어간다"를 감 잡게 하는 용도.
-const SAMPLE_VARS: Record<string, string> = {
-  학생이름: "김학생", 접속코드: "48213", 코드: "48213", 링크: "https://studycube.co.kr/apply",
-  제목: "9월 정기고사 일정 안내", 만료일: "9월 15일", 학원이름: "스터디큐브",
-};
+// 미리보기 값. 학생마다 달라지는 것(이름·코드·만료일·제목)만 예시로 지어내고, 학생과 무관하게
+// 고정된 것(링크·학원이름)은 실제 발송에 쓰이는 바로 그 값을 넣는다.
+//
+// 예전엔 이 표에 링크와 학원이름까지 문자열로 박아뒀는데, 그게 실제 발송값과 조용히 갈렸다:
+// 미리보기는 "스터디큐브"와 살아있는 링크를 보여주는데 실제 문자는 "[본점]"과 404 링크로 나갔고,
+// 화면만 봐서는 그 사실을 알 방법이 없었다. 미리보기가 거짓말을 하면 없느니만 못하다 —
+// 그래서 고정값은 예시로 짓지 않는다.
+function sampleVars(academyName: string): Record<string, string> {
+  return {
+    학생이름: "김학생", 접속코드: "48213", 코드: "48213",
+    제목: "9월 정기고사 일정 안내", 만료일: "9월 15일",
+    링크: STUDENT_LOGIN_URL,
+    학원이름: academyName || "(학원 이름 미설정)",
+  };
+}
 
 function ByteMeter({ text }: { text: string }) {
   const n = smsByteLength(text);
@@ -24,7 +34,7 @@ function ByteMeter({ text }: { text: string }) {
   );
 }
 
-function TemplateEditor({ row, canManage }: { row: TemplateRow; canManage: boolean }) {
+function TemplateEditor({ row, canManage, academyName }: { row: TemplateRow; canManage: boolean; academyName: string }) {
   const router = useRouter();
   const [title, setTitle] = useState(row.title);
   const [body, setBody] = useState(row.body);
@@ -34,7 +44,7 @@ function TemplateEditor({ row, canManage }: { row: TemplateRow; canManage: boole
   const [saved, setSaved] = useState(false);
 
   const dirty = title !== row.title || body !== row.body || enabled !== row.enabled;
-  const preview = useMemo(() => renderTemplate(body, SAMPLE_VARS), [body]);
+  const preview = useMemo(() => renderTemplate(body, sampleVars(academyName)), [body, academyName]);
   const unknown = useMemo(() => unknownVariablesIn(row.situation as SmsSituation, body), [row.situation, body]);
 
   function save() {
@@ -92,7 +102,9 @@ function TemplateEditor({ row, canManage }: { row: TemplateRow; canManage: boole
           style={{ resize: "vertical", minHeight: 64, fontFamily: "inherit" }}
         />
         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-          <ByteMeter text={body} />
+          {/* 원본이 아니라 변수를 실제 값으로 바꾼 문장을 잰다 — {링크} 는 8바이트지만 실제
+              주소는 34바이트라, 원본을 재면 SMS 로 보이던 문구가 실제로는 LMS 로 나간다. */}
+          <ByteMeter text={preview} />
           {unknown.length > 0 && (
             <span style={{ fontSize: 12, color: "var(--danger-strong)" }}>
               이 상황에 없는 변수: {unknown.map((v) => `{${v}}`).join(", ")}
@@ -102,7 +114,7 @@ function TemplateEditor({ row, canManage }: { row: TemplateRow; canManage: boole
       </div>
 
       <div style={{ background: "var(--panel2)", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, color: "var(--sub)" }}>
-        미리보기(예시 값): {preview}
+        미리보기(학생 이름·코드는 예시, 링크·학원 이름은 실제 값): {preview}
       </div>
 
       {canManage && (
@@ -325,7 +337,7 @@ export default function TemplatesView({
       <DailyTimeSetting initial={expiryDailyTime} canManage={canManage} />
 
       {rows.map((row) => (
-        <TemplateEditor key={row.situation} row={row} canManage={canManage} />
+        <TemplateEditor key={row.situation} row={row} canManage={canManage} academyName={academyName} />
       ))}
     </div>
   );
